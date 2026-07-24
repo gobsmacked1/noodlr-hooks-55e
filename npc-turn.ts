@@ -11,6 +11,8 @@ import { resolveRollMacros } from "../dice/roll-macros";
 import { renderMarkdown } from "../util/markdown";
 import { buildCombatStateBlock } from "./tracker";
 import { getCombatSystemPrompt } from "./config";
+import { getTtsEnabled } from "../media/config";
+import { speakForActor } from "../media/creature-voice";
 
 /** Run the current combatant's turn if it is a non-player creature. */
 export async function runCurrentNpcTurn(): Promise<void> {
@@ -57,6 +59,9 @@ export async function runCurrentNpcTurn(): Promise<void> {
       content: renderMarkdown(text),
       speaker: { alias: combatant.name },
     });
+
+    // Voice the narration using the combatant's creature-type voice/pitch, if TTS is on.
+    if (getTtsEnabled() && combatant.actor) void speakForActor(text, combatant.actor);
   } catch (err) {
     log("NPC turn failed:", err);
     ui.notifications?.error(game.i18n.format("NOODLR.Combat.Failed", { error: String(err) }));
