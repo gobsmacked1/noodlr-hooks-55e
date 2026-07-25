@@ -1,6 +1,7 @@
 // Combat feature settings: the AI-run-NPC-turn system prompt override.
 
-import { MODULE_ID, COMBAT_SETTINGS, DEFAULT_COMBAT_PROMPT } from "../constants";
+import { MODULE_ID, COMBAT_SETTINGS } from "../constants";
+import { DEFAULT_COMBAT_PROMPT } from "../prompts";
 
 export function registerCombatSettings(): void {
   game.settings.register(MODULE_ID, COMBAT_SETTINGS.systemPrompt, {
