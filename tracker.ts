@@ -4,14 +4,14 @@
 // best-effort — HP/condition locations vary by game system, so extraction degrades
 // gracefully (enemies fall back to tiers; unknown HP is labeled).
 
-interface Hp {
+export interface Hp {
   value: number;
   max: number;
   temp: number;
 }
 
 /** Best-effort HP extraction across common system data shapes. */
-function readHp(actor: any): Hp | null {
+export function readHp(actor: any): Hp | null {
   const sys = actor?.system;
   const candidates = [sys?.attributes?.hp, sys?.hp, sys?.health, sys?.attributes?.health];
   for (const hp of candidates) {
@@ -31,7 +31,7 @@ function readHp(actor: any): Hp | null {
 }
 
 /** Descriptive HP tier for enemies (fewer exact numbers to corrupt; good DMing). */
-function hpTier(hp: Hp | null): string {
+export function hpTier(hp: Hp | null): string {
   if (!hp || hp.max <= 0) return "unknown condition";
   const ratio = hp.value / hp.max;
   if (hp.value <= 0) return "down";
