@@ -39,9 +39,12 @@ export async function runCurrentNpcTurn(): Promise<void> {
   }
 
   const state = buildCombatStateBlock() ?? "";
+  // Empty blocks are dropped rather than sent as empty system messages (some providers reject those):
+  // the combat prompt can be cleared by the GM, and there is no state block outside combat.
+  const combatPrompt = getCombatSystemPrompt();
   const messages = [
-    { role: "system" as const, content: getCombatSystemPrompt() },
-    { role: "system" as const, content: state },
+    ...(combatPrompt ? [{ role: "system" as const, content: combatPrompt }] : []),
+    ...(state ? [{ role: "system" as const, content: state }] : []),
     {
       role: "user" as const,
       content: `It is ${combatant.name}'s turn. Decide and narrate their single action now. Use {{roll:...}} for any dice.`,
