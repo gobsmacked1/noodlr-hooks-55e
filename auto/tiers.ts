@@ -41,6 +41,10 @@ export type Consideration =
   | "controlManeuvers"
   /** Drink the potion, cast the heal on itself. */
   | "selfHealing"
+  /** Shoot from where the melee cannot reach, and back off when something closes. */
+  | "keepDistance"
+  /** Finish the turn behind something solid rather than in the open. */
+  | "seekCover"
   // --- Tier 5: it has friends ------------------------------------------------------------------
   /** Heal, buff, or otherwise spend a turn improving an ally instead of itself. */
   | "supportAllies"
@@ -107,9 +111,17 @@ const LADDER: Array<{ descriptor: string; adds: Consideration[]; noise: number; 
     },
     {
       descriptor: "Average intellect",
-      adds: ["stealth", "deception", "controlManeuvers", "selfHealing"],
+      adds: [
+        "stealth",
+        "deception",
+        "controlManeuvers",
+        "selfHealing",
+        "keepDistance",
+        "seekCover",
+      ],
       noise: 0.45,
-      breadth: 6,
+      // Two more things to weigh than the tier had before the 2026-08-02 revision.
+      breadth: 7,
     },
     {
       descriptor: "Veteran / skilled professional",

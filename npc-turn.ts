@@ -32,6 +32,8 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} uses ${o.itemName} on ${target}.`;
     case "control":
       return `${me} uses ${o.itemName} against ${target}.`;
+    case "kite":
+      return `${me} backs out of melee and shoots ${target} with ${o.itemName}.`;
     case "flee":
       return `${me} breaks off and tries to escape.`;
     case "call":
@@ -87,7 +89,9 @@ export async function runTurnFor(combatant: any): Promise<void> {
       return;
     }
 
-    const intent = describeIntent(plan);
+    const intent = plan.postscript
+      ? `${describeIntent(plan)} …${plan.postscript}.`
+      : describeIntent(plan);
     const reasoning = describeReasoning(plan);
     log(`${intent} [${reasoning}]`);
 

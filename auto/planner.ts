@@ -26,7 +26,8 @@ import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from ".
 const BLOODIED = 0.5;
 const DESPERATE = 0.25;
 
-export type PlanKind = "attack" | "heal-self" | "heal-ally" | "control" | "flee" | "call" | "close";
+export type PlanKind =
+  "attack" | "heal-self" | "heal-ally" | "control" | "flee" | "call" | "close" | "kite";
 
 export interface PlanOption {
   kind: PlanKind;
@@ -48,6 +49,8 @@ export interface TurnPlan {
   /** Everything that was weighed, best-scored first. */
   considered: PlanOption[];
   board: Board;
+  /** An intent tacked onto the end of the turn, such as ducking behind cover. */
+  postscript?: string;
 }
 
 // ---- seeded randomness ------------------------------------------------------------------------
@@ -131,17 +134,49 @@ function readUsables(actor: any, P: SystemPaths): Usable[] {
   return out;
 }
 
+/** What an opponent can do back, which is all the creature needs to decide how close to stand. */
+interface ThreatProfile {
+  /** Farthest a melee-style attack of theirs reaches, in scene units; 0 when they have none. */
+  meleeReach: number;
+  hasRanged: boolean;
+}
+
+function threatOf(enemy: BoardActor, P: SystemPaths, cache: Map<string, ThreatProfile>) {
+  const key = enemy.combatantId;
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  const kit = readUsables(enemy.actor, P);
+  const melee = kit.filter((u) => MELEE_TYPES.has(u.actionType));
+  const grid = Number((canvas as any)?.scene?.grid?.distance ?? 5);
+  // An opponent whose sheet says nothing readable is assumed able to hit you if you stand next to
+  // it. Guessing "harmless" would walk archers into a grapple on every unfamiliar system.
+  const unreadable = kit.length === 0;
+  const profile: ThreatProfile = {
+    meleeReach: unreadable ? grid : melee.reduce((max, u) => Math.max(max, u.range), 0),
+    hasRanged: unreadable ? false : kit.some((u) => RANGED_TYPES.has(u.actionType)),
+  };
+  cache.set(key, profile);
+  return profile;
+}
+
 // ---- option generation -------------------------------------------------------------------------
 
 function normalize(value: number, max: number): number {
   return max > 0 ? Math.max(0, Math.min(1, value / max)) : 0;
 }
 
-function attackOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption[] {
+function attackOptions(
+  board: Board,
+  kit: Usable[],
+  p: TierProfile,
+  threat: (enemy: BoardActor) => ThreatProfile,
+): PlanOption[] {
   const options: PlanOption[] = [];
   const biggestFootprint = Math.max(1, ...board.enemies.map((e) => e.footprint));
   const mostSpells = Math.max(1, ...board.enemies.map((e) => e.spellCount));
   const selfHurt = board.self.hpFraction !== null && board.self.hpFraction < BLOODIED;
+  const hasRangedOption = kit.some((u) => u.available && RANGED_TYPES.has(u.actionType));
 
   for (const usable of kit) {
     if (!usable.available || !ATTACK_TYPES.has(usable.actionType)) continue;
@@ -178,6 +213,21 @@ function attackOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption[
         score += 0.5 * (1 - enemy.hpFraction);
         reasons.push("already wounded");
       }
+      // Tier 4 and up would rather shoot than be stood next to. Two separate judgements: reward a
+      // shot taken from outside the target's reach, and penalize deliberately walking into it when
+      // there was a ranged option on the sheet.
+      if (can(p, "keepDistance")) {
+        const reach = threat(enemy).meleeReach;
+        if (!usable.melee && enemy.distance > reach) {
+          score += 0.45;
+          reasons.push("out of their reach");
+        }
+        if (hasRangedOption && usable.melee && !inReach) {
+          score -= 0.55;
+          reasons.push("would have to close into melee");
+        }
+      }
+
       if (can(p, "avoidStrongOpponents") && selfHurt) {
         const bulk = normalize(enemy.footprint, biggestFootprint);
         score -= 0.45 * bulk;
@@ -254,6 +304,43 @@ function controlOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
     );
 }
 
+/**
+ * Backing out of melee and shooting from the new spot. Distinct from fleeing: the creature is not
+ * leaving the fight, it is refusing to have it at arm's length.
+ */
+function kiteOptions(
+  board: Board,
+  kit: Usable[],
+  p: TierProfile,
+  threat: (enemy: BoardActor) => ThreatProfile,
+): PlanOption[] {
+  if (!can(p, "keepDistance")) return [];
+  if (board.speed === null || board.speed <= 0) return [];
+
+  const ranged = kit.find((u) => u.available && RANGED_TYPES.has(u.actionType));
+  if (!ranged) return [];
+
+  const crowding = board.enemies.filter((e) => e.distance <= threat(e).meleeReach);
+  if (crowding.length === 0) return [];
+
+  // Shoot whoever is still worth shooting once it has stepped away — usually the one that closed.
+  const target =
+    board.enemies.find((e) => e.distance <= ranged.range && !crowding.includes(e)) ?? crowding[0];
+
+  return [
+    {
+      kind: "kite",
+      item: ranged.item,
+      itemName: ranged.name,
+      target,
+      score: 1.3 + 0.45 * Math.min(1, crowding.length / 2),
+      reasons: [
+        crowding.length > 1 ? "hemmed in by melee" : `${crowding[0].name} is close enough to swing`,
+      ],
+    },
+  ];
+}
+
 function survivalOptions(board: Board, p: TierProfile): PlanOption[] {
   const options: PlanOption[] = [];
   const hp = board.self.hpFraction;
@@ -297,6 +384,28 @@ function weightedChoice(options: PlanOption[], noise: number, rand: () => number
 }
 
 /**
+ * Ending the turn behind something solid, stated as an intent rather than a computed destination.
+ *
+ * Choosing a real cover square needs line-of-sight sampling against every shooter and the scene's
+ * walls, which is the positioning layer's job (N5) and far too expensive to bolt on here. Announcing
+ * the intent is still worth doing: the GM placing the token knows the creature meant to end up out of
+ * sight, which is the part that changes how the next round plays.
+ */
+function coverIntent(
+  board: Board,
+  p: TierProfile,
+  chosen: PlanOption,
+  threat: (enemy: BoardActor) => ThreatProfile,
+): string | undefined {
+  if (!can(p, "seekCover")) return undefined;
+  // Already leaving, or nobody can shoot it where it stands: no reason to spend the movement.
+  if (chosen.kind === "flee" || chosen.kind === "kite") return undefined;
+  const shooters = board.enemies.filter((e) => threat(e).hasRanged);
+  if (shooters.length === 0) return undefined;
+  return "then moves to put cover between itself and the ranged attackers";
+}
+
+/**
  * Decide one creature's turn. Returns null only when there is nothing to decide (no board, or the
  * creature has no conceivable option), which the caller reports rather than silently skipping.
  */
@@ -312,10 +421,14 @@ export function planTurn(combatant: any): TurnPlan | null {
   const profile = tierProfile(mental === null ? 4 : tierForScore(mental));
 
   const kit = readUsables(actor, P);
+  const threatCache = new Map<string, ThreatProfile>();
+  const threat = (enemy: BoardActor) => threatOf(enemy, P, threatCache);
+
   const options = [
-    ...attackOptions(board, kit, profile),
+    ...attackOptions(board, kit, profile, threat),
     ...healingOptions(board, kit, profile),
     ...controlOptions(board, kit, profile),
+    ...kiteOptions(board, kit, profile, threat),
     ...survivalOptions(board, profile),
   ];
   if (options.length === 0) return null;
@@ -329,5 +442,12 @@ export function planTurn(combatant: any): TurnPlan | null {
   );
   const chosen = weightedChoice(considered, profile.noise, seededRandom(seed));
 
-  return { profile, mental, chosen, considered, board };
+  return {
+    profile,
+    mental,
+    chosen,
+    considered,
+    board,
+    postscript: coverIntent(board, profile, chosen, threat),
+  };
 }
