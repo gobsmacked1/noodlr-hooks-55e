@@ -13,6 +13,7 @@ import { buildCombatStateBlock } from "./tracker";
 import { getCombatSystemPrompt } from "./config";
 import { getTtsEnabled } from "../media/config";
 import { speakForActor } from "../media/creature-voice";
+import { buildRulesetBlock } from "../system/ruleset";
 
 /** Run the current combatant's turn if it is a non-player creature. */
 export async function runCurrentNpcTurn(): Promise<void> {
@@ -44,6 +45,7 @@ export async function runCurrentNpcTurn(): Promise<void> {
   const combatPrompt = getCombatSystemPrompt();
   const messages = [
     ...(combatPrompt ? [{ role: "system" as const, content: combatPrompt }] : []),
+    { role: "system" as const, content: buildRulesetBlock() },
     ...(state ? [{ role: "system" as const, content: state }] : []),
     {
       role: "user" as const,
