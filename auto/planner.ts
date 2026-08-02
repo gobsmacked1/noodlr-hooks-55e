@@ -20,6 +20,7 @@
 
 import { pickNumber, pickString, systemPaths, type SystemPaths } from "../system-profiles";
 import { readBoard, type Board, type BoardActor } from "./board";
+import { findConcealment, type Spot } from "./positioning";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
 
 /** Below this fraction of maximum hit points a creature considers itself in trouble. */
@@ -27,7 +28,7 @@ const BLOODIED = 0.5;
 const DESPERATE = 0.25;
 
 export type PlanKind =
-  "attack" | "heal-self" | "heal-ally" | "control" | "flee" | "call" | "close" | "kite";
+  "attack" | "heal-self" | "heal-ally" | "control" | "flee" | "call" | "close" | "kite" | "hide";
 
 export interface PlanOption {
   kind: PlanKind;
@@ -37,6 +38,10 @@ export interface PlanOption {
   target?: BoardActor;
   /** Distance that must be crossed first, in scene units. */
   approach?: number;
+  /** Where the creature ends up, when the option involves going somewhere specific. */
+  spot?: Spot;
+  /** Whose eyes the spot was chosen against. */
+  observer?: string;
   score: number;
   /** Why this scored what it did — surfaced to the GM, and the reason the tuning is debuggable. */
   reasons: string[];
@@ -51,6 +56,8 @@ export interface TurnPlan {
   board: Board;
   /** An intent tacked onto the end of the turn, such as ducking behind cover. */
   postscript?: string;
+  /** Where that end-of-turn move ends up, when one was found. */
+  coverSpot?: Spot;
 }
 
 // ---- seeded randomness ------------------------------------------------------------------------
@@ -341,6 +348,49 @@ function kiteOptions(
   ];
 }
 
+/**
+ * Whose eyes matter. The user's framing is "the Players", so player-owned combatants are preferred
+ * as the reference observer; a fight with no PCs in it falls back to whoever is hostile.
+ */
+function playerFacing(board: Board): BoardActor[] {
+  const pcs = board.enemies.filter((e) => e.isPC);
+  return pcs.length > 0 ? pcs : board.enemies;
+}
+
+/** Hiding is tested against the NEAREST player: the hardest pair of eyes to escape. */
+function hideOptions(
+  board: Board,
+  kit: Usable[],
+  p: TierProfile,
+  rand: () => number,
+): PlanOption[] {
+  if (!can(p, "stealth")) return [];
+  if (board.speed === null || board.speed <= 0) return [];
+
+  const nearest = playerFacing(board)[0];
+  if (!nearest) return [];
+
+  const spot = findConcealment(board.self.token, nearest.token, board.speed, rand);
+  if (!spot) return [];
+
+  const hp = board.self.hpFraction ?? 1;
+  const hasRanged = kit.some((u) => u.available && RANGED_TYPES.has(u.actionType));
+  const reasons = [`out of ${nearest.name}'s sight`];
+  let score = 1.05;
+  // Breaking contact is far more attractive when losing the stand-up fight, and a creature that can
+  // shoot from concealment has a use for it beyond simply not being hit.
+  if (hp < BLOODIED) {
+    score += 0.9 * (1 - hp);
+    reasons.push("losing the straight fight");
+  }
+  if (hasRanged) {
+    score += 0.3;
+    reasons.push("somewhere to shoot from");
+  }
+
+  return [{ kind: "hide", target: nearest, spot, observer: nearest.name, score, reasons }];
+}
+
 function survivalOptions(board: Board, p: TierProfile): PlanOption[] {
   const options: PlanOption[] = [];
   const hp = board.self.hpFraction;
@@ -384,25 +434,45 @@ function weightedChoice(options: PlanOption[], noise: number, rand: () => number
 }
 
 /**
- * Ending the turn behind something solid, stated as an intent rather than a computed destination.
+ * Ending the turn behind something solid.
  *
- * Choosing a real cover square needs line-of-sight sampling against every shooter and the scene's
- * walls, which is the positioning layer's job (N5) and far too expensive to bolt on here. Announcing
- * the intent is still worth doing: the GM placing the token knows the creature meant to end up out of
- * sight, which is the part that changes how the next round plays.
+ * Tested against the FURTHEST player (user's call): distant opponents are the ones still shooting at
+ * the end of a round, and one observer keeps this to a few dozen ray casts. The known hole is that
+ * cover from the far archer is not cover from the near one — accepted deliberately, because the
+ * alternative on a per-turn budget was announcing an intention and computing nothing.
+ *
+ * Budget is half the creature's speed: it has already spent movement acting, and we do not track how
+ * much. Half is the conservative guess — it under-promises rather than proposing a shuffle the
+ * creature could not actually afford.
  */
 function coverIntent(
   board: Board,
   p: TierProfile,
   chosen: PlanOption,
   threat: (enemy: BoardActor) => ThreatProfile,
-): string | undefined {
+  rand: () => number,
+): { text: string; spot: Spot } | undefined {
   if (!can(p, "seekCover")) return undefined;
-  // Already leaving, or nobody can shoot it where it stands: no reason to spend the movement.
-  if (chosen.kind === "flee" || chosen.kind === "kite") return undefined;
+  // Already leaving, already breaking away, or already hiding: the movement is spoken for.
+  if (chosen.kind === "flee" || chosen.kind === "kite" || chosen.kind === "hide") return undefined;
+  if (board.speed === null || board.speed <= 0) return undefined;
+
   const shooters = board.enemies.filter((e) => threat(e).hasRanged);
   if (shooters.length === 0) return undefined;
-  return "then moves to put cover between itself and the ranged attackers";
+
+  const facing = playerFacing(board);
+  const furthest = facing[facing.length - 1];
+  if (!furthest) return undefined;
+
+  const spot = findConcealment(board.self.token, furthest.token, board.speed / 2, rand);
+  // No reachable cover means no claim of cover. Announcing an intention we could not satisfy would
+  // have the GM hunting for a wall that isn't there.
+  if (!spot) return undefined;
+
+  return {
+    text: `then falls back ${spot.travel} ${board.units} ${spot.bearing} into cover from ${furthest.name}`,
+    spot,
+  };
 }
 
 /**
@@ -424,11 +494,17 @@ export function planTurn(combatant: any): TurnPlan | null {
   const threatCache = new Map<string, ThreatProfile>();
   const threat = (enemy: BoardActor) => threatOf(enemy, P, threatCache);
 
+  const seed = hashString(
+    `${game.combat?.id ?? ""}:${game.combat?.round ?? 0}:${combatant?.id ?? ""}`,
+  );
+  const rand = seededRandom(seed);
+
   const options = [
     ...attackOptions(board, kit, profile, threat),
     ...healingOptions(board, kit, profile),
     ...controlOptions(board, kit, profile),
     ...kiteOptions(board, kit, profile, threat),
+    ...hideOptions(board, kit, profile, rand),
     ...survivalOptions(board, profile),
   ];
   if (options.length === 0) return null;
@@ -437,10 +513,8 @@ export function planTurn(combatant: any): TurnPlan | null {
   // both the tier's cognitive limit and the CPU ceiling for the turn.
   const considered = options.sort((a, b) => b.score - a.score).slice(0, profile.breadth);
 
-  const seed = hashString(
-    `${game.combat?.id ?? ""}:${game.combat?.round ?? 0}:${combatant?.id ?? ""}`,
-  );
-  const chosen = weightedChoice(considered, profile.noise, seededRandom(seed));
+  const chosen = weightedChoice(considered, profile.noise, rand);
+  const cover = coverIntent(board, profile, chosen, threat, rand);
 
   return {
     profile,
@@ -448,6 +522,7 @@ export function planTurn(combatant: any): TurnPlan | null {
     chosen,
     considered,
     board,
-    postscript: coverIntent(board, profile, chosen, threat),
+    postscript: cover?.text,
+    coverSpot: cover?.spot,
   };
 }

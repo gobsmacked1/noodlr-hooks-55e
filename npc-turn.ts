@@ -34,6 +34,8 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} uses ${o.itemName} against ${target}.`;
     case "kite":
       return `${me} backs out of melee and shoots ${target} with ${o.itemName}.`;
+    case "hide":
+      return `${me} slips ${o.spot?.travel ?? 0} ${units} ${o.spot?.bearing ?? "away"} and hides, out of ${o.observer ?? target}'s sight.`;
     case "flee":
       return `${me} breaks off and tries to escape.`;
     case "call":
