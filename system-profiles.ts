@@ -57,6 +57,8 @@ export interface SystemPaths {
   /** Per-item fields. */
   itemActivation: string[];
   itemActivationLabel: string[];
+  /** Coarse kind of thing an item does (dnd5e: mwak/rwak/msak/rsak/save/heal/util). */
+  itemActionType: string[];
   itemUses: string[];
   /** Some systems (dnd5e 4.x) store uses as a SPENT count; remaining = max - spent. */
   itemUsesSpent: string[];
@@ -88,6 +90,7 @@ const GENERIC: SystemPaths = {
   challenge: ["system.details.cr", "system.details.level.value", "system.details.level"],
   itemActivation: ["system.activation.type", "system.actionType", "system.actions.0.type"],
   itemActivationLabel: ["labels.activation"],
+  itemActionType: ["system.actionType", "system.action.type"],
   itemUses: ["system.uses.value", "system.charges.value"],
   itemUsesSpent: ["system.uses.spent"],
   itemUsesMax: ["system.uses.max", "system.charges.max"],
