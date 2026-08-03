@@ -98,8 +98,11 @@ type Usable = CreatureAction;
  * has thrown the turn away. Both are real behaviours the creature should get — just not from here, and
  * the off-turn layer that will spend them does not exist yet (see AGENTS.md gaps).
  */
-const onTurn = (u: Usable) =>
-  u.economy === "action" || u.economy === "bonus" || u.economy === "free";
+// A creature's turn is its action and its bonus action. "free" is deliberately excluded: the system
+// marks those activations passive, and the surveyed world has 106 of them — grapple-escape checks and
+// similar companions to other actions. Offering one as a turn option risks a creature spending its only
+// choice on the mechanical residue of something it did not do.
+const onTurn = (u: Usable) => u.economy === "action" || u.economy === "bonus";
 
 const isAttack = (u: Usable) => u.available && u.kind === "attack" && onTurn(u);
 const isRangedAttack = (u: Usable) => isAttack(u) && u.ranged;

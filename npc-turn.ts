@@ -16,6 +16,7 @@
 // a GM resolving one attack by hand has lost a click, whereas a thrown exception loses the turn.
 
 import { log } from "../constants";
+import { prewarmCastSpells } from "./actions";
 import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./auto/planner";
 import { performPlan } from "./auto/execute";
 import { resolveCombatant, type Outcome } from "./auto/encounter";
@@ -108,6 +109,11 @@ export async function runCurrentNpcTurn(): Promise<void> {
 /** Plan and announce one specific combatant's turn. */
 export async function runTurnFor(combatant: any): Promise<void> {
   try {
+    // Planning is synchronous, but a monster's spells usually live behind a feat pointing into a
+    // compendium pack, and resolving that pointer needs an await. Warm them first or the creature reads
+    // as having no spells at all.
+    await prewarmCastSpells(combatant?.actor);
+
     const plan = planTurn(combatant);
     if (!plan) {
       ui.notifications?.warn(

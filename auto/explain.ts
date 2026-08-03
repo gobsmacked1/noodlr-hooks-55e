@@ -7,11 +7,11 @@
 //
 // Call `game.modules.get("noodlr").api.explainTurn()` with a token selected.
 
-import { readActions } from "../actions";
+import { prewarmCastSpells, readActions } from "../actions";
 import { planTurn } from "./planner";
 import { chatterScore } from "../banter/speak";
 
-export function explainTurn(): void {
+export async function explainTurn(): Promise<void> {
   const selected: any = (canvas as any)?.tokens?.controlled?.[0];
   const combat = game.combat;
   if (!selected || !combat) {
@@ -26,6 +26,9 @@ export function explainTurn(): void {
     console.warn("Noodlr | that token is not in the current combat");
     return;
   }
+
+  // Same warm-up the real turn does, or the console would report fewer spells than the creature has.
+  await prewarmCastSpells(combatant.actor);
 
   const actions = readActions(combatant.actor);
   console.group(`Noodlr | ${combatant.name}`);

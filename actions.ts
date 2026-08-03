@@ -80,6 +80,13 @@ function economyOf(raw: unknown): Economy | null {
   const type = String(raw ?? "")
     .trim()
     .toLowerCase();
+  // No activation at all means the activity is not independently usable: it is the companion half of
+  // something else — the save rider on a bite, the extra damage on a sneak attack. The system fills an
+  // activation in during preparation when the item has one, so an empty type on a prepared actor is an
+  // assertion, not a gap. 109 of 2067 activities in the surveyed world are this shape, and every one of
+  // them was being offered to the planner as a full action: a creature could spend its turn on the save
+  // half of an attack it never made. (Census, 2026-08-03.)
+  if (!type) return null;
   if (OUT_OF_COMBAT.has(type)) return null;
   if (type === "action") return "action";
   if (type === "bonus") return "bonus";
@@ -101,6 +108,10 @@ export interface CreatureAction {
   item: any;
   /** The specific activity on that item, where the system models them. Undefined on legacy shapes. */
   activity?: any;
+  /** Lowercased spell name, when this action casts one. Used only to collapse duplicate offerings. */
+  spellKey?: string;
+  /** True when reached through a feat's "cast" wrapper rather than the spell item itself. */
+  viaCast?: boolean;
   name: string;
   kind: ActionKind;
   economy: Economy;
@@ -284,17 +295,63 @@ function kindOfActivity(activity: any): ActionKind {
 function castSpellOf(activity: any): any {
   if (String(activity?.type ?? "").toLowerCase() !== "cast") return null;
   const cached = activity?.cachedSpell;
-  if (cached) return cached;
-  const uuid = activity?.spell?.uuid;
+  if (cached?.system?.activities) return cached;
+  const uuid = String(activity?.spell?.uuid ?? "");
   if (!uuid) return null;
+
+  const warmed = spellCache.get(uuid);
+  if (warmed) return warmed;
   try {
     const sync = (foundry as any)?.utils?.fromUuidSync ?? (globalThis as any).fromUuidSync;
-    // A pack that isn't loaded yields an index stub with no `system`, which is no use to us.
+    // A compendium pack that hasn't been loaded yields an index STUB with no activities — which is why
+    // `prewarmCastSpells` exists. Almost every wrapper on a 2024 monster points into a pack, so without
+    // the prewarm this returns nothing and the creature appears to have no spells at all.
     const doc = typeof sync === "function" ? sync(uuid) : null;
     return doc?.system?.activities ? doc : null;
   } catch {
     return null;
   }
+}
+
+/** Spells resolved from compendium packs, keyed by UUID. Session-lived: pack contents do not change. */
+const spellCache = new Map<string, any>();
+/** UUIDs already attempted and failed, so a broken pointer is not retried every single turn. */
+const spellMisses = new Set<string>();
+
+/**
+ * Load the spells behind an actor's "cast" wrappers, so the planner can read them synchronously.
+ *
+ * Must be awaited before planning a turn. The census makes the stakes concrete: the surveyed world has
+ * 509 cast activities against 524 spell items, so wrappers are how nearly every monster in it casts —
+ * "1/day each: fireball" is a feat holding the uses and pointing at a compendium spell. Resolving that
+ * pointer needs an await, and planning is synchronous, so it happens here first.
+ */
+export async function prewarmCastSpells(actor: any): Promise<void> {
+  const wanted: string[] = [];
+  for (const item of actor?.items ?? []) {
+    const list: any[] = item?.system?.activities?.contents ?? [];
+    for (const activity of list) {
+      if (String(activity?.type ?? "").toLowerCase() !== "cast") continue;
+      const uuid = String(activity?.spell?.uuid ?? "");
+      if (uuid && !spellCache.has(uuid) && !spellMisses.has(uuid)) wanted.push(uuid);
+    }
+  }
+  if (wanted.length === 0) return;
+
+  const resolve = (foundry as any)?.utils?.fromUuid ?? (globalThis as any).fromUuid;
+  if (typeof resolve !== "function") return;
+  await Promise.all(
+    [...new Set(wanted)].map(async (uuid) => {
+      try {
+        const doc = await resolve(uuid);
+        if (doc?.system?.activities) spellCache.set(uuid, doc);
+        else spellMisses.add(uuid);
+      } catch {
+        spellMisses.add(uuid);
+      }
+    }),
+  );
+  log(`resolved ${spellCache.size} cast-wrapper spells (${spellMisses.size} unresolved)`);
 }
 
 function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[] | null {
@@ -356,6 +413,14 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
     out.push({
       item,
       activity,
+      spellKey: spell
+        ? String(spell.name ?? "")
+            .trim()
+            .toLowerCase()
+        : item?.type === "spell"
+          ? itemName.toLowerCase()
+          : undefined,
+      viaCast: Boolean(spell),
       name: activityName && activityName !== itemName ? `${itemName} (${activityName})` : itemName,
       kind,
       economy,
@@ -430,10 +495,28 @@ export function readActions(actor: any): CreatureAction[] {
     const legacy = fromActionType(item, actor, P);
     if (legacy) out.push(legacy);
   }
-  if (out.length === 0 && (actor?.items?.size ?? 0) > 0) {
+
+  const deduped = collapseDuplicateSpells(out);
+  if (deduped.length === 0 && (actor?.items?.size ?? 0) > 0) {
     log(
       `no readable actions on ${actor?.name} despite ${actor.items.size} items — check system paths`,
     );
   }
-  return out;
+  return deduped;
+}
+
+/**
+ * One offering per spell, preferring the wrapper that owns the resource.
+ *
+ * A monster can carry the same spell twice over: as a spell item in its list, and as a feat's "cast"
+ * wrapper holding "1/day". Offering both distorts the planner's weighted choice toward spellcasting and
+ * risks spending the wrong resource — casting the item bypasses the wrapper's daily limit entirely.
+ * The wrapper wins because it is where the accounting lives.
+ */
+function collapseDuplicateSpells(actions: CreatureAction[]): CreatureAction[] {
+  const wrapped = new Set(
+    actions.filter((a) => a.viaCast && a.spellKey).map((a) => a.spellKey as string),
+  );
+  if (wrapped.size === 0) return actions;
+  return actions.filter((a) => a.viaCast || !a.spellKey || !wrapped.has(a.spellKey));
 }
