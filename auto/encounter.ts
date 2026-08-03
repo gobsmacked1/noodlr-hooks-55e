@@ -15,6 +15,13 @@
 import { log } from "../../constants";
 import { pickNumber, pickString, systemPaths } from "../system-profiles";
 import { releaseCombatant } from "./registry";
+import {
+  awardExperience,
+  forfeitPartyGear,
+  isDnd5e,
+  restoreForfeited,
+  xpForActor,
+} from "../systems/dnd5e-rewards";
 
 export type Outcome = "fled" | "surrendered" | "mercy";
 
@@ -39,6 +46,11 @@ export function registerEncounterTracking(): void {
   Hooks.on("deleteCombat", () => {
     state = null;
   });
+
+  // Same version split as the artifact controls: registering the legacy name on v13 emits a
+  // deprecation warning all by itself.
+  const generation = Number((game as any)?.release?.generation ?? 13);
+  Hooks.on(generation >= 13 ? "renderChatMessageHTML" : "renderChatMessage", wireRestoreButton);
 
   // Aggression is inferred from players rolling dice while a fight is running. It is a proxy, and a
   // deliberately generous one: a party that is talking, healing, or backing away rolls far less than
@@ -149,26 +161,84 @@ export async function resolveCombatant(combatant: any, outcome: Outcome): Promis
 }
 
 /**
- * A fight is over when no hostile creature is still willing and able to fight. Noodlr says so and
- * stops there: ending the encounter, handing out experience, and dividing loot stay with the GM.
+ * A fight is over when no hostile creature is still willing and able to fight. At that point the
+ * addendum's arithmetic runs: full experience for the slain and the surrendered, half for those that
+ * escaped, and nothing at all if the party accepted mercy.
+ *
+ * Ending the encounter itself is still the GM's to press. Awarding experience is not reversible in
+ * any tidy way, so it happens once, at the end, from a tally the GM can read in the same card.
  */
 async function announceEncounterEndIfOver(combat: any): Promise<void> {
   const P = systemPaths();
   let hostiles = 0;
   let standing = 0;
+  let xp = 0;
+  let spared = false;
+
   for (const c of combat.combatants ?? []) {
     const any = c as any;
     if (any?.hasPlayerOwner ?? any?.actor?.hasPlayerOwner) continue;
     hostiles++;
     const hp = pickNumber(any.actor, P.hpValue);
     const dead = any.isDefeated || (hp !== null && hp <= 0);
-    if (!dead && !hasResolved(String(any.id ?? ""))) standing++;
+    const outcome = outcomeOf(String(any.id ?? ""));
+    if (!dead && !outcome) standing++;
+
+    if (outcome === "mercy") spared = true;
+    const worth = isDnd5e() ? xpForActor(any.actor) : 0;
+    // Escaping halves the award; surrendering and dying are both worth the full value.
+    if (outcome === "fled") xp += Math.floor(worth / 2);
+    else if (dead || outcome === "surrendered") xp += worth;
   }
   if (hostiles === 0 || standing > 0) return;
 
+  const lines = [game.i18n.localize("NOODLR.Combat.Resolution.Over")];
+
+  if (spared) {
+    // A party that accepted mercy earns nothing and pays for it, per the addendum.
+    const taken = await forfeitPartyGear();
+    lines.push(
+      game.i18n.format("NOODLR.Combat.Resolution.Forfeit", {
+        actors: taken.actors,
+        items: taken.items,
+      }),
+    );
+  } else if (xp > 0) {
+    const award = await awardExperience(xp);
+    if (award.each > 0) {
+      lines.push(
+        game.i18n.format("NOODLR.Combat.Resolution.Xp", {
+          total: xp,
+          each: award.each,
+          heads: award.heads,
+        }),
+      );
+    }
+  }
+
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({
-    content: `<p>${game.i18n.localize("NOODLR.Combat.Resolution.Over")}</p>`,
+    content:
+      lines.map((l) => `<p>${l}</p>`).join("") +
+      (spared
+        ? `<button type="button" data-action="noodlr-restore-forfeit">${game.i18n.localize(
+            "NOODLR.Combat.Resolution.Undo",
+          )}</button>`
+        : ""),
     whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
+  });
+}
+
+/** The undo button on the mercy card. GM only — it writes to player-owned sheets. */
+function wireRestoreButton(_message: unknown, html: unknown): void {
+  if (!game.user?.isGM) return;
+  const root: HTMLElement | undefined =
+    html instanceof HTMLElement ? html : ((html as any)?.[0] as HTMLElement | undefined);
+  const button = root?.querySelector<HTMLButtonElement>('[data-action="noodlr-restore-forfeit"]');
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const restored = await restoreForfeited();
+    ui.notifications?.info(game.i18n.format("NOODLR.Combat.Resolution.Restored", { restored }));
   });
 }
