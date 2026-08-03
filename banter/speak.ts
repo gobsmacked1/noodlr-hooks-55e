@@ -4,13 +4,17 @@
 //
 //     chatter = INT + 2·CHA − 2·WIS,  clamped to 0…10,  then 10% per point
 //
-// The reasoning behind it is worth keeping, because the signs look wrong at a glance: a clever
+// The signs are intentional (user, confirmed 2026-08-03) and must not be "corrected": a clever
 // creature is often too pleased with its own commentary, a charismatic one is a show-off (hence the
-// doubled weight), and wisdom is largely knowing when to shut up (hence subtracting it, doubled). So
-// a hag with a high WIS says almost nothing while a preening warlord will not stop.
+// doubled weight), and wisdom is largely knowing when to shut up — so it is SUBTRACTED, doubled.
+//
+// The subtraction is doing double duty, which is the elegant part. A wise creature stays quiet and
+// fights; an UNWISE one has a negative modifier, so the minus flips it positive and the fool becomes
+// the loudest thing on the battlefield. Both halves of the behaviour fall out of the same term.
 //
 // Hard gate before any of that: a creature with no language cannot speak. A dire wolf gets no lines
-// however charismatic the sheet says it is.
+// however charismatic the sheet says it is. Everything that CAN talk is floored at one point (10%),
+// because the raw formula otherwise mutes almost every published low-CR humanoid — see below.
 //
 // Reactions can also carry a line ("at the beginning of their turn, or during a reaction"), but the
 // off-turn reaction layer does not exist yet — see the gaps note in AGENTS.md. Turn-start only, today.
@@ -150,8 +154,11 @@ export async function maybeTaunt(combatant: any, target: any): Promise<string | 
   const P = systemPaths();
   if (!hasLanguage(actor, P)) return null;
 
-  const score = chatterScore(actor);
-  if (score <= 0) return null;
+  // Floor of one point (user, 2026-08-03) after the language gate, not inside the formula. The raw
+  // arithmetic lands most low-CR humanoids on exactly zero — a goblin's −1 WIS contributes +2 and its
+  // −1 CHA takes the same amount straight back — which silenced the entire mook population. Anything
+  // that can talk now gets at least a one-in-ten chance to jeer.
+  const score = Math.max(1, chatterScore(actor));
 
   // Its own stream, so switching banter off cannot change a single tactical decision.
   const rand = turnRandom(String(combatant.id ?? ""), "banter");
