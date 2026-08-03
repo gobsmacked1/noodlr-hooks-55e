@@ -34,6 +34,7 @@ export function explainTurn(): void {
     actions.map((a) => ({
       name: a.name,
       kind: a.kind,
+      costs: a.economy,
       melee: a.melee,
       ranged: a.ranged,
       range: a.range,

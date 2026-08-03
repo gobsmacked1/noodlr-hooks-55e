@@ -19,7 +19,7 @@ import { log } from "../../constants";
 /** Ray types Foundry restricts by wall: we need sight (can it see me) and move (can I get there). */
 type Restriction = "sight" | "move";
 
-interface Point {
+export interface Point {
   x: number;
   y: number;
 }
@@ -42,7 +42,7 @@ export interface Spot {
  * tried in turn, and an unrecognised API returns null — "we could not tell" — which callers treat as
  * "do not claim cover", never as "cover found".
  */
-function blocked(origin: Point, destination: Point, type: Restriction): boolean | null {
+export function blocked(origin: Point, destination: Point, type: Restriction): boolean | null {
   const config = { type, mode: "any" };
   // Lazy on purpose. Building this as an array of values reads every entry, and merely TOUCHING the
   // legacy global emits a deprecation warning even when the modern namespace answered — which is
@@ -96,7 +96,7 @@ function bearingOf(dx: number, dy: number): string {
   return BEARINGS[index];
 }
 
-function centerOf(token: any): Point | null {
+export function centerOf(token: any): Point | null {
   const doc = token?.document ?? token;
   const x = Number(doc?.x);
   const y = Number(doc?.y);
@@ -108,7 +108,7 @@ function centerOf(token: any): Point | null {
   };
 }
 
-function insideScene(point: Point): boolean {
+export function insideScene(point: Point): boolean {
   const rect: any = (canvas as any)?.dimensions?.sceneRect;
   if (!rect) return true;
   return (
@@ -120,7 +120,7 @@ function insideScene(point: Point): boolean {
 }
 
 /** Somebody is already standing there. Crude on purpose: exact footprints are not worth the cost. */
-function occupied(point: Point, self: any): boolean {
+export function occupied(point: Point, self: any): boolean {
   const grid = Number((canvas as any)?.grid?.size) || 100;
   for (const token of (canvas as any)?.tokens?.placeables ?? []) {
     if (token === self) continue;

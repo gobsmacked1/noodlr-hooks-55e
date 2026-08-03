@@ -4,13 +4,20 @@
 // model request per beat per creature made every encounter slow and expensive, and a horde fight
 // unaffordable). Decisions now come from the deterministic planner in `auto/planner.ts`.
 //
-// This pass DECIDES AND ANNOUNCES ONLY. Nothing is moved, spent, or applied: the plan is posted to
-// chat so the GM can see what the creature intends and resolve it themselves. Execution through the
-// system's own item-use path — where a bug can actually damage a world — is the next layer, and it
-// arrives with GM approval on by default.
+// Order of operations, and each part is deliberate:
+//   1. plan   — the deterministic planner picks a verb, an implement and a target
+//   2. taunt  — aimed at whoever the creature is about to deal with, so it needs the plan first
+//   3. announce — narration goes out BEFORE the dice, so the chat log reads as prose then resolution
+//   4. perform — the token moves and the system's own item-use path rolls it, so Midi QoL and friends
+//                resolve the mechanics exactly as if the GM had clicked the button (AGENTS.md #2)
+//   5. resolve — flee / surrender / mercy are recorded by the encounter layer
+//
+// A failure in step 4 is reported to the GM as a whisper and nothing else: the announcement stands, and
+// a GM resolving one attack by hand has lost a click, whereas a thrown exception loses the turn.
 
 import { log } from "../constants";
 import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./auto/planner";
+import { performPlan } from "./auto/execute";
 import { resolveCombatant, type Outcome } from "./auto/encounter";
 import { isNpcBanterEnabled } from "./config";
 import { maybeTaunt } from "./banter/speak";
@@ -36,6 +43,8 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} attacks ${target} with ${o.itemName}.`;
     case "close":
       return `${me} closes ${Math.round(o.approach ?? 0)} ${units} on ${target} and attacks with ${o.itemName}.`;
+    case "advance":
+      return `${me} advances on ${target}, still too far to strike.`;
     case "heal-self":
       return `${me} uses ${o.itemName} on itself.`;
     case "heal-ally":
@@ -130,6 +139,17 @@ export async function runTurnFor(combatant: any): Promise<void> {
       content: `<p>${foundry.utils.escapeHTML(intent)}</p>`,
       speaker: { alias: plan.board.self.name },
     });
+
+    // Now make it happen: move the token, nominate the target, and hand the roll to the system so the
+    // table's automation resolves it. Announced first so the narration reads ahead of the dice cards.
+    const performed = await performPlan(plan);
+    if (performed.problem) {
+      log(`execution problem for ${plan.board.self.name}: ${performed.problem}`);
+      await ChatMessage.create({
+        content: `<p><em>${foundry.utils.escapeHTML(plan.board.self.name)}: Noodlr could not carry that out (${foundry.utils.escapeHTML(performed.problem)}). Resolve it manually.</em></p>`,
+        whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
+      });
+    }
 
     noteDossierEvent(String(combatant.id ?? ""), `Round ${game.combat?.round ?? "?"}: ${intent}`);
 

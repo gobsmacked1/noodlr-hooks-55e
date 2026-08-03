@@ -38,6 +38,7 @@ export type PlanKind =
   | "flee"
   | "call"
   | "close"
+  | "advance"
   | "kite"
   | "hide"
   | "help"
@@ -49,6 +50,15 @@ export interface PlanOption {
   /** Item being used, when the option involves one. */
   item?: any;
   itemName?: string;
+  /**
+   * The specific activity to invoke, and its reach. Both come straight from the normalized action and
+   * exist for the execution layer: invoking the ITEM when it holds several activities makes dnd5e
+   * prompt for which one, and nobody is watching an automated turn to answer that.
+   */
+  activity?: any;
+  range?: number;
+  /** Separation the creature wants from `target` when withdrawing, in scene units. */
+  standOff?: number;
   target?: BoardActor;
   /** Distance that must be crossed first, in scene units. */
   approach?: number;
@@ -81,7 +91,17 @@ export interface TurnPlan {
 
 type Usable = CreatureAction;
 
-const isAttack = (u: Usable) => u.available && u.kind === "attack";
+/**
+ * Can this be spent on the creature's own turn?
+ *
+ * Reactions and legendary actions are off-turn resources: a creature that used its Parry as its turn
+ * has thrown the turn away. Both are real behaviours the creature should get — just not from here, and
+ * the off-turn layer that will spend them does not exist yet (see AGENTS.md gaps).
+ */
+const onTurn = (u: Usable) =>
+  u.economy === "action" || u.economy === "bonus" || u.economy === "free";
+
+const isAttack = (u: Usable) => u.available && u.kind === "attack" && onTurn(u);
 const isRangedAttack = (u: Usable) => isAttack(u) && u.ranged;
 
 /** What an opponent can do back, which is all the creature needs to decide how close to stand. */
@@ -196,6 +216,8 @@ function attackOptions(
         kind: inReach ? "attack" : "close",
         item: usable.item,
         itemName: usable.name,
+        activity: usable.activity,
+        range: usable.range,
         target: enemy,
         approach: inReach ? 0 : gap,
         score,
@@ -206,9 +228,38 @@ function attackOptions(
   return options;
 }
 
+/**
+ * Walking toward the enemy when it cannot be reached this turn.
+ *
+ * The gap that made the first play test embarrassing: a Dire Wolf 60 ft from the party has no attack
+ * "in reach", cannot close 60 ft on a 50 ft move, and therefore generated no attack option at all —
+ * leaving a floor option (bellowing for help) as the best thing it could think of. Advancing needs no
+ * intelligence whatsoever, so it sits at tier 1 alongside attacking, and is only offered when nothing
+ * better exists: it scores below any real attack and above the floor.
+ */
+function advanceOptions(board: Board, kit: Usable[], hasBetter: boolean): PlanOption[] {
+  if (hasBetter) return [];
+  const target = board.enemies[0];
+  if (!target || board.speed === null || board.speed <= 0) return [];
+
+  const attacks = kit.filter(isAttack);
+  if (attacks.length === 0) return [];
+  const bestReach = Math.max(...attacks.map((a) => a.range));
+
+  return [
+    {
+      kind: "advance",
+      target,
+      range: bestReach,
+      score: 0.9,
+      reasons: [`${target.name} is out of reach; closing the distance`],
+    },
+  ];
+}
+
 function healingOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption[] {
   const options: PlanOption[] = [];
-  const healers = kit.filter((u) => u.available && u.kind === "heal");
+  const healers = kit.filter((u) => u.available && u.kind === "heal" && onTurn(u));
   if (healers.length === 0) return options;
 
   const selfHp = board.self.hpFraction;
@@ -218,6 +269,8 @@ function healingOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
         kind: "heal-self",
         item: usable.item,
         itemName: usable.name,
+        activity: usable.activity,
+        range: usable.range,
         // Steeply more attractive the closer to death it is; a scratch is not worth a potion.
         score: 1.2 + 2.2 * (1 - selfHp),
         reasons: ["hurt badly enough to spend something on it"],
@@ -231,6 +284,8 @@ function healingOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
           kind: "heal-ally",
           item: usable.item,
           itemName: usable.name,
+          activity: usable.activity,
+          range: usable.range,
           target: ally,
           score: 1 + 1.8 * (1 - ally.hpFraction),
           reasons: [`${ally.name} is in a bad way`],
@@ -247,7 +302,7 @@ function controlOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
   // something rather than dealing damage — which covers most crowd control and most maneuvers at
   // once. Counterspell specifically is a reaction, so it belongs to the off-turn work, not here.
   return kit
-    .filter((u) => u.available && u.kind === "control")
+    .filter((u) => u.available && u.kind === "control" && onTurn(u))
     .flatMap((usable) =>
       board.enemies
         .filter((e) => e.distance <= usable.range)
@@ -255,6 +310,8 @@ function controlOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
           kind: "control" as const,
           item: usable.item,
           itemName: usable.name,
+          activity: usable.activity,
+          range: usable.range,
           target: enemy,
           score: 1.1 + (can(p, "targetHighestThreat") && enemy.spellCount > 0 ? 0.6 : 0),
           reasons: ["shut them down rather than trade blows"],
@@ -301,6 +358,11 @@ function kiteOptions(
       kind: "kite",
       item: ranged.item,
       itemName: ranged.name,
+      activity: ranged.activity,
+      range: ranged.range,
+      // Far enough that the thing about to close cannot reach it, not as far as the bow can shoot.
+      standOff:
+        threat(target).meleeReach + (Number((canvas as any)?.scene?.grid?.distance ?? 5) || 5),
       target,
       score: 1.25 + 0.35 * Math.min(1, closing.length / 2),
       reasons: [`${closing[0].name} could close next turn`, "free to withdraw right now"],
@@ -518,8 +580,10 @@ export function planTurn(combatant: any): TurnPlan | null {
 
   const rand = turnRandom(String(combatant?.id ?? ""), "tactics");
 
+  const offensive = attackOptions(board, kit, profile, threat);
   const options = [
-    ...attackOptions(board, kit, profile, threat),
+    ...offensive,
+    ...advanceOptions(board, kit, offensive.length > 0),
     ...healingOptions(board, kit, profile),
     ...controlOptions(board, kit, profile),
     ...kiteOptions(board, kit, profile, threat),
