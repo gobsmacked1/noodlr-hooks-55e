@@ -22,6 +22,7 @@ import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "../
 import { isMercifulSort, partyHasCeasedAggression, partyIsDefeated } from "./encounter";
 import { readBoard, type Board, type BoardActor } from "./board";
 import { findConcealment, type Spot } from "./positioning";
+import { turnRandom } from "./random";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
 
 /** Below this fraction of maximum hit points a creature considers itself in trouble. */
@@ -70,28 +71,6 @@ export interface TurnPlan {
   postscript?: string;
   /** Where that end-of-turn move ends up, when one was found. */
   coverSpot?: Spot;
-}
-
-// ---- seeded randomness ------------------------------------------------------------------------
-
-function hashString(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-/** mulberry32 — small, fast, and good enough for picking between a dozen options. */
-function seededRandom(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
 
 // ---- reading the creature's own kit ------------------------------------------------------------
@@ -585,10 +564,7 @@ export function planTurn(combatant: any): TurnPlan | null {
   const threatCache = new Map<string, ThreatProfile>();
   const threat = (enemy: BoardActor) => threatOf(enemy, P, threatCache);
 
-  const seed = hashString(
-    `${game.combat?.id ?? ""}:${game.combat?.round ?? 0}:${combatant?.id ?? ""}`,
-  );
-  const rand = seededRandom(seed);
+  const rand = turnRandom(String(combatant?.id ?? ""), "tactics");
 
   const options = [
     ...attackOptions(board, kit, profile, threat),

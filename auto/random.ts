@@ -1,0 +1,33 @@
+// Seeded randomness shared by everything that makes a per-turn choice.
+//
+// Every stream is derived from fight + round + creature, so a turn replays identically. Callers pass
+// a distinct `stream` label for each independent decision: banter must draw from its own sequence, or
+// turning banter on would shift the numbers the tactical planner sees and quietly change what the
+// creature does. Independent decisions, independent streams.
+
+export function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** mulberry32 — small, fast, and good enough for picking between a dozen options. */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A reproducible generator for one creature's turn, isolated per stream. */
+export function turnRandom(combatantId: string, stream: string): () => number {
+  return seededRandom(
+    hashString(`${game.combat?.id ?? ""}:${game.combat?.round ?? 0}:${combatantId}:${stream}`),
+  );
+}

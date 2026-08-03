@@ -12,6 +12,8 @@
 import { log } from "../constants";
 import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./auto/planner";
 import { resolveCombatant, type Outcome } from "./auto/encounter";
+import { isNpcBanterEnabled } from "./config";
+import { maybeTaunt } from "./banter/speak";
 import { noteDossierEvent } from "./dossier";
 import { TIER_CAVEAT } from "./auto/tiers";
 
@@ -103,6 +105,15 @@ export async function runTurnFor(combatant: any): Promise<void> {
         game.i18n.format("NOODLR.Combat.NoPlan", { name: combatant?.name ?? "?" }),
       );
       return;
+    }
+
+    // Mouth first, then act: the taunt is thrown at whoever the creature is about to deal with, so
+    // the plan has to exist before the line can be aimed.
+    if (isNpcBanterEnabled()) {
+      const heckled = plan.chosen.target?.isPC
+        ? plan.chosen.target
+        : plan.board.enemies.find((e) => e.isPC);
+      if (heckled) await maybeTaunt(combatant, heckled);
     }
 
     const intent = plan.postscript

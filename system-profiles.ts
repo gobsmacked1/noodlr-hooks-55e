@@ -56,6 +56,17 @@ export interface SystemPaths {
   challenge: string[];
   /** Free-text alignment, read only to decide whether a creature is the merciful sort. */
   alignment: string[];
+  /** Ability modifiers, which is what the banter formula is written in terms of. */
+  intelligenceMod: string[];
+  wisdomMod: string[];
+  charismaMod: string[];
+  /** Known languages — a creature with none cannot taunt anybody. */
+  languages: string[];
+  /** Creature type ("undead", "beast", "humanoid"), used to colour which taunts suit. */
+  creatureType: string[];
+  /** Player-side details a taunt needs to land: ancestry, class, and how they are addressed. */
+  race: string[];
+  gender: string[];
   /** Legendary action / resistance pools, when the system models them. */
   legendaryActions: string[];
   legendaryResistances: string[];
@@ -99,6 +110,17 @@ const GENERIC: SystemPaths = {
   senses: ["system.attributes.senses", "system.traits.senses", "system.perception.senses"],
   challenge: ["system.details.cr", "system.details.level.value", "system.details.level"],
   alignment: ["system.details.alignment", "system.details.alignment.value", "system.alignment"],
+  intelligenceMod: ["system.abilities.int.mod"],
+  wisdomMod: ["system.abilities.wis.mod"],
+  charismaMod: ["system.abilities.cha.mod"],
+  languages: [
+    "system.traits.languages.value",
+    "system.traits.languages",
+    "system.details.languages",
+  ],
+  creatureType: ["system.details.type.value", "system.details.type", "system.traits.type.value"],
+  race: ["system.details.race.name", "system.details.race", "system.details.ancestry.name"],
+  gender: ["system.details.gender", "system.details.biography.gender"],
   legendaryActions: ["system.resources.legact.value"],
   legendaryResistances: ["system.resources.legres.value"],
   itemActivation: ["system.activation.type", "system.actionType", "system.actions.0.type"],
