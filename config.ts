@@ -30,6 +30,26 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.turnPace, {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 6,
+  });
+}
+
+/**
+ * Seconds an automated turn is held open before initiative advances.
+ *
+ * A machine resolves a turn in under a second, which reads as a blur rather than a fight: the table
+ * cannot follow six skeletons acting in five seconds, and spoken banter from consecutive creatures
+ * overlaps into noise (user's report, 2026-08-03). This is the deliberate handbrake — a floor on how
+ * fast the fight can move, not a delay added to work that is still happening.
+ */
+export function getTurnPaceSeconds(): number {
+  const raw = Number(game.settings.get(MODULE_ID, COMBAT_SETTINGS.turnPace));
+  if (!Number.isFinite(raw)) return 6;
+  return Math.min(60, Math.max(0, raw));
 }
 
 export function getCombatAutomation(): CombatAutomationMode {

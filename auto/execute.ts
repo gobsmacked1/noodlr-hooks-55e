@@ -107,6 +107,9 @@ async function useAction(
   return undefined;
 }
 
+/** Plans whose whole point is that the creature ends up somewhere else. */
+const MOVING_PLANS = new Set(["close", "kite", "hide", "advance", "help", "flee"]);
+
 /** Movement budget left for the mechanical part of the turn, in scene units. */
 function speedOf(plan: TurnPlan): number {
   return plan.board.speed ?? 0;
@@ -208,6 +211,13 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
     // Cover is a second, smaller move at the end of the turn, and only after the action resolved.
     if (plan.coverSpot) {
       result.moved += await moveTo(selfToken, plan.coverSpot);
+    }
+
+    // Say so when the announcement promised movement and none happened. Silence here is what made the
+    // first two attempts at this so hard to diagnose: the chat card described a creature closing 23 ft,
+    // the token never budged, and nothing anywhere said the move had been refused.
+    if (MOVING_PLANS.has(option.kind) && result.moved === 0) {
+      result.problem = "the token would not move — see the console for which call was refused";
     }
   } catch (err) {
     result.problem = String((err as any)?.message ?? err);

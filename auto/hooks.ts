@@ -12,18 +12,22 @@
 // to play one creature has not asked it to take over the fight.
 
 import { log } from "../../constants";
+import { getTurnPaceSeconds } from "../config";
 import { isPrimaryGM } from "../../util/gm";
 import { runTurnFor } from "../npc-turn";
 import { shouldAutomate } from "./registry";
 import { hasResolved } from "./encounter";
 
 /**
- * Beat between the narration and the tracker moving on.
+ * Floor on how long an automated turn occupies the table, in milliseconds.
  *
- * Chat cards render asynchronously; without a pause the tracker jumps before the table has read what
- * just happened, and a chain of automated creatures becomes a wall of text appearing after the fact.
+ * This is a minimum DURATION, not a delay bolted onto the end: the time a creature spent thinking,
+ * rolling and moving counts toward it, so a slow turn waits not at all and an instant one waits the
+ * full pace. Configurable under Text Generation ("Automated turn pace"); 0 disables it.
  */
-const SETTLE_MS = 900;
+function paceFloorMs(): number {
+  return getTurnPaceSeconds() * 1000;
+}
 
 /**
  * Consecutive automated turns before automation stops advancing the tracker.
@@ -37,8 +41,13 @@ const RUNAWAY_LIMIT = 24;
 
 let consecutive = 0;
 
-/** Advance past the creature Noodlr just played, if the tracker is still where we left it. */
-async function endAutomatedTurn(combat: any, playedId: string): Promise<void> {
+/**
+ * Advance past the creature Noodlr just played, if the tracker is still where we left it.
+ *
+ * `startedAt` is when the turn began, so the configured pace is measured across the whole turn rather
+ * than added to it.
+ */
+async function endAutomatedTurn(combat: any, playedId: string, startedAt: number): Promise<void> {
   if (!combat?.started) return;
   // The GM may have advanced manually while the turn was resolving, or the encounter may have ended on
   // a surrender. Either way the tracker has moved on without us and must not be nudged again.
@@ -52,7 +61,8 @@ async function endAutomatedTurn(combat: any, playedId: string): Promise<void> {
     return;
   }
 
-  await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
+  const remaining = paceFloorMs() - (Date.now() - startedAt);
+  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
   // Re-check: the pause is long enough for the GM to have acted during it.
   if (!combat?.started || String(combat.combatant?.id ?? "") !== playedId) return;
 
@@ -85,13 +95,15 @@ export function registerAutomationTurnHook(): void {
     // A creature that ran, gave up, or stood down does not get played again if the tracker still
     // holds a turn for it. It still needs skipping past, though, or the fight stalls on it.
     const id = String(combatant?.id ?? "");
+    const startedAt = Date.now();
     if (hasResolved(id)) {
-      void endAutomatedTurn(combat, id);
+      // Nothing happened, so nothing needs watching: skip a spent creature without holding the table.
+      void endAutomatedTurn(combat, id, Date.now());
       return;
     }
 
     log(`automation taking ${combatant?.name ?? "?"}'s turn`);
     consecutive++;
-    void runTurnFor(combatant).then(() => endAutomatedTurn(combat, id));
+    void runTurnFor(combatant).then(() => endAutomatedTurn(combat, id, startedAt));
   });
 }

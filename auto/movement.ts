@@ -38,8 +38,12 @@ function toUnits(pixels: number): number {
  * Foundry stores token position as the top-left corner, while every measurement here is centre-based;
  * conflating the two puts large creatures half a square off, which is exactly the sort of error that
  * looks like "the AI moved it somewhere stupid".
+ *
+ * Reports whether snapping actually happened, because the waypoint's `snapped` field is pure metadata:
+ * it records a claim for the ruler and undo history and snaps nothing itself, so setting it on an
+ * unaligned coordinate just files a false statement.
  */
-function cornerFor(token: any, point: Point): Point {
+function cornerFor(token: any, point: Point): { point: Point; snapped: boolean } {
   const doc = token?.document ?? token;
   const size = gridSize();
   const corner = {
@@ -47,49 +51,208 @@ function cornerFor(token: any, point: Point): Point {
     y: point.y - (size * (Number(doc?.height) || 1)) / 2,
   };
 
-  const grid: any = (canvas as any)?.grid;
-  try {
-    if (typeof grid?.getSnappedPoint === "function") {
-      const snapped = grid.getSnappedPoint(corner, { mode: 0xff0 });
-      if (Number.isFinite(snapped?.x) && Number.isFinite(snapped?.y)) return snapped;
+  // The document's own snapper understands the token's footprint; the raw grid snapper does not.
+  for (const snap of [
+    () => doc?.getSnappedPosition?.(corner),
+    () => (canvas as any)?.grid?.getSnappedPoint?.(corner),
+  ]) {
+    try {
+      const snapped = snap();
+      if (Number.isFinite(snapped?.x) && Number.isFinite(snapped?.y))
+        return { point: { x: snapped.x, y: snapped.y }, snapped: true };
+    } catch {
+      // gridless scenes and unfamiliar grid APIs keep the unsnapped position
     }
-  } catch {
-    // gridless scenes and unfamiliar grid APIs keep the unsnapped position
   }
-  return corner;
+  return { point: corner, snapped: false };
 }
+
+/**
+ * How this creature travels, as one of the movement actions the core config declares.
+ *
+ * Matters because each action carries its own wall rule: a flyer told to "walk" is tested against walls
+ * it should be crossing. An action the core does not recognise makes `move()` throw, so anything
+ * unrecognised is omitted and the core default applies.
+ */
+function movementAction(token: any): string | undefined {
+  const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
+  if (!actions) return undefined;
+
+  const doc = token?.document ?? token;
+  const modes: any = doc?.actor?.system?.attributes?.movement;
+  if (modes) {
+    if (Number(modes.walk) > 0) return actions.walk ? "walk" : undefined;
+    // No walk speed: whatever it does instead, in the order a creature would prefer it.
+    for (const mode of ["fly", "swim", "burrow", "climb"]) {
+      if (Number(modes[mode]) > 0 && actions[mode]) return mode;
+    }
+  }
+  return actions.walk ? "walk" : undefined;
+}
+
+/**
+ * How long to wait for a move before giving up on it.
+ *
+ * A movement PAUSED by a region behaviour (Terrain Mapper's stairs and elevators do this) never
+ * resolves its promise at all — so an unguarded await would hang the creature's turn, and with it the
+ * whole automated initiative chain, for the rest of the session.
+ */
+const MOVE_TIMEOUT_MS = 8000;
 
 /**
  * Move a token so its centre lands at `point`. Returns the distance travelled in scene units.
  *
- * Prefers `TokenDocument#move` (Foundry v13+), which walks the token through the intervening grid
- * spaces, measures the cost, constrains the path against walls and impassable terrain, and records the
- * move in the token's movement history — everything a player dragging the token would get. A raw
- * position update, by contrast, teleports: it is the fallback for older cores only.
+ * Uses `TokenDocument#move` (Foundry v13+), which walks the token through the intervening grid spaces,
+ * constrains the path against walls, and records the move in the token's history — everything a player
+ * dragging the token would get. `update({x, y})` is NOT a fallback: since v13 it is routed through the
+ * identical pipeline and is just as refusable, while hiding the outcome behind a truthy return.
  *
- * The distance returned is measured from where the token ACTUALLY ended up, not from where it was
- * asked to go, so a creature stopped short by a wall reports the shorter distance.
+ * The distance returned is measured from where the token ACTUALLY ended up, not from where it was asked
+ * to go, so a creature stopped short by a wall reports the shorter distance — and 0 means it did not
+ * move at all, which the caller is expected to act on rather than assume away.
  */
 export async function moveTo(token: any, point: Point): Promise<number> {
   const origin = centerOf(token);
   const doc = token?.document ?? token;
-  if (!origin) return 0;
-
-  const corner = cornerFor(token, point);
-  try {
-    if (typeof doc?.move === "function") {
-      await doc.move({ x: corner.x, y: corner.y, snapped: true }, { autoRotate: true });
-    } else if (typeof doc?.update === "function") {
-      await doc.update({ x: corner.x, y: corner.y }, { animate: true });
-    } else {
-      return 0;
-    }
-  } catch (err) {
-    log("movement: the token would not move:", err);
+  if (!origin) {
+    log("movement: no position for the token; cannot move it");
     return 0;
   }
-  const landed = centerOf(token) ?? point;
-  return Math.round(toUnits(Math.hypot(landed.x - origin.x, landed.y - origin.y)));
+  if (typeof doc?.move !== "function") {
+    log("movement: this token document has no move(); Foundry v13 or newer is required");
+    return 0;
+  }
+
+  const { point: corner, snapped } = cornerFor(token, point);
+  const before = sourcePosition(doc);
+
+  const waypoint: Record<string, unknown> = {
+    // Top-left pixel coordinates, as integers. Not centres, not grid offsets.
+    x: Math.round(corner.x),
+    y: Math.round(corner.y),
+    snapped,
+    explicit: true,
+    checkpoint: true,
+  };
+  const action = movementAction(token);
+  if (action) waypoint.action = action;
+
+  let completed: unknown;
+  try {
+    // `ignoreCost` because the planner already budgeted this creature's movement in scene units;
+    // letting terrain cost truncate the path as well would silently halve every move across rough
+    // ground. Walls are deliberately NOT ignored — a creature should no more walk through a wall than a
+    // player's token should.
+    completed = await withTimeout(
+      doc.move(waypoint, {
+        method: "api",
+        constrainOptions: { ignoreCost: true },
+        autoRotate: false,
+        showRuler: false,
+      }),
+    );
+  } catch (err) {
+    log("movement: move() threw:", err);
+    return 0;
+  }
+
+  if (completed === TIMED_OUT) {
+    // Almost certainly paused by a region behaviour. Stop it, so the creature's turn — and the whole
+    // automated initiative chain behind it — is not left awaiting a promise that will never settle.
+    log(`movement: ${describe(doc)} stalled mid-move (state: ${state(doc)}); abandoning it`);
+    try {
+      doc.stopMovement?.();
+    } catch {
+      // nothing more to do; the turn continues either way
+    }
+  }
+
+  const after = sourcePosition(doc);
+  // A pixel of drift is rounding, not movement.
+  if (Math.hypot(after.x - before.x, after.y - before.y) > 1) {
+    const landed = centerOf(token) ?? point;
+    return Math.round(toUnits(Math.hypot(landed.x - origin.x, landed.y - origin.y)));
+  }
+
+  reportRefusal(doc, completed, waypoint);
+  return 0;
+}
+
+const TIMED_OUT = Symbol("timed-out");
+
+function withTimeout<T>(promise: Promise<T>): Promise<T | typeof TIMED_OUT> {
+  return Promise.race([
+    promise,
+    new Promise<typeof TIMED_OUT>((resolve) =>
+      setTimeout(() => resolve(TIMED_OUT), MOVE_TIMEOUT_MS),
+    ),
+  ]);
+}
+
+/**
+ * The token's stored position, not its animated one.
+ *
+ * `_source` is the only honest reading: the prepared `x`/`y` are interpolated during the move animation,
+ * so comparing them can report movement that is only a frame of tweening — or none at all, because the
+ * animation has not started yet. This is why v0.4.24's "verify it moved" check could not be trusted.
+ */
+function sourcePosition(doc: any): { x: number; y: number } {
+  const source = doc?._source ?? doc;
+  return { x: Number(source?.x) || 0, y: Number(source?.y) || 0 };
+}
+
+function describe(doc: any): string {
+  return String(doc?.name ?? "token");
+}
+
+function state(doc: any): string {
+  return String(doc?.movement?.state ?? "unknown");
+}
+
+/**
+ * Explain a move that did not happen, in the terms its cause actually has.
+ *
+ * `move()` returning false and `move()` returning true are two DIFFERENT failures, and conflating them
+ * is what kept this invisible for two releases:
+ *
+ *  - `false` means core refused: the path was constrained to nothing (a wall, or a destination inside
+ *    one), or a `preMoveToken` handler vetoed it. Note that the GM's "Unconstrained Movement" toggle does
+ *    not apply to programmatic moves — core reads it only in the drag workflow — so "I can drag the token
+ *    there myself" proves nothing about this call.
+ *  - `true` with the token still in place means something removed the position from the update after core
+ *    had already approved it, which is a `preUpdateToken` handler: a grappled or mounted creature
+ *    (Rideable), or one on a teleport cooldown (Monk's Active Tiles).
+ */
+function reportRefusal(doc: any, completed: unknown, waypoint: Record<string, unknown>): void {
+  const movement: any = doc?.movement;
+  const detail = {
+    completed,
+    constrained: movement?.constrained,
+    state: movement?.state,
+    destination: `${waypoint.x},${waypoint.y}`,
+    action: waypoint.action ?? "(core default)",
+  };
+
+  if (completed === true) {
+    log(
+      `movement: core allowed ${describe(doc)}'s move but its position was stripped before saving — is ` +
+        `it grappled, mounted, or on a teleport cooldown?`,
+      detail,
+    );
+    return;
+  }
+  if (movement?.constrained) {
+    log(
+      `movement: ${describe(doc)}'s path hit walls or terrain and was shortened to nothing`,
+      detail,
+    );
+    return;
+  }
+  log(
+    `movement: ${describe(doc)} was refused — either a preMoveToken handler vetoed it (NotYourTurn and ` +
+      `Token Warp both do this) or the destination is unreachable`,
+    detail,
+  );
 }
 
 /**
@@ -124,7 +287,11 @@ export async function moveToward(
     // `false` means "definitely not blocked"; null means the collision API was unreadable, in which
     // case we move anyway — refusing to move on an unknown API would disable movement wholesale.
     if (blocked(origin, point, "move") === true) continue;
-    return moveTo(token, point);
+    // Keep trying shorter steps when the move is refused. Returning here regardless is what made the
+    // whole shorten-and-retry design decorative: the first candidate consumed the loop even when the
+    // token never budged, so a destination core disliked ended the attempt outright.
+    const travelled = await moveTo(token, point);
+    if (travelled > 0) return travelled;
   }
   return 0;
 }
@@ -161,7 +328,8 @@ export async function moveAwayFrom(
     };
     if (!insideScene(point) || occupied(point, token)) continue;
     if (blocked(origin, point, "move") === true) continue;
-    return moveTo(token, point);
+    const travelled = await moveTo(token, point);
+    if (travelled > 0) return travelled;
   }
   return 0;
 }
@@ -196,7 +364,8 @@ export async function moveOffField(token: any, budget: number): Promise<number> 
     };
     if (occupied(point, token)) continue;
     if (blocked(origin, point, "move") === true) continue;
-    return moveTo(token, point);
+    const travelled = await moveTo(token, point);
+    if (travelled > 0) return travelled;
   }
   return 0;
 }
