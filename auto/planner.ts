@@ -18,7 +18,8 @@
 // This file never computes an attack roll, damage, a save, or a DC — see the amended principle 0 in
 // AGENTS.md. It picks a verb, an implement, and a target; resolution belongs to the system.
 
-import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "../system-profiles";
+import { pickNumber, systemPaths, type SystemPaths } from "../system-profiles";
+import { readActions, type CreatureAction } from "../actions";
 import { isMercifulSort, partyHasCeasedAggression, partyIsDefeated } from "./encounter";
 import { readBoard, type Board, type BoardActor } from "./board";
 import { findConcealment, type Spot } from "./positioning";
@@ -74,68 +75,14 @@ export interface TurnPlan {
 }
 
 // ---- reading the creature's own kit ------------------------------------------------------------
+//
+// Normalizing an actor's items into actions lives in `../actions.ts`, which speaks both the dnd5e
+// activities model and the older actionType shape. The planner only cares about the normalized form.
 
-interface Usable {
-  item: any;
-  name: string;
-  /** dnd5e-style coarse type; "" when the system doesn't report one. */
-  actionType: string;
-  melee: boolean;
-  /** Effective reach/range in scene units. */
-  range: number;
-  /** False when charges, ammunition, or quantity say it is spent. */
-  available: boolean;
-}
+type Usable = CreatureAction;
 
-const MELEE_TYPES = new Set(["mwak", "msak", "melee"]);
-const RANGED_TYPES = new Set(["rwak", "rsak", "ranged"]);
-const ATTACK_TYPES = new Set([...MELEE_TYPES, ...RANGED_TYPES]);
-
-function readUsables(actor: any, P: SystemPaths): Usable[] {
-  const out: Usable[] = [];
-  for (const item of actor?.items ?? []) {
-    const actionType = pickString(item, P.itemActionType).toLowerCase();
-    if (!actionType) continue;
-
-    const usesMax = pickNumber(item, P.itemUsesMax);
-    const spent = pickNumber(item, P.itemUsesSpent);
-    const remaining =
-      pickNumber(item, P.itemUses) ??
-      (usesMax !== null && spent !== null ? Math.max(0, usesMax - spent) : null);
-    const quantity = pickNumber(item, P.itemQuantity);
-
-    // Ammunition: a bow with an empty quiver is not an option, which is the whole point of the
-    // archer example. Consumables with a quantity of zero are equally gone.
-    let available = true;
-    // A recharge feature that has not come back is spent, however tempting it looks. This is a fact
-    // the sheet states, not a rule we are interpreting.
-    if (pickString(item, P.itemRechargeValue) && pick(item, P.itemRecharged) === false) {
-      available = false;
-    }
-    if (remaining !== null && usesMax !== null && usesMax > 0 && remaining <= 0) available = false;
-    if (quantity !== null && quantity <= 0) available = false;
-    const ammoId = pickString(item, P.itemConsumeTarget);
-    if (ammoId) {
-      const ammo = actor?.items?.get?.(ammoId);
-      const ammoQty = ammo ? pickNumber(ammo, P.itemQuantity) : null;
-      if (ammoQty !== null && ammoQty <= 0) available = false;
-    }
-
-    const melee = MELEE_TYPES.has(actionType);
-    const rangeValue = pickNumber(item, P.itemRange);
-    out.push({
-      item,
-      name: String(item?.name ?? "?"),
-      actionType,
-      melee,
-      // A melee weapon with no stated reach still reaches an adjacent square; the exact number is a
-      // rules detail we deliberately do not model, so one grid step is the honest default.
-      range: rangeValue ?? (melee ? Number((canvas as any)?.scene?.grid?.distance ?? 5) : 30),
-      available,
-    });
-  }
-  return out;
-}
+const isAttack = (u: Usable) => u.available && u.kind === "attack";
+const isRangedAttack = (u: Usable) => isAttack(u) && u.ranged;
 
 /** What an opponent can do back, which is all the creature needs to decide how close to stand. */
 interface ThreatProfile {
@@ -151,15 +98,20 @@ function threatOf(enemy: BoardActor, P: SystemPaths, cache: Map<string, ThreatPr
   const cached = cache.get(key);
   if (cached) return cached;
 
-  const kit = readUsables(enemy.actor, P);
-  const melee = kit.filter((u) => MELEE_TYPES.has(u.actionType));
+  const kit = readActions(enemy.actor);
+  const melee = kit.filter((u) => isAttack(u) && u.melee);
   const grid = Number((canvas as any)?.scene?.grid?.distance ?? 5);
   // An opponent whose sheet says nothing readable is assumed able to hit you if you stand next to
   // it. Guessing "harmless" would walk archers into a grapple on every unfamiliar system.
   const unreadable = kit.length === 0;
   const profile: ThreatProfile = {
-    meleeReach: unreadable ? grid : melee.reduce((max, u) => Math.max(max, u.range), 0),
-    hasRanged: unreadable ? false : kit.some((u) => RANGED_TYPES.has(u.actionType)),
+    // Zero when it has no melee at all — an archer threatens nobody's withdrawal.
+    meleeReach: unreadable
+      ? grid
+      : melee.length === 0
+        ? 0
+        : Math.max(grid, ...melee.map((u) => u.range)),
+    hasRanged: unreadable ? false : kit.some(isRangedAttack),
     speed: pickNumber(enemy.actor, P.speed) ?? grid * 6,
   };
   cache.set(key, profile);
@@ -182,10 +134,10 @@ function attackOptions(
   const biggestFootprint = Math.max(1, ...board.enemies.map((e) => e.footprint));
   const mostSpells = Math.max(1, ...board.enemies.map((e) => e.spellCount));
   const selfHurt = board.self.hpFraction !== null && board.self.hpFraction < BLOODIED;
-  const hasRangedOption = kit.some((u) => u.available && RANGED_TYPES.has(u.actionType));
+  const hasRangedOption = kit.some(isRangedAttack);
 
   for (const usable of kit) {
-    if (!usable.available || !ATTACK_TYPES.has(usable.actionType)) continue;
+    if (!isAttack(usable)) continue;
 
     for (const enemy of board.enemies) {
       const gap = enemy.distance - usable.range;
@@ -256,7 +208,7 @@ function attackOptions(
 
 function healingOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption[] {
   const options: PlanOption[] = [];
-  const healers = kit.filter((u) => u.available && u.actionType === "heal");
+  const healers = kit.filter((u) => u.available && u.kind === "heal");
   if (healers.length === 0) return options;
 
   const selfHp = board.self.hpFraction;
@@ -295,7 +247,7 @@ function controlOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
   // something rather than dealing damage — which covers most crowd control and most maneuvers at
   // once. Counterspell specifically is a reaction, so it belongs to the off-turn work, not here.
   return kit
-    .filter((u) => u.available && u.actionType === "save")
+    .filter((u) => u.available && u.kind === "control")
     .flatMap((usable) =>
       board.enemies
         .filter((e) => e.distance <= usable.range)
@@ -329,7 +281,7 @@ function kiteOptions(
   if (!can(p, "keepDistance")) return [];
   if (board.speed === null || board.speed <= 0) return [];
 
-  const ranged = kit.find((u) => u.available && RANGED_TYPES.has(u.actionType));
+  const ranged = kit.find(isRangedAttack);
   if (!ranged) return [];
 
   // Anyone already within reach would get a swing at it as it left.
@@ -444,7 +396,7 @@ function hideOptions(
   if (!spot) return [];
 
   const hp = board.self.hpFraction ?? 1;
-  const hasRanged = kit.some((u) => u.available && RANGED_TYPES.has(u.actionType));
+  const hasRanged = kit.some(isRangedAttack);
   const reasons = [`out of ${nearest.name}'s sight`];
   let score = 1.05;
   // Breaking contact is far more attractive when losing the stand-up fight, and a creature that can
@@ -560,7 +512,7 @@ export function planTurn(combatant: any): TurnPlan | null {
   // dragon into a beetle.
   const profile = tierProfile(mental === null ? 4 : tierForScore(mental));
 
-  const kit = readUsables(actor, P);
+  const kit = readActions(actor);
   const threatCache = new Map<string, ThreatProfile>();
   const threat = (enemy: BoardActor) => threatOf(enemy, P, threatCache);
 

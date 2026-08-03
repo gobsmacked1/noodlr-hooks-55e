@@ -44,12 +44,22 @@ export interface Spot {
  */
 function blocked(origin: Point, destination: Point, type: Restriction): boolean | null {
   const config = { type, mode: "any" };
-  const candidates = [
-    (foundry as any)?.canvas?.geometry?.ClockwiseSweepPolygon,
-    (globalThis as any).ClockwiseSweepPolygon,
-    (CONFIG as any)?.Canvas?.polygonBackends?.[type],
+  // Lazy on purpose. Building this as an array of values reads every entry, and merely TOUCHING the
+  // legacy global emits a deprecation warning even when the modern namespace answered — which is
+  // exactly the console noise this module was adding in v0.4.22. Each candidate is only evaluated if
+  // the ones before it were unusable.
+  const candidates: Array<() => any> = [
+    () => (foundry as any)?.canvas?.geometry?.ClockwiseSweepPolygon,
+    () => (globalThis as any).CONFIG?.Canvas?.polygonBackends?.[type],
+    () => (globalThis as any).ClockwiseSweepPolygon,
   ];
-  for (const backend of candidates) {
+  for (const resolve of candidates) {
+    let backend: any;
+    try {
+      backend = resolve();
+    } catch {
+      continue;
+    }
     if (typeof backend?.testCollision === "function") {
       try {
         return Boolean(backend.testCollision(origin, destination, config));
