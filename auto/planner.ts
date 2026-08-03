@@ -18,7 +18,8 @@
 // This file never computes an attack roll, damage, a save, or a DC — see the amended principle 0 in
 // AGENTS.md. It picks a verb, an implement, and a target; resolution belongs to the system.
 
-import { pickNumber, pickString, systemPaths, type SystemPaths } from "../system-profiles";
+import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "../system-profiles";
+import { isMercifulSort, partyHasCeasedAggression, partyIsDefeated } from "./encounter";
 import { readBoard, type Board, type BoardActor } from "./board";
 import { findConcealment, type Spot } from "./positioning";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
@@ -28,7 +29,18 @@ const BLOODIED = 0.5;
 const DESPERATE = 0.25;
 
 export type PlanKind =
-  "attack" | "heal-self" | "heal-ally" | "control" | "flee" | "call" | "close" | "kite" | "hide";
+  | "attack"
+  | "heal-self"
+  | "heal-ally"
+  | "control"
+  | "flee"
+  | "call"
+  | "close"
+  | "kite"
+  | "hide"
+  | "help"
+  | "surrender"
+  | "mercy";
 
 export interface PlanOption {
   kind: PlanKind;
@@ -116,6 +128,11 @@ function readUsables(actor: any, P: SystemPaths): Usable[] {
     // Ammunition: a bow with an empty quiver is not an option, which is the whole point of the
     // archer example. Consumables with a quantity of zero are equally gone.
     let available = true;
+    // A recharge feature that has not come back is spent, however tempting it looks. This is a fact
+    // the sheet states, not a rule we are interpreting.
+    if (pickString(item, P.itemRechargeValue) && pick(item, P.itemRecharged) === false) {
+      available = false;
+    }
     if (remaining !== null && usesMax !== null && usesMax > 0 && remaining <= 0) available = false;
     if (quantity !== null && quantity <= 0) available = false;
     const ammoId = pickString(item, P.itemConsumeTarget);
@@ -146,6 +163,8 @@ interface ThreatProfile {
   /** Farthest a melee-style attack of theirs reaches, in scene units; 0 when they have none. */
   meleeReach: number;
   hasRanged: boolean;
+  /** How far they can move to close the gap next turn. */
+  speed: number;
 }
 
 function threatOf(enemy: BoardActor, P: SystemPaths, cache: Map<string, ThreatProfile>) {
@@ -162,6 +181,7 @@ function threatOf(enemy: BoardActor, P: SystemPaths, cache: Map<string, ThreatPr
   const profile: ThreatProfile = {
     meleeReach: unreadable ? grid : melee.reduce((max, u) => Math.max(max, u.range), 0),
     hasRanged: unreadable ? false : kit.some((u) => RANGED_TYPES.has(u.actionType)),
+    speed: pickNumber(enemy.actor, P.speed) ?? grid * 6,
   };
   cache.set(key, profile);
   return profile;
@@ -291,10 +311,10 @@ function healingOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
 }
 
 function controlOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption[] {
-  if (!can(p, "controlManeuvers")) return [];
-  // "save"-type items are the closest thing to a system-agnostic marker for effects that impose
-  // something rather than deal damage. Stealth, deception, and disarm proper need identifiers we
-  // cannot read generically yet — see the gaps note in AGENTS.md.
+  if (!can(p, "controlManeuvers") && !can(p, "advancedCasting")) return [];
+  // "save"-type items are the closest thing to a system-agnostic marker for an effect that imposes
+  // something rather than dealing damage — which covers most crowd control and most maneuvers at
+  // once. Counterspell specifically is a reaction, so it belongs to the off-turn work, not here.
   return kit
     .filter((u) => u.available && u.actionType === "save")
     .flatMap((usable) =>
@@ -312,8 +332,14 @@ function controlOptions(board: Board, kit: Usable[], p: TierProfile): PlanOption
 }
 
 /**
- * Backing out of melee and shooting from the new spot. Distinct from fleeing: the creature is not
- * leaving the fight, it is refusing to have it at arm's length.
+ * Stepping back out of melee range and shooting from the new spot.
+ *
+ * Revised 2026-08-02, and the subtlest rule in the file: a tier-4 creature withdraws only "when not at
+ * risk of an opportunity attack". That inverts the naive version, which backed away precisely when
+ * something was already adjacent — the exact moment leaving costs a free hit. So a creature that is
+ * ALREADY engaged stays and fights; one that is merely about to be closed on gives ground now, while
+ * it is still free to. Refusing the melee before it starts is the competent play, and the one the
+ * rules reward.
  */
 function kiteOptions(
   board: Board,
@@ -327,25 +353,90 @@ function kiteOptions(
   const ranged = kit.find((u) => u.available && RANGED_TYPES.has(u.actionType));
   if (!ranged) return [];
 
-  const crowding = board.enemies.filter((e) => e.distance <= threat(e).meleeReach);
-  if (crowding.length === 0) return [];
+  // Anyone already within reach would get a swing at it as it left.
+  const engaged = board.enemies.some((e) => e.distance <= threat(e).meleeReach);
+  if (engaged) return [];
 
-  // Shoot whoever is still worth shooting once it has stepped away — usually the one that closed.
-  const target =
-    board.enemies.find((e) => e.distance <= ranged.range && !crowding.includes(e)) ?? crowding[0];
+  // Nobody on it yet, but someone can be next turn: this is the free moment to open the gap.
+  const closing = board.enemies.filter((e) => {
+    const t = threat(e);
+    return t.meleeReach > 0 && e.distance <= t.meleeReach + t.speed;
+  });
+  if (closing.length === 0) return [];
 
+  const target = board.enemies.find((e) => e.distance <= ranged.range) ?? closing[0];
   return [
     {
       kind: "kite",
       item: ranged.item,
       itemName: ranged.name,
       target,
-      score: 1.3 + 0.45 * Math.min(1, crowding.length / 2),
-      reasons: [
-        crowding.length > 1 ? "hemmed in by melee" : `${crowding[0].name} is close enough to swing`,
-      ],
+      score: 1.25 + 0.35 * Math.min(1, closing.length / 2),
+      reasons: [`${closing[0].name} could close next turn`, "free to withdraw right now"],
     },
   ];
+}
+
+/**
+ * Making an ally's attempt land. What "help" grants is the system's business; all this decides is
+ * that the creature spends its turn on someone else's attack instead of its own.
+ */
+function helpOptions(
+  board: Board,
+  p: TierProfile,
+  threat: (enemy: BoardActor) => ThreatProfile,
+): PlanOption[] {
+  if (!can(p, "helpAlly")) return [];
+  const grid = Number((canvas as any)?.scene?.grid?.distance ?? 5);
+
+  for (const ally of board.allies) {
+    if (ally.distance > grid * 2) continue;
+    const engagedWith = board.enemies.find((e) => e.distance <= threat(e).meleeReach + grid);
+    if (!engagedWith) continue;
+    return [
+      {
+        kind: "help",
+        target: ally,
+        score: 0.95,
+        reasons: [`${ally.name} is toe to toe with ${engagedWith.name}`],
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * Throwing down its weapon, and sparing a party that has already stopped fighting.
+ *
+ * Both end the fight without anyone else dying, and both are gated on things the module can actually
+ * check: how badly hurt the creature is, whether the party has held its fire for a full round, and
+ * what the sheet says about alignment.
+ */
+function yieldOptions(board: Board, p: TierProfile, actor: any): PlanOption[] {
+  const options: PlanOption[] = [];
+  const hp = board.self.hpFraction;
+
+  if (can(p, "surrender") && hp !== null && hp < DESPERATE && board.enemies.length > 0) {
+    // Competes head-on with fleeing at the same hit points, which is the interesting choice: the
+    // creature with nowhere to run is the one that gives up.
+    options.push({
+      kind: "surrender",
+      score: 1.3 + 6 * (DESPERATE - hp),
+      reasons: ["beaten, and would rather live than die well"],
+    });
+  }
+
+  if (can(p, "mercy") && partyHasCeasedAggression() && partyIsDefeated() && isMercifulSort(actor)) {
+    options.push({
+      kind: "mercy",
+      // Strong where it applies, because the conditions are narrow: the party must be beaten AND have
+      // stopped fighting AND the creature must be the sort that spares people.
+      score: 2.2,
+      reasons: ["they have stopped fighting, and they are beaten"],
+    });
+  }
+
+  return options;
 }
 
 /**
@@ -505,6 +596,8 @@ export function planTurn(combatant: any): TurnPlan | null {
     ...controlOptions(board, kit, profile),
     ...kiteOptions(board, kit, profile, threat),
     ...hideOptions(board, kit, profile, rand),
+    ...helpOptions(board, profile, threat),
+    ...yieldOptions(board, profile, actor),
     ...survivalOptions(board, profile),
   ];
   if (options.length === 0) return null;

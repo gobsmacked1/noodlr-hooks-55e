@@ -8,6 +8,7 @@ import { log } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
 import { runTurnFor } from "../npc-turn";
 import { shouldAutomate } from "./registry";
+import { hasResolved } from "./encounter";
 
 export function registerAutomationTurnHook(): void {
   Hooks.on("updateCombat", (combat: any, changed: any) => {
@@ -19,6 +20,9 @@ export function registerAutomationTurnHook(): void {
 
     const combatant = combat.combatant;
     if (!shouldAutomate(combatant)) return;
+    // A creature that ran, gave up, or stood down does not get played again if the tracker still
+    // holds a turn for it.
+    if (hasResolved(String(combatant?.id ?? ""))) return;
 
     log(`automation taking ${combatant?.name ?? "?"}'s turn`);
     void runTurnFor(combatant);

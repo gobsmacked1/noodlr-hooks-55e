@@ -54,6 +54,11 @@ export interface SystemPaths {
   altSpeeds: string[];
   senses: string[];
   challenge: string[];
+  /** Free-text alignment, read only to decide whether a creature is the merciful sort. */
+  alignment: string[];
+  /** Legendary action / resistance pools, when the system models them. */
+  legendaryActions: string[];
+  legendaryResistances: string[];
   /** Per-item fields. */
   itemActivation: string[];
   itemActivationLabel: string[];
@@ -73,6 +78,11 @@ export interface SystemPaths {
   /** Ammunition consumption: which item id is spent, if any. */
   itemConsumeTarget: string[];
   itemConsumeType: string[];
+  /** Recharge state: whether a "recharge 5-6" style feature is currently available. */
+  itemRechargeValue: string[];
+  itemRecharged: string[];
+  /** Whether an item is a reaction, a legendary action, and so on. */
+  itemActivationCost: string[];
 }
 
 // Candidates that work across the many systems built in dnd5e's image. Tried after a matching
@@ -88,6 +98,9 @@ const GENERIC: SystemPaths = {
   altSpeeds: ["system.attributes.movement", "system.attributes.speed.otherSpeeds"],
   senses: ["system.attributes.senses", "system.traits.senses", "system.perception.senses"],
   challenge: ["system.details.cr", "system.details.level.value", "system.details.level"],
+  alignment: ["system.details.alignment", "system.details.alignment.value", "system.alignment"],
+  legendaryActions: ["system.resources.legact.value"],
+  legendaryResistances: ["system.resources.legres.value"],
   itemActivation: ["system.activation.type", "system.actionType", "system.actions.0.type"],
   itemActivationLabel: ["labels.activation"],
   itemActionType: ["system.actionType", "system.action.type"],
@@ -103,6 +116,9 @@ const GENERIC: SystemPaths = {
   itemPrepared: ["system.preparation.prepared", "system.prepared.value"],
   itemConsumeTarget: ["system.consume.target"],
   itemConsumeType: ["system.consume.type"],
+  itemRechargeValue: ["system.recharge.value", "system.uses.recovery.0.formula"],
+  itemRecharged: ["system.recharge.charged"],
+  itemActivationCost: ["system.activation.cost", "system.activation.value"],
 };
 
 // Only the exceptions. dnd5e matches GENERIC and is listed for documentation value; pf2e differs

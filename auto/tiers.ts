@@ -17,34 +17,46 @@
 
 /** A named capability the planner checks before it will even score an option. */
 export type Consideration =
-  // --- Tier 1: it can act at all -------------------------------------------------------------
-  /** Use its main attack, bonus attack, innate/special features, and spell-likes on someone. */
+  // --- Tier 1: it can use everything on its own sheet ------------------------------------------
+  /**
+   * Its whole action economy, not just a swing: movement, action, bonus action, special features,
+   * spell-likes, reactions, rechargeable features, and legendary actions/resistances. Even an insect
+   * uses what it physically has — competence is about CHOOSING, not about access.
+   */
   | "basicAttacks"
   /** Bellow for help — alerts allies, no mechanical target selection behind it. */
   | "callForHelp"
-  // --- Tier 2: crude target preference --------------------------------------------------------
+  // --- Tier 2: crude target preference and a survival reflex -----------------------------------
   /** Pick on whoever LOOKS weakest (smallest/lowest apparent stature), not whoever is weakest. */
   | "targetApparentWeakest"
-  // --- Tier 3: self-preservation --------------------------------------------------------------
+  /** Break off and run when badly wounded. Instinct, not reasoning — a cornered rat flees. */
+  | "fleeWhenHurt"
+  // --- Tier 3: it understands other creatures ---------------------------------------------------
   /** Back away from opponents that have hurt it badly. */
   | "avoidStrongOpponents"
   /** Use carried items at all (thrown flask, caltrops, a wand it happens to hold). */
   | "useInventory"
-  /** Break off and run when badly wounded. */
-  | "fleeWhenHurt"
-  // --- Tier 4: it knows the rules apply to it too ---------------------------------------------
+  /** Spend its own turn making an ally's attempt more likely to land. */
+  | "helpAlly"
+  /** Grasp that it can stop fighting and live — throw down its weapon rather than die. */
+  | "surrender"
+  // --- Tier 4: it knows the rules apply to it too ------------------------------------------------
   /** Hide, break line of sight, use cover deliberately. */
   | "stealth"
   /** Feint, bluff, misdirect — anything the system models as a deception-style action. */
   | "deception"
-  /** Disarm, shove, grapple, trip: mechanical options that are not damage. */
+  /** Disarm, shove, grapple, trip, rage: mechanical options that are not simply damage. */
   | "controlManeuvers"
+  /** Counterspell, crowd control: spending magic on the shape of the fight rather than on damage. */
+  | "advancedCasting"
   /** Drink the potion, cast the heal on itself. */
   | "selfHealing"
-  /** Shoot from where the melee cannot reach, and back off when something closes. */
+  /** Shoot from where the melee cannot reach — and step away only when it is safe to do so. */
   | "keepDistance"
   /** Finish the turn behind something solid rather than in the open. */
   | "seekCover"
+  /** Spare a beaten party that has stopped fighting, if it is the sort of creature that would. */
+  | "mercy"
   // --- Tier 5: it has friends ------------------------------------------------------------------
   /** Heal, buff, or otherwise spend a turn improving an ally instead of itself. */
   | "supportAllies"
@@ -95,19 +107,23 @@ const LADDER: Array<{ descriptor: string; adds: Consideration[]; noise: number; 
       descriptor: "Insect-level intellect",
       adds: ["basicAttacks", "callForHelp"],
       noise: 0.85,
-      breadth: 2,
-    },
-    {
-      descriptor: "Animal instincts only",
-      adds: ["targetApparentWeakest"],
-      noise: 0.7,
+      // Few, but drawn from everything on the sheet. A creature that can only choose between its
+      // bite and its recharge breath is still choosing between them badly, which is the point.
       breadth: 3,
     },
     {
-      descriptor: "Child-like",
-      adds: ["avoidStrongOpponents", "useInventory", "fleeWhenHurt"],
-      noise: 0.55,
+      descriptor: "Animal instincts only",
+      // Fleeing moved down from tier 3 (user, 2026-08-02): running from pain is instinct, not
+      // reasoning. A cornered rat manages it.
+      adds: ["targetApparentWeakest", "fleeWhenHurt"],
+      noise: 0.7,
       breadth: 4,
+    },
+    {
+      descriptor: "Child-like",
+      adds: ["avoidStrongOpponents", "useInventory", "helpAlly", "surrender"],
+      noise: 0.55,
+      breadth: 5,
     },
     {
       descriptor: "Average intellect",
@@ -115,19 +131,20 @@ const LADDER: Array<{ descriptor: string; adds: Consideration[]; noise: number; 
         "stealth",
         "deception",
         "controlManeuvers",
+        "advancedCasting",
         "selfHealing",
         "keepDistance",
         "seekCover",
+        "mercy",
       ],
       noise: 0.45,
-      // Two more things to weigh than the tier had before the 2026-08-02 revision.
-      breadth: 7,
+      breadth: 8,
     },
     {
       descriptor: "Veteran / skilled professional",
       adds: ["supportAllies", "protectAllies"],
       noise: 0.35,
-      breadth: 8,
+      breadth: 9,
     },
     {
       descriptor: "Above-average intellect",

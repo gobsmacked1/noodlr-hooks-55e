@@ -10,9 +10,17 @@
 // arrives with GM approval on by default.
 
 import { log } from "../constants";
-import { planTurn, type PlanOption, type TurnPlan } from "./auto/planner";
+import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./auto/planner";
+import { resolveCombatant, type Outcome } from "./auto/encounter";
 import { noteDossierEvent } from "./dossier";
 import { TIER_CAVEAT } from "./auto/tiers";
+
+/** The three ways a creature leaves a fight alive. */
+const OUTCOMES: Partial<Record<PlanKind, Outcome>> = {
+  flee: "fled",
+  surrender: "surrendered",
+  mercy: "mercy",
+};
 
 /** One line the table reads: what the creature is doing, and to whom. */
 function describeIntent(plan: TurnPlan): string {
@@ -36,6 +44,12 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} backs out of melee and shoots ${target} with ${o.itemName}.`;
     case "hide":
       return `${me} slips ${o.spot?.travel ?? 0} ${units} ${o.spot?.bearing ?? "away"} and hides, out of ${o.observer ?? target}'s sight.`;
+    case "help":
+      return `${me} moves to help ${target}.`;
+    case "surrender":
+      return `${me} throws down its weapon and surrenders.`;
+    case "mercy":
+      return `${me} lowers its weapon and spares the party.`;
     case "flee":
       return `${me} breaks off and tries to escape.`;
     case "call":
@@ -107,6 +121,11 @@ export async function runTurnFor(combatant: any): Promise<void> {
     });
 
     noteDossierEvent(String(combatant.id ?? ""), `Round ${game.combat?.round ?? "?"}: ${intent}`);
+
+    // Three of the outcomes take a creature out of the fight for good, on terms the addendum
+    // spells out. Recording them is what lets an encounter end without a body count.
+    const outcome = OUTCOMES[plan.chosen.kind];
+    if (outcome) await resolveCombatant(combatant, outcome);
   } catch (err) {
     log("NPC turn planning failed:", err);
     ui.notifications?.error(game.i18n.format("NOODLR.Combat.Failed", { error: String(err) }));
