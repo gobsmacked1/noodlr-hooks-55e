@@ -112,7 +112,7 @@ function flagScopes(doc: any): string[] {
  * ingested later; the compact summary always goes to the console regardless.
  */
 export async function surveyActions(
-  opts: { saveToFile?: boolean; max?: number } = {},
+  opts: { saveToFile?: boolean; max?: number; asText?: boolean } = {},
 ): Promise<Survey> {
   const P = systemPaths();
   const survey: Survey = {
@@ -260,6 +260,9 @@ export async function surveyActions(
 
   console.group(`Noodlr | sheet survey: ${survey.actorsScanned} actors`);
   console.log(survey);
+  // A GM whose Foundry runs on another machine cannot easily fetch the written file, and copying a
+  // deeply nested console object is fiddly. `asText` prints one selectable block instead.
+  if (opts.asText) console.log(JSON.stringify(survey, null, 2));
   console.groupEnd();
 
   if (opts.saveToFile) {
