@@ -14,6 +14,7 @@
 
 import { log, MODULE_ID } from "../constants";
 import { saveMedia } from "../media/storage";
+import { prewarmCastSpells, readActions } from "./actions";
 import { pick, systemPaths } from "./system-profiles";
 
 /** Count occurrences of a value, tolerating undefined as its own bucket. */
@@ -80,8 +81,25 @@ interface Survey {
     castActivities: number;
     cachedSpellClones: number;
   };
-  /** Actors that yielded nothing readable: the population this whole subsystem fails on. */
-  actorsWithNoReadableAction: string[];
+  /** Actors carrying no activities at all. Rare, and usually a deliberately inert sheet. */
+  actorsWithNoActivities: string[];
+  /**
+   * What the planner's own reader makes of these sheets — the only numbers that predict behaviour.
+   *
+   * Everything above counts what is IN the data. This counts what survives being read, which is the
+   * distinction that matters: a census showing 366 attack activities means nothing if the reader
+   * discards them. `actorsWithNoTurnAction` is precisely the population that falls back to shouting for
+   * help, and until now it was inferred from play reports instead of measured.
+   */
+  reader: {
+    actionsRead: number;
+    kinds: Record<string, number>;
+    economies: Record<string, number>;
+    unavailable: number;
+    viaCastWrapper: number;
+    actorsWithNoTurnAction: string[];
+    actorsWithNoTurnActionCount: number;
+  };
   /** One real example per distinct activity type, for eyeballing the fields we do not tally. */
   examples: Record<string, unknown>;
 }
@@ -149,7 +167,16 @@ export async function surveyActions(
       castActivities: 0,
       cachedSpellClones: 0,
     },
-    actorsWithNoReadableAction: [],
+    actorsWithNoActivities: [],
+    reader: {
+      actionsRead: 0,
+      kinds: {},
+      economies: {},
+      unavailable: 0,
+      viaCastWrapper: 0,
+      actorsWithNoTurnAction: [],
+      actorsWithNoTurnActionCount: 0,
+    },
     examples: {},
   };
 
@@ -165,6 +192,8 @@ export async function surveyActions(
   const spellMethods = new Tally();
   const languageShapes = new Tally();
   const creatureTypes = new Tally();
+  const readerKinds = new Tally();
+  const readerEconomies = new Tally();
 
   const max = opts.max ?? Number.POSITIVE_INFINITY;
   for (const actor of (game as any).actors ?? []) {
@@ -238,7 +267,27 @@ export async function surveyActions(
         }
       }
     }
-    if (readable === 0) survey.actorsWithNoReadableAction.push(String(actor?.name ?? "?"));
+    if (readable === 0) survey.actorsWithNoActivities.push(String(actor?.name ?? "?"));
+
+    // Now read the sheet the way a turn does. The prewarm is what lets a caster's compendium-backed
+    // spells resolve, and it caches, so 193 actors cost one load per distinct spell.
+    await prewarmCastSpells(actor);
+    const actions = readActions(actor);
+    survey.reader.actionsRead += actions.length;
+    let turnOptions = 0;
+    for (const action of actions) {
+      readerKinds.add(action.kind);
+      readerEconomies.add(action.economy);
+      if (!action.available) survey.reader.unavailable++;
+      if (action.viaCast) survey.reader.viaCastWrapper++;
+      if (action.available && (action.economy === "action" || action.economy === "bonus"))
+        turnOptions++;
+    }
+    if (turnOptions === 0) {
+      survey.reader.actorsWithNoTurnActionCount++;
+      if (survey.reader.actorsWithNoTurnAction.length < 25)
+        survey.reader.actorsWithNoTurnAction.push(String(actor?.name ?? "?"));
+    }
   }
 
   survey.itemTypes = itemTypes.top();
@@ -255,8 +304,10 @@ export async function surveyActions(
   survey.spellMethods = spellMethods.top();
   survey.languageShapes = languageShapes.top();
   survey.creatureTypes = creatureTypes.top();
+  survey.reader.kinds = readerKinds.top();
+  survey.reader.economies = readerEconomies.top();
   // A hundred names is not a finding; a count and a handful of examples is.
-  survey.actorsWithNoReadableAction = survey.actorsWithNoReadableAction.slice(0, 20);
+  survey.actorsWithNoActivities = survey.actorsWithNoActivities.slice(0, 20);
 
   console.group(`Noodlr | sheet survey: ${survey.actorsScanned} actors`);
   console.log(survey);
