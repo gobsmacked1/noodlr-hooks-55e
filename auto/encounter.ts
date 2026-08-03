@@ -185,10 +185,11 @@ async function announceEncounterEndIfOver(combat: any): Promise<void> {
     if (!dead && !outcome) standing++;
 
     if (outcome === "mercy") spared = true;
-    const worth = isDnd5e() ? xpForActor(any.actor) : 0;
-    // Escaping halves the award; surrendering and dying are both worth the full value.
-    if (outcome === "fled") xp += Math.floor(worth / 2);
-    else if (dead || outcome === "surrendered") xp += worth;
+    // Revised 2026-08-02: escaping is worth nothing, not half. A creature that got away leaves no
+    // body to count, and a party often drives enemies off ON PURPOSE — intimidation, pity, keeping a
+    // faction's regard — so paying them for it would be paying them for a fight they chose not to
+    // have. The tally is now literally what is left on the field: the dead, and those who yielded.
+    if (dead || outcome === "surrendered") xp += isDnd5e() ? xpForActor(any.actor) : 0;
   }
   if (hostiles === 0 || standing > 0) return;
 
