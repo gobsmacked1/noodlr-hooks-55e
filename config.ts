@@ -36,6 +36,26 @@ export function registerCombatSettings(): void {
     type: Number,
     default: 6,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.moveSpeed, {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 0,
+  });
+}
+
+/**
+ * Grid squares per second an automated creature slides across the canvas; 0 means "leave Foundry's".
+ *
+ * A creature that arrives instantly reads as a teleport, and players call foul on a Dire Wolf that
+ * blinks 30 ft (user's report, 2026-08-04). The default is 0 rather than a number of my own choosing
+ * because Foundry already has an animation pace and overriding it by default would be presumptuous;
+ * this exists for tables that want the walk slowed down so it can be followed.
+ */
+export function getMoveSpeed(): number {
+  const raw = Number(game.settings.get(MODULE_ID, COMBAT_SETTINGS.moveSpeed));
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return Math.min(20, Math.max(1, raw));
 }
 
 /**

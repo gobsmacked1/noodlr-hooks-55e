@@ -12,6 +12,7 @@
 //   - Nothing here touches hit points, resources, or the turn — movement is the only side effect.
 
 import { log } from "../../constants";
+import { getMoveSpeed } from "../config";
 import { blocked, centerOf, insideScene, occupied, type Point } from "./positioning";
 
 function gridSize(): number {
@@ -166,6 +167,8 @@ export async function moveTo(token: any, point: Point): Promise<number> {
   const action = movementAction(token);
   if (action) waypoint.action = action;
   const ignoreWalls = unconstrained();
+  const speed = getMoveSpeed();
+  const animation = speed > 0 ? { movementSpeed: speed } : undefined;
 
   let completed: unknown;
   try {
@@ -178,6 +181,7 @@ export async function moveTo(token: any, point: Point): Promise<number> {
         constrainOptions: { ignoreCost: true, ignoreWalls },
         autoRotate: false,
         showRuler: false,
+        ...(animation ? { animation } : {}),
       }),
     );
   } catch (err) {
@@ -199,12 +203,30 @@ export async function moveTo(token: any, point: Point): Promise<number> {
   const after = sourcePosition(doc);
   // A pixel of drift is rounding, not movement.
   if (Math.hypot(after.x - before.x, after.y - before.y) > 1) {
+    await settleAnimation(doc);
     const landed = centerOf(token) ?? point;
     return Math.round(toUnits(Math.hypot(landed.x - origin.x, landed.y - origin.y)));
   }
 
   reportRefusal(doc, completed, waypoint);
   return 0;
+}
+
+/**
+ * Wait for the token to finish sliding before the turn carries on.
+ *
+ * The document's coordinates update before the sprite arrives, so without this the attack card and the
+ * spoken line land while the creature is still visibly mid-stride, and the turn-pace floor measures a
+ * turn that has not finished happening. Bounded, and silent about APIs it does not recognise: an
+ * unknown animation shape means no wait, which is exactly the behaviour before this existed.
+ */
+async function settleAnimation(doc: any): Promise<void> {
+  const contexts = doc?.object?.animationContexts;
+  if (!(contexts?.size > 0)) return;
+  for (let i = 0; i < 100; i++) {
+    if (!(contexts.size > 0)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 const TIMED_OUT = Symbol("timed-out");

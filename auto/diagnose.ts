@@ -46,13 +46,23 @@ function snapshot(doc: any): { x: number; y: number; elevation: number } {
   };
 }
 
+interface AttemptReport {
+  attempt: string;
+  moved: boolean;
+  returned: unknown;
+  constrained: unknown;
+  state: unknown;
+  from: string;
+  to: string;
+}
+
 /** One move attempt, reported in full. Returns whether the token's stored position actually changed. */
 async function attempt(
   doc: any,
   label: string,
   waypoint: Record<string, unknown>,
   options: Record<string, unknown>,
-): Promise<boolean> {
+): Promise<AttemptReport> {
   const before = snapshot(doc);
   let completed: unknown;
   let threw: unknown;
@@ -65,16 +75,15 @@ async function attempt(
     threw = err;
   }
   const after = snapshot(doc);
-  const moved = Math.hypot(after.x - before.x, after.y - before.y) > 1;
-  console.log(`  ${label}:`, {
-    moved,
+  return {
+    attempt: label,
+    moved: Math.hypot(after.x - before.x, after.y - before.y) > 1,
     returned: threw ? `THREW: ${String((threw as any)?.message ?? threw)}` : completed,
     constrained: doc?.movement?.constrained,
     state: doc?.movement?.state,
     from: `${before.x},${before.y}@${before.elevation}`,
     to: `${after.x},${after.y}@${after.elevation}`,
-  });
-  return moved;
+  };
 }
 
 /**
@@ -85,46 +94,50 @@ async function attempt(
  * the refusal is coming from a module hook rather than from geometry, which the `noHook` attempt then
  * confirms.
  */
-export async function testMove(): Promise<void> {
+export async function testMove(): Promise<Record<string, unknown> | undefined> {
   const token: any = (canvas as any)?.tokens?.controlled?.[0];
   if (!token) {
     ui.notifications?.warn("Select a token first, then run testMove() again.");
-    return;
+    return undefined;
   }
   const doc = token.document ?? token;
   const grid = Number((canvas as any)?.grid?.size) || 100;
   const origin = centerOf(token);
   if (!origin) {
     console.warn("Noodlr | that token has no readable position");
-    return;
+    return undefined;
   }
   const start = snapshot(doc);
 
-  console.group(`Noodlr | movement test: ${doc?.name ?? "token"}`);
-  console.log("world:", {
-    foundry: game.version,
-    system: `${game.system?.id}@${(game.system as any)?.version}`,
-    scene: (canvas as any)?.scene?.name,
-    gridSize: grid,
-    gridDistance: (canvas as any)?.grid?.distance,
-  });
-  console.log("token:", {
-    ...start,
-    width: doc?.width,
-    height: doc?.height,
-    hidden: doc?.hidden,
-    speeds: doc?.actor?.system?.attributes?.movement,
-    // The setting that does NOT apply to programmatic moves in core, which Noodlr now mirrors itself.
-    unconstrainedMovementSetting: (() => {
-      try {
-        return game.settings.get("core", "unconstrainedMovement");
-      } catch {
-        return "(unreadable)";
-      }
-    })(),
-  });
-  const suspects = activeSuspects();
-  console.log("movement-related modules active:", suspects.length ? suspects : "none detected");
+  // Everything is collected into one object and printed as text at the end. The first version wrote
+  // straight to a console group, and the report that came back from play was the returned Promise
+  // expanded in the inspector — the findings themselves were not copyable (2026-08-04).
+  const report: Record<string, unknown> = {
+    token: {
+      name: doc?.name,
+      ...start,
+      width: doc?.width,
+      height: doc?.height,
+      hidden: doc?.hidden,
+      speeds: doc?.actor?.system?.attributes?.movement,
+    },
+    world: {
+      foundry: game.version,
+      system: `${game.system?.id}@${(game.system as any)?.version}`,
+      scene: (canvas as any)?.scene?.name,
+      gridSize: grid,
+      gridDistance: (canvas as any)?.grid?.distance,
+      // The setting that does NOT apply to programmatic moves in core, which Noodlr now mirrors itself.
+      unconstrainedMovementSetting: (() => {
+        try {
+          return game.settings.get("core", "unconstrainedMovement");
+        } catch {
+          return "(unreadable)";
+        }
+      })(),
+    },
+    modulesThatTouchMovement: activeSuspects(),
+  };
 
   // What our own pre-flight thinks of the eight neighbouring squares.
   const compass: Array<[string, number, number]> = [
@@ -153,66 +166,55 @@ export async function testMove(): Promise<void> {
   console.log("neighbouring squares:", neighbours);
 
   const target = firstFree ?? { x: origin.x + grid, y: origin.y };
-  if (!firstFree)
-    console.log("no square passed our pre-flight; testing east anyway, since core decides");
-
   const corner = {
     x: Math.round(target.x - (grid * (Number(doc?.width) || 1)) / 2),
     y: Math.round(target.y - (grid * (Number(doc?.height) || 1)) / 2),
   };
   const waypoint = { ...corner, elevation: start.elevation, explicit: true, checkpoint: true };
 
-  console.log("attempts (each is a real move, and the token is put back afterwards):");
-  const ok =
-    (await attempt(doc, "walk, walls enforced", waypoint, {
+  // Stop at the first attempt that works: the point is to find the LEAST permissive call that moves
+  // this token, because that is what names the cause.
+  const attempts: AttemptReport[] = [];
+  const escalation: Array<[string, Record<string, unknown>, Record<string, unknown>]> = [
+    ["walk, walls enforced", waypoint, { constrainOptions: { ignoreCost: true } }],
+    [
+      "walk, walls ignored",
+      waypoint,
+      { constrainOptions: { ignoreCost: true, ignoreWalls: true } },
+    ],
+    ["displace (skips wall testing)", { ...waypoint, action: "displace" }, {}],
+    ["displace, hooks disabled", { ...waypoint, action: "displace" }, { noHook: true }],
+  ];
+  for (const [label, point, options] of escalation) {
+    const result = await attempt(doc, label, point, {
       method: "api",
-      constrainOptions: { ignoreCost: true },
       showRuler: false,
-    })) ||
-    (await attempt(doc, "walk, walls ignored", waypoint, {
-      method: "api",
-      constrainOptions: { ignoreCost: true, ignoreWalls: true },
-      showRuler: false,
-    })) ||
-    (await attempt(
-      doc,
-      "displace (skips wall testing)",
-      { ...waypoint, action: "displace" },
-      {
-        method: "api",
-        showRuler: false,
-      },
-    )) ||
-    (await attempt(
-      doc,
-      "displace, hooks disabled",
-      { ...waypoint, action: "displace" },
-      {
-        method: "api",
-        showRuler: false,
-        noHook: true,
-      },
-    ));
+      ...options,
+    });
+    attempts.push(result);
+    if (result.moved) break;
+  }
+  report.attempts = attempts;
 
-  if (ok) {
+  const winner = attempts.find((a) => a.moved);
+  if (winner) {
+    // Instant on purpose: this is a diagnostic putting things back, not a creature walking.
     try {
       await doc.move(
         { ...start, action: "displace", explicit: true, checkpoint: true },
-        {
-          method: "api",
-          showRuler: false,
-        },
+        { method: "api", showRuler: false },
       );
     } catch (err) {
-      console.warn("could not return the token to its starting square:", err);
+      console.warn("Noodlr | could not return the token to its starting square:", err);
     }
   }
-  console.log(
-    ok
-      ? "RESULT: the token moved. The first attempt that succeeded above names the cause."
-      : "RESULT: nothing moved it, not even displace with hooks disabled. That points at permissions or a wrapped update, not geometry.",
-  );
-  console.groupEnd();
+  report.result = winner
+    ? `MOVED on "${winner.attempt}" - the least permissive call that works, so that names the cause.`
+    : "NOTHING moved it, not even displace with hooks disabled. That points at permissions or a wrapped update, not geometry.";
+
+  console.log("Noodlr | movement test - copy everything below this line:");
+  console.log(JSON.stringify(report, null, 2));
+  return report;
 }
 
 /**
