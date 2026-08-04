@@ -73,37 +73,92 @@ async function endAutomatedTurn(combat: any, playedId: string, startedAt: number
   }
 }
 
+/**
+ * Has every combatant still in the fight got an initiative?
+ *
+ * The hard lesson behind this (user's test, 2026-08-04): automatic engagement starts a combat in which
+ * only the monsters have rolled, so the tracker's first turn is a monster and automation cheerfully
+ * played the whole round — the player was unconscious before ever rolling. Turn order is not meaningful
+ * until everyone has a number, and acting on a provisional order is not a pacing problem, it is cheating.
+ * Defeated combatants are excluded so a corpse in the tracker cannot deadlock the fight.
+ */
+export function initiativeSettled(combat: any): boolean {
+  for (const combatant of combat?.combatants ?? []) {
+    if (combatant?.isDefeated) continue;
+    if (combatant?.initiative === null || combatant?.initiative === undefined) return false;
+  }
+  return true;
+}
+
+/** The turn currently being played, as combat:round:combatant, so no route plays it twice. */
+let playing: string | null = null;
+
+/** Whether we have already said we are waiting, so the console does not fill up with it. */
+let waiting = false;
+
+/**
+ * Play the current creature's turn, if it is ours to play and the fight is ready for it.
+ *
+ * Reached from two directions — the tracker advancing, and the last straggler rolling initiative — so
+ * it is guarded against playing the same turn twice.
+ */
+function takeTurn(combat: any): void {
+  if (!combat?.started || !isPrimaryGM()) return;
+
+  if (!initiativeSettled(combat)) {
+    if (!waiting) {
+      waiting = true;
+      log("automation is holding: not every combatant has rolled initiative yet");
+    }
+    return;
+  }
+  waiting = false;
+
+  const combatant = combat.combatant;
+  if (!shouldAutomate(combatant)) {
+    // A turn Noodlr does not play — a player's, or a creature the GM kept — is what the runaway
+    // brake is counting the absence of.
+    consecutive = 0;
+    return;
+  }
+
+  const id = String(combatant?.id ?? "");
+  const token = `${combat.id}:${combat.round}:${id}`;
+  if (playing === token) return;
+  playing = token;
+
+  // A creature that ran, gave up, or stood down does not get played again if the tracker still
+  // holds a turn for it. It still needs skipping past, though, or the fight stalls on it.
+  const startedAt = Date.now();
+  if (hasResolved(id)) {
+    // Nothing happened, so nothing needs watching: skip a spent creature without holding the table.
+    void endAutomatedTurn(combat, id, Date.now());
+    return;
+  }
+
+  log(`automation taking ${combatant?.name ?? "?"}'s turn`);
+  consecutive++;
+  void runTurnFor(combatant).then(() => endAutomatedTurn(combat, id, startedAt));
+}
+
 export function registerAutomationTurnHook(): void {
   Hooks.on("deleteCombat", () => {
     consecutive = 0;
+    playing = null;
+    waiting = false;
   });
 
   Hooks.on("updateCombat", (combat: any, changed: any) => {
     // Only when the turn actually moved: unrelated tracker edits (initiative fixes, a token added
     // mid-fight) must not re-run the current creature.
     if (!("turn" in (changed ?? {})) && !("round" in (changed ?? {}))) return;
-    if (!combat?.started) return;
-    if (!isPrimaryGM()) return;
+    takeTurn(combat);
+  });
 
-    const combatant = combat.combatant;
-    if (!shouldAutomate(combatant)) {
-      // A turn Noodlr does not play — a player's, or a creature the GM kept — is what the runaway
-      // brake is counting the absence of.
-      consecutive = 0;
-      return;
-    }
-    // A creature that ran, gave up, or stood down does not get played again if the tracker still
-    // holds a turn for it. It still needs skipping past, though, or the fight stalls on it.
-    const id = String(combatant?.id ?? "");
-    const startedAt = Date.now();
-    if (hasResolved(id)) {
-      // Nothing happened, so nothing needs watching: skip a spent creature without holding the table.
-      void endAutomatedTurn(combat, id, Date.now());
-      return;
-    }
-
-    log(`automation taking ${combatant?.name ?? "?"}'s turn`);
-    consecutive++;
-    void runTurnFor(combatant).then(() => endAutomatedTurn(combat, id, startedAt));
+  // The other way in: a fight that was held waiting for initiative becomes playable the moment the last
+  // straggler rolls. Without this the tracker sits on turn one until somebody nudges it by hand.
+  Hooks.on("updateCombatant", (combatant: any, changed: any) => {
+    if (!("initiative" in (changed ?? {}))) return;
+    takeTurn(combatant?.parent);
   });
 }

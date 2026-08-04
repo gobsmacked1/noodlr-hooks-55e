@@ -32,6 +32,7 @@ import { log, MODULE_ID } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
 import { readHp } from "../tracker";
 import { getCombatAutomation, isAutoEngageEnabled } from "../config";
+import { initiativeSettled } from "./hooks";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
 const POLL_MS = 6000;
@@ -43,6 +44,9 @@ const POLL_MS = 6000;
  * next encounter immediately, and the GM cannot get a word in.
  */
 const PEACE_MS = 60_000;
+
+/** How long the players are given to roll their own initiative before the fight starts without them. */
+const INITIATIVE_WAIT_MS = 60_000;
 
 /** Sight range assumed for a creature whose token has vision switched off and no stated senses. */
 const ASSUMED_SIGHT = 60;
@@ -310,6 +314,39 @@ function hasLineOfSight(spotter: any, target: any): boolean {
 }
 
 /**
+ * Hold until everyone has an initiative, or until the table has clearly stopped rolling.
+ *
+ * The wait is bounded because an absent player must not be able to freeze an encounter indefinitely; a
+ * minute is long enough for someone to notice the tracker and short enough that nobody is left staring.
+ * When it expires, the stragglers are rolled for and the fight begins — announced, because a roll made
+ * on a player's behalf is something they are entitled to know about.
+ *
+ * Returns false when the encounter went away while we waited, in which case there is nothing to start.
+ */
+async function waitForInitiative(combat: any): Promise<boolean> {
+  const deadline = Date.now() + INITIATIVE_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (!combat?.id || !(game.combats as any)?.get?.(combat.id)) return false;
+    if (initiativeSettled(combat)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  if (!combat?.id || !(game.combats as any)?.get?.(combat.id)) return false;
+  if (initiativeSettled(combat)) return true;
+
+  log("perception: nobody rolled in time; rolling the stragglers so the fight can start");
+  const ChatMessage = (globalThis as any).ChatMessage;
+  await ChatMessage.create({
+    content: `<p><em>${game.i18n.localize("NOODLR.Combat.AutoEngage.RolledFor")}</em></p>`,
+  });
+  try {
+    await combat.rollAll();
+  } catch (err) {
+    log("could not roll the remaining initiatives:", err);
+  }
+  return true;
+}
+
+/**
  * Start the fight.
  *
  * Everything hostile and everything player-owned on the scene joins, not just the pair that noticed
@@ -363,7 +400,6 @@ async function engage(spotter: any, target: any): Promise<void> {
     // at the start of a fight, and it is not the work the GM asked to be relieved of — they asked not to
     // have to roll for a dozen monsters and press "begin". The players' own buttons are waiting for them.
     await combat.rollNPC();
-    await combat.startCombat();
 
     const ChatMessage = (globalThis as any).ChatMessage;
     await ChatMessage.create({
@@ -372,6 +408,13 @@ async function engage(spotter: any, target: any): Promise<void> {
         `<strong>${foundry.utils.escapeHTML(targetName)}</strong>. Roll for initiative!</p>`,
       flags: { [MODULE_ID]: { autoEngage: true } },
     });
+
+    // Ask before beginning, not after. Starting a fight in which only the monsters have rolled puts a
+    // monster at the top of a provisional order, and the round that follows is not the round the dice
+    // would have given (user's test, 2026-08-04: every hostile acted and the player was unconscious
+    // before ever rolling). The encounter is visible and everyone's roll button is live while we wait.
+    if (!(await waitForInitiative(combat))) return;
+    await combat.startCombat();
     Hooks.callAll("noodlrCombatInitiated", spotter, target);
   } catch (err) {
     log("could not start combat automatically:", err);
