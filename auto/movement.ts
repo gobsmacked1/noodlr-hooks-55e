@@ -120,13 +120,18 @@ function unconstrained(): boolean {
 }
 
 /**
- * How long to wait for a move before giving up on it.
+ * How long a move may make no visible progress before it is abandoned.
  *
  * A movement PAUSED by a region behaviour (Terrain Mapper's stairs and elevators do this) never
  * resolves its promise at all — so an unguarded await would hang the creature's turn, and with it the
  * whole automated initiative chain, for the rest of the session.
+ *
+ * This is a STALL watchdog, not a deadline. The first version was a flat 8-second timeout, which was
+ * fine until the movement-speed setting arrived: a creature crossing twelve squares at one square per
+ * second takes twelve seconds legitimately, and a deadline would have killed the walk mid-stride and
+ * reported it as a hang. Time spent visibly animating does not count against this.
  */
-const MOVE_TIMEOUT_MS = 8000;
+const MOVE_STALL_MS = 15000;
 
 /**
  * Move a token so its centre lands at `point`. Returns the distance travelled in scene units.
@@ -175,7 +180,8 @@ export async function moveTo(token: any, point: Point): Promise<number> {
     // `ignoreCost` because the planner already budgeted this creature's movement in scene units;
     // letting terrain cost truncate the path as well would silently halve every move across rough
     // ground. Walls are enforced unless this GM has told Foundry they should not be.
-    completed = await withTimeout(
+    completed = await awaitMove(
+      doc,
       doc.move(waypoint, {
         method: "api",
         constrainOptions: { ignoreCost: true, ignoreWalls },
@@ -223,21 +229,56 @@ export async function moveTo(token: any, point: Point): Promise<number> {
 async function settleAnimation(doc: any): Promise<void> {
   const contexts = doc?.object?.animationContexts;
   if (!(contexts?.size > 0)) return;
-  for (let i = 0; i < 100; i++) {
-    if (!(contexts.size > 0)) return;
+  // Generous, because the movement-speed setting can legitimately make a long walk take many seconds.
+  // This waits for a slide that is genuinely happening; it is not a budget for one.
+  const deadline = Date.now() + 60000;
+  while (contexts.size > 0 && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
 const TIMED_OUT = Symbol("timed-out");
 
-function withTimeout<T>(promise: Promise<T>): Promise<T | typeof TIMED_OUT> {
-  return Promise.race([
-    promise,
-    new Promise<typeof TIMED_OUT>((resolve) =>
-      setTimeout(() => resolve(TIMED_OUT), MOVE_TIMEOUT_MS),
-    ),
-  ]);
+/** True while the token is visibly sliding, or core still considers the movement live. */
+function moveInProgress(doc: any): boolean {
+  if ((doc?.object?.animationContexts?.size ?? 0) > 0) return true;
+  const state = String(doc?.movement?.state ?? "");
+  return state === "pending" || state === "planned";
+}
+
+/**
+ * Await a move, giving up only once it stops making progress.
+ *
+ * Resolves with whatever `move()` returned, or TIMED_OUT if the movement paused or went quiet. A paused
+ * movement is abandoned at once rather than waited out, because its promise is never going to settle.
+ */
+function awaitMove<T>(doc: any, promise: Promise<T>): Promise<T | typeof TIMED_OUT> {
+  let settled = false;
+  const tracked = promise.then(
+    (value) => {
+      settled = true;
+      return value;
+    },
+    (error) => {
+      settled = true;
+      throw error;
+    },
+  );
+
+  const watchdog = (async (): Promise<typeof TIMED_OUT> => {
+    let idle = 0;
+    while (!settled) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (settled) break;
+      if (String(doc?.movement?.state ?? "") === "paused") return TIMED_OUT;
+      idle = moveInProgress(doc) ? 0 : idle + 250;
+      if (idle >= MOVE_STALL_MS) return TIMED_OUT;
+    }
+    // The real result won the race. Never resolve, so this cannot overtake it.
+    return new Promise<never>(() => {});
+  })();
+
+  return Promise.race([tracked, watchdog]);
 }
 
 /**
