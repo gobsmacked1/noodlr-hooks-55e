@@ -11,6 +11,7 @@
 
 import { readHp } from "../tracker";
 import { pickNumber, systemPaths } from "../system-profiles";
+import { readLocomotion, type Locomotion } from "./locomotion";
 
 export interface BoardActor {
   combatantId: string;
@@ -27,7 +28,9 @@ export interface BoardActor {
   hpValue: number | null;
   /** Grid squares occupied (width x height) — the crude "how big does it look" signal. */
   footprint: number;
-  /** Distance from the acting creature, in the scene's own units. */
+  /** Height above the scene floor, in the scene's units. Flyers and ledges make this matter. */
+  elevation: number;
+  /** Horizontal distance from the acting creature, in the scene's own units. */
   distance: number;
   defeated: boolean;
   /** How many spell-like items the creature carries: the proxy for "that one is artillery". */
@@ -42,6 +45,8 @@ export interface Board {
   units: string;
   /** How far the acting creature can move this turn, in the same units; null when unknown. */
   speed: number | null;
+  /** Which modes it travels by, and which one the budget above belongs to. */
+  locomotion: Locomotion;
 }
 
 function tokenOf(combatant: any): any {
@@ -123,6 +128,7 @@ function describeActor(combatant: any, selfToken: any, selfDisposition: number):
     hpFraction: hp && hp.max > 0 ? Math.max(0, Math.min(1, hp.value / hp.max)) : null,
     hpValue: hp ? hp.value : null,
     footprint: width * height,
+    elevation: Number((token as any)?.document?.elevation ?? (token as any)?.elevation ?? 0) || 0,
     distance: selfToken === token ? 0 : measure(selfToken, token),
     defeated: Boolean(combatant?.isDefeated),
     spellCount,
@@ -152,11 +158,17 @@ export function readBoard(combatant: any): Board | null {
   enemies.sort((a, b) => a.distance - b.distance);
   allies.sort((a, b) => a.distance - b.distance);
 
+  // The budget is the speed of the mode this creature actually travels by, not its walk speed. A
+  // wyvern was being handed its 20 ft walk instead of its 80 ft fly, and a creature with no land speed
+  // at all — most aquatic monsters — read as 0 and could not take a step.
+  const locomotion = readLocomotion(combatant.actor, P);
+
   return {
     self,
     enemies,
     allies,
     units: String((canvas as any)?.scene?.grid?.units ?? "ft"),
-    speed: pickNumber(combatant.actor, P.speed),
+    speed: locomotion.speed > 0 ? locomotion.speed : pickNumber(combatant.actor, P.speed),
+    locomotion,
   };
 }

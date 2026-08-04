@@ -42,6 +42,24 @@ export function registerCombatSettings(): void {
     type: Number,
     default: 0,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.autoEngage, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+}
+
+/**
+ * Do hostile creatures start the fight themselves when they notice the party?
+ *
+ * On by default, but only ever consulted when Combat Automation is already Full or Partial — a GM who
+ * turned automation on has asked for the mechanical work to be taken off their hands, and stopping to
+ * press "roll initiative" and "begin combat" is exactly the sort of work they meant (user, 2026-08-04).
+ * It remains a separate switch because ambushes and set-piece openings are sometimes the GM's to time.
+ */
+export function isAutoEngageEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoEngage));
 }
 
 /**

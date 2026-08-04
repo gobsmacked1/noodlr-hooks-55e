@@ -13,7 +13,16 @@
 
 import { log } from "../../constants";
 import { getMoveSpeed } from "../config";
+import { actionFor, readLocomotion } from "./locomotion";
 import { blocked, centerOf, insideScene, occupied, type Point } from "./positioning";
+
+/** Optional detail a caller knows and `moveTo` cannot work out for itself. */
+export interface MoveIntent {
+  /** Height to arrive at. Omitted means "stay at the height you are". */
+  elevation?: number;
+  /** Movement remaining, in scene units, so core can stop the path when the cost runs out. */
+  budget?: number;
+}
 
 function gridSize(): number {
   return Number((canvas as any)?.grid?.size) || 100;
@@ -75,21 +84,13 @@ function cornerFor(token: any, point: Point): { point: Point; snapped: boolean }
  * it should be crossing. An action the core does not recognise makes `move()` throw, so anything
  * unrecognised is omitted and the core default applies.
  */
-function movementAction(token: any): string | undefined {
-  const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
-  if (!actions) return undefined;
-
+function movementAction(token: any, verticalChange: boolean): string | undefined {
   const doc = token?.document ?? token;
-  const modes: any = doc?.actor?.system?.attributes?.movement;
-  if (modes) {
-    if (Number(modes.walk) > 0) return actions.walk ? "walk" : undefined;
-    // No walk speed: whatever it does instead, in the order a creature would prefer it.
-    for (const mode of ["fly", "swim", "burrow", "climb"]) {
-      if (Number(modes[mode]) > 0 && actions[mode]) return mode;
-    }
-  }
-  return actions.walk ? "walk" : undefined;
+  return actionFor(readLocomotion(doc?.actor), verticalChange);
 }
+
+/** A height difference smaller than this is rounding, not a climb. */
+const VERTICAL_TOLERANCE = 1;
 
 /**
  * The token's current elevation, carried through every move.
@@ -145,7 +146,7 @@ const MOVE_STALL_MS = 15000;
  * to go, so a creature stopped short by a wall reports the shorter distance — and 0 means it did not
  * move at all, which the caller is expected to act on rather than assume away.
  */
-export async function moveTo(token: any, point: Point): Promise<number> {
+export async function moveTo(token: any, point: Point, intent: MoveIntent = {}): Promise<number> {
   const origin = centerOf(token);
   const doc = token?.document ?? token;
   if (!origin) {
@@ -160,31 +161,41 @@ export async function moveTo(token: any, point: Point): Promise<number> {
   const { point: corner, snapped } = cornerFor(token, point);
   const before = sourcePosition(doc);
 
+  const from = elevationOf(doc);
+  const to = Number.isFinite(intent.elevation as number) ? (intent.elevation as number) : from;
+  const climbing = Math.abs(to - from) > VERTICAL_TOLERANCE;
+
   const waypoint: Record<string, unknown> = {
     // Top-left pixel coordinates, as integers. Not centres, not grid offsets.
     x: Math.round(corner.x),
     y: Math.round(corner.y),
-    elevation: elevationOf(doc),
+    elevation: to,
     snapped,
     explicit: true,
     checkpoint: true,
   };
-  const action = movementAction(token);
+  const action = movementAction(token, climbing);
   if (action) waypoint.action = action;
   const ignoreWalls = unconstrained();
   const speed = getMoveSpeed();
   const animation = speed > 0 ? { movementSpeed: speed } : undefined;
 
+  // Let core enforce the budget in COST rather than distance, when it is known. That is the only way
+  // difficult terrain is honoured: 30 ft of movement buys 15 ft of bog, and core already knows the
+  // multipliers for every movement action — including that a flyer is not paying them. The previous
+  // `ignoreCost: true` bought immunity from that accounting, which was quietly a rules violation.
+  const constrainOptions: Record<string, unknown> = { ignoreWalls };
+  if (Number.isFinite(intent.budget as number) && (intent.budget as number) > 0) {
+    constrainOptions.maxCost = intent.budget;
+  }
+
   let completed: unknown;
   try {
-    // `ignoreCost` because the planner already budgeted this creature's movement in scene units;
-    // letting terrain cost truncate the path as well would silently halve every move across rough
-    // ground. Walls are enforced unless this GM has told Foundry they should not be.
     completed = await awaitMove(
       doc,
       doc.move(waypoint, {
         method: "api",
-        constrainOptions: { ignoreCost: true, ignoreWalls },
+        constrainOptions,
         autoRotate: false,
         showRuler: false,
         ...(animation ? { animation } : {}),
@@ -391,7 +402,27 @@ export async function moveToward(
       },
     })),
     `toward ${describe(target?.document ?? target)}`,
+    { budget, elevation: reachableElevation(token, target) },
   );
+}
+
+/**
+ * The height to arrive at when moving to meet something, or undefined to stay put vertically.
+ *
+ * Only a creature that can fly rises to meet a target above it — a wolf cannot climb into the air to
+ * bite a hovering wizard, and pretending otherwise would move a token somewhere the rules forbid. When
+ * the difference is small enough to be a stair rather than a flight, it is matched regardless, so a
+ * creature does not refuse to step up onto the barbican it is standing beside.
+ */
+function reachableElevation(token: any, target: any): number | undefined {
+  const selfDoc = token?.document ?? token;
+  const targetDoc = target?.document ?? target;
+  const mine = elevationOf(selfDoc);
+  const theirs = elevationOf(targetDoc);
+  if (Math.abs(theirs - mine) <= VERTICAL_TOLERANCE) return undefined;
+
+  const loco = readLocomotion(selfDoc?.actor);
+  return (loco.modes.fly ?? 0) > 0 || (loco.modes.climb ?? 0) > 0 ? theirs : undefined;
 }
 
 /**
@@ -407,6 +438,7 @@ async function stepTo(
   origin: Point,
   candidates: Array<{ label: string; point: Point }>,
   intent: string,
+  move: MoveIntent = {},
 ): Promise<number> {
   const who = describe(token?.document ?? token);
   const rejected: string[] = [];
@@ -425,7 +457,7 @@ async function stepTo(
     // elevation: tokens on top of a structure read as blocked by the walls of the rooms beneath them,
     // so every candidate was discarded before core ever got a say. Core is asked regardless now.
     const wall = blocked(origin, point, "move") === true ? " (our wall test says blocked)" : "";
-    const travelled = await moveTo(token, point);
+    const travelled = await moveTo(token, point, move);
     if (travelled > 0) return travelled;
     rejected.push(`${label}: refused${wall}`);
   }
@@ -477,6 +509,7 @@ export async function moveAwayFrom(
       },
     })),
     `away from ${describe(target?.document ?? target)}`,
+    { budget },
   );
 }
 
@@ -524,5 +557,6 @@ export async function moveOffField(token: any, budget: number): Promise<number> 
       };
     }),
     "off the field",
+    { budget },
   );
 }

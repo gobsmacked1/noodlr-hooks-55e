@@ -32,20 +32,30 @@ const OUTCOMES: Partial<Record<PlanKind, Outcome>> = {
   mercy: "mercy",
 };
 
+/** How this creature's movement reads in a sentence: it flies, it does not "close on foot". */
+const TRAVEL: Record<string, { close: string; advance: string }> = {
+  walk: { close: "closes", advance: "advances on" },
+  fly: { close: "flies", advance: "wings toward" },
+  swim: { close: "swims", advance: "swims toward" },
+  burrow: { close: "tunnels", advance: "tunnels toward" },
+  climb: { close: "climbs", advance: "climbs toward" },
+};
+
 /** One line the table reads: what the creature is doing, and to whom. */
 function describeIntent(plan: TurnPlan): string {
   const me = plan.board.self.name;
   const o: PlanOption = plan.chosen;
   const target = o.target?.name ?? "";
   const units = plan.board.units;
+  const travel = TRAVEL[plan.board.locomotion.primary] ?? TRAVEL.walk;
 
   switch (o.kind) {
     case "attack":
       return `${me} attacks ${target} with ${o.itemName}.`;
     case "close":
-      return `${me} closes ${Math.round(o.approach ?? 0)} ${units} on ${target} and attacks with ${o.itemName}.`;
+      return `${me} ${travel.close} ${Math.round(o.approach ?? 0)} ${units} on ${target} and attacks with ${o.itemName}.`;
     case "advance":
-      return `${me} advances on ${target}, still too far to strike.`;
+      return `${me} ${travel.advance} ${target}, still too far to strike.`;
     case "heal-self":
       return `${me} uses ${o.itemName} on itself.`;
     case "heal-ally":

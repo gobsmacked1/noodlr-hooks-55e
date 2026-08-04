@@ -63,6 +63,7 @@ async function withTarget<T>(tokenId: string | undefined, fn: () => Promise<T>):
 async function useAction(
   action: { item: any; activity?: any; name: string },
   targetUuid?: string,
+  asReaction = false,
 ): Promise<string | undefined> {
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
   const dialog = { configure: false };
@@ -78,9 +79,16 @@ async function useAction(
   // leaking into the monster's. Precedence between the two target options is unverified upstream, so the
   // acting user's targets are ALSO set by the caller: this is belt and braces, not a bet.
   if (typeof midi?.completeActivityUse === "function" && activity) {
-    const usage = targetUuid
-      ? { midiOptions: { targetUuids: [targetUuid], ignoreUserTargets: true } }
-      : {};
+    // `isReaction` and `targetConfirmation: "none"` are what midi's own reaction path passes; without
+    // them an off-turn use is treated as an ordinary one and can stop for a target confirmation nobody
+    // is present to give. Unknown options are ignored by midi, so they cost nothing when not reacting.
+    const midiOptions: Record<string, unknown> = { ignoreUserTargets: true };
+    if (targetUuid) midiOptions.targetUuids = [targetUuid];
+    if (asReaction) {
+      midiOptions.isReaction = true;
+      midiOptions.workflowOptions = { targetConfirmation: "none" };
+    }
+    const usage = targetUuid || asReaction ? { midiOptions } : {};
     attempts.push(() => midi.completeActivityUse(activity, usage, dialog, message));
   }
   if (typeof activity?.use === "function") {
@@ -105,6 +113,25 @@ async function useAction(
   }
   if (lastError) throw lastError;
   return undefined;
+}
+
+/**
+ * Use one action against one token, through the system's own path.
+ *
+ * The off-turn reaction layer needs exactly what a planned turn needs — targets set both ways, dialogs
+ * suppressed, the system left to roll — so it shares this rather than growing a second, subtly different
+ * copy. Returns the name of what was used, or throws what the system threw.
+ */
+export async function useActionAt(
+  action: { item: any; activity?: any; name: string },
+  target: any,
+  opts: { asReaction?: boolean } = {},
+): Promise<string | undefined> {
+  const doc = target?.document ?? target;
+  const tokenId = String(doc?.id ?? target?.id ?? "") || undefined;
+  return withTarget(tokenId, () =>
+    useAction(action, doc?.uuid as string | undefined, opts.asReaction),
+  );
 }
 
 /** Plans whose whole point is that the creature ends up somewhere else. */

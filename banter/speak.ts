@@ -13,7 +13,7 @@
 // the loudest thing on the battlefield. Both halves of the behaviour fall out of the same term.
 //
 // Hard gate before any of that: a creature with no language cannot speak. A dire wolf gets no lines
-// however charismatic the sheet says it is. Everything that CAN talk is floored at one point (10%),
+// however charismatic the sheet says it is. Everything that CAN talk is floored at one point (5%),
 // because the raw formula otherwise mutes almost every published low-CR humanoid — see below.
 //
 // Reactions can also carry a line ("at the beginning of their turn, or during a reaction"), but the
@@ -68,14 +68,24 @@ function hasLanguage(actor: any, P: SystemPaths): boolean {
   return typeof raw.custom === "string" && raw.custom.trim().length > 0;
 }
 
-/** 0–10: how many tens of percent chance this creature has of running its mouth. */
+/**
+ * How likely this creature is to run its mouth, as a count of 5% steps (0–20).
+ *
+ * The formula is unchanged; only the scale is. Each point was worth ten percent, which had talkative
+ * creatures speaking on half their turns and wore thin quickly in play (user, 2026-08-04). Same
+ * arithmetic, twice the headroom, half the weight per point: a creature scoring 6 drops from a 60%
+ * chance to 30%, while the most obnoxious thing on the field can still reach certainty.
+ */
 export function chatterScore(actor: any): number {
   const P = systemPaths();
   const int = modifier(actor, P.intelligenceMod, P.intelligence);
   const wis = modifier(actor, P.wisdomMod, P.wisdom);
   const cha = modifier(actor, P.charismaMod, ["system.abilities.cha.value"]);
-  return Math.max(0, Math.min(10, int + 2 * cha - 2 * wis));
+  return Math.max(0, Math.min(20, int + 2 * cha - 2 * wis));
 }
+
+/** Percentage points contributed by each score point. */
+const CHATTER_STEP = 0.05;
 
 function classOf(actor: any): string | undefined {
   // The class item with the most levels is the character people would name first.
@@ -157,12 +167,12 @@ export async function maybeTaunt(combatant: any, target: any): Promise<string | 
   // Floor of one point (user, 2026-08-03) after the language gate, not inside the formula. The raw
   // arithmetic lands most low-CR humanoids on exactly zero — a goblin's −1 WIS contributes +2 and its
   // −1 CHA takes the same amount straight back — which silenced the entire mook population. Anything
-  // that can talk now gets at least a one-in-ten chance to jeer.
+  // that can talk now gets at least a one-in-twenty chance to jeer.
   const score = Math.max(1, chatterScore(actor));
 
   // Its own stream, so switching banter off cannot change a single tactical decision.
   const rand = turnRandom(String(combatant.id ?? ""), "banter");
-  if (rand() >= score / 10) return null;
+  if (rand() >= score * CHATTER_STEP) return null;
 
   const profile = readTarget(target.actor, String(target.name ?? ""));
   const creatureType = pickString(actor, P.creatureType).toLowerCase();
@@ -173,7 +183,9 @@ export async function maybeTaunt(combatant: any, target: any): Promise<string | 
   if (usable.length === 0) return null;
 
   const line = choose(usable, usableWeights, rand);
-  log(`banter: ${combatant.name} -> ${profile.name} (${score}0% chatter): ${line.text}`);
+  log(
+    `banter: ${combatant.name} -> ${profile.name} (${Math.round(score * CHATTER_STEP * 100)}% chatter): ${line.text}`,
+  );
 
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({

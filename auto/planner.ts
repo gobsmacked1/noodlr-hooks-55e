@@ -163,10 +163,17 @@ function attackOptions(
     if (!isAttack(usable)) continue;
 
     for (const enemy of board.enemies) {
-      const gap = enemy.distance - usable.range;
+      // Separation is three-dimensional, and pretending otherwise is how a wolf ends up "reaching" a
+      // wizard hovering thirty feet above it. Reach is measured through the air; closing is only
+      // offered if the creature has some way of covering the vertical part as well.
+      const rise = enemy.elevation - board.self.elevation;
+      const separation = Math.hypot(enemy.distance, rise);
+      const gap = separation - usable.range;
       const inReach = gap <= 0;
-      // Closing the gap is only an option if the creature could plausibly cover it this turn.
       if (!inReach && (board.speed === null || gap > board.speed)) continue;
+      if (!inReach && Math.abs(rise) > 1 && !canChangeHeight(board)) {
+        continue;
+      }
 
       const reasons: string[] = [];
       // Everything starts equal: hitting something is what combatants do.
@@ -240,10 +247,18 @@ function attackOptions(
  * intelligence whatsoever, so it sits at tier 1 alongside attacking, and is only offered when nothing
  * better exists: it scores below any real attack and above the floor.
  */
+/** Can this creature gain or lose height under its own power? */
+function canChangeHeight(board: Board): boolean {
+  const modes = board.locomotion.modes;
+  return (modes.fly ?? 0) > 0 || (modes.climb ?? 0) > 0;
+}
+
 function advanceOptions(board: Board, kit: Usable[], hasBetter: boolean): PlanOption[] {
   if (hasBetter) return [];
   const target = board.enemies[0];
   if (!target || board.speed === null || board.speed <= 0) return [];
+  // Walking hopefully toward something in the air achieves nothing but a wasted turn.
+  if (Math.abs(target.elevation - board.self.elevation) > 1 && !canChangeHeight(board)) return [];
 
   const attacks = kit.filter(isAttack);
   if (attacks.length === 0) return [];
