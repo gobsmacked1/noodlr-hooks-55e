@@ -122,8 +122,13 @@ export function insideScene(point: Point): boolean {
 /** Somebody is already standing there. Crude on purpose: exact footprints are not worth the cost. */
 export function occupied(point: Point, self: any): boolean {
   const grid = Number((canvas as any)?.grid?.size) || 100;
+  // Compare identity by document id, not object identity. `self` arrives as a TokenDocument from the
+  // board while this list holds Token placeables, so `token === self` never matched and a creature
+  // counted ITSELF as an obstacle — quietly vetoing every short step it tried to take.
+  const selfId = String((self?.document ?? self)?.id ?? "");
   for (const token of (canvas as any)?.tokens?.placeables ?? []) {
-    if (token === self) continue;
+    const id = String((token?.document ?? token)?.id ?? "");
+    if (id && id === selfId) continue;
     const c = centerOf(token);
     if (c && Math.hypot(c.x - point.x, c.y - point.y) < grid * 0.75) return true;
   }

@@ -91,6 +91,34 @@ function movementAction(token: any): string | undefined {
 }
 
 /**
+ * The token's current elevation, carried through every move.
+ *
+ * Waypoints default any field they omit, so leaving elevation out is *usually* harmless — but "usually"
+ * is not good enough for a party fighting on top of a barbican, where a move that silently lands at
+ * elevation 0 puts a creature inside the structure rather than on it. Stating it costs nothing.
+ */
+function elevationOf(doc: any): number {
+  const raw = Number(doc?._source?.elevation ?? doc?.elevation);
+  return Number.isFinite(raw) ? raw : 0;
+}
+
+/**
+ * Whether this GM has core's "Unconstrained Movement" switched on.
+ *
+ * Core reads that setting ONLY in the drag workflow, so a GM who has turned it on can drag a token
+ * through a wall all day while an identical programmatic move is silently refused. Mirroring it here is
+ * what makes Noodlr's moves behave the way the GM's own hands do — which is the whole promise of "the
+ * module moves the token for you". Off by default, so a table that enforces walls keeps enforcing them.
+ */
+function unconstrained(): boolean {
+  try {
+    return Boolean(game.user?.isGM && game.settings.get("core", "unconstrainedMovement"));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * How long to wait for a move before giving up on it.
  *
  * A movement PAUSED by a region behaviour (Terrain Mapper's stairs and elevators do this) never
@@ -130,23 +158,24 @@ export async function moveTo(token: any, point: Point): Promise<number> {
     // Top-left pixel coordinates, as integers. Not centres, not grid offsets.
     x: Math.round(corner.x),
     y: Math.round(corner.y),
+    elevation: elevationOf(doc),
     snapped,
     explicit: true,
     checkpoint: true,
   };
   const action = movementAction(token);
   if (action) waypoint.action = action;
+  const ignoreWalls = unconstrained();
 
   let completed: unknown;
   try {
     // `ignoreCost` because the planner already budgeted this creature's movement in scene units;
     // letting terrain cost truncate the path as well would silently halve every move across rough
-    // ground. Walls are deliberately NOT ignored — a creature should no more walk through a wall than a
-    // player's token should.
+    // ground. Walls are enforced unless this GM has told Foundry they should not be.
     completed = await withTimeout(
       doc.move(waypoint, {
         method: "api",
-        constrainOptions: { ignoreCost: true },
+        constrainOptions: { ignoreCost: true, ignoreWalls },
         autoRotate: false,
         showRuler: false,
       }),
@@ -267,9 +296,17 @@ export async function moveToward(
   budget: number,
   desired: number,
 ): Promise<number> {
+  const who = describe(token?.document ?? token);
   const origin = centerOf(token);
   const goal = centerOf(target);
-  if (!origin || !goal || !(budget > 0)) return 0;
+  if (!origin || !goal) {
+    log(`movement: ${who} cannot step toward a target with no position`);
+    return 0;
+  }
+  if (!(budget > 0)) {
+    log(`movement: ${who} has no movement budget (speed read as ${budget})`);
+    return 0;
+  }
 
   const separation = Math.hypot(goal.x - origin.x, goal.y - origin.y);
   const stopShort = toPixels(Math.max(desired, 0));
@@ -280,19 +317,57 @@ export async function moveToward(
   const ux = (goal.x - origin.x) / separation;
   const uy = (goal.y - origin.y) / separation;
 
-  for (const fraction of [1, 0.75, 0.5, 0.25]) {
-    const distance = wanted * fraction;
-    const point = { x: origin.x + ux * distance, y: origin.y + uy * distance };
-    if (!insideScene(point) || occupied(point, token)) continue;
-    // `false` means "definitely not blocked"; null means the collision API was unreadable, in which
-    // case we move anyway — refusing to move on an unknown API would disable movement wholesale.
-    if (blocked(origin, point, "move") === true) continue;
-    // Keep trying shorter steps when the move is refused. Returning here regardless is what made the
-    // whole shorten-and-retry design decorative: the first candidate consumed the loop even when the
-    // token never budged, so a destination core disliked ended the attempt outright.
+  return stepTo(
+    token,
+    origin,
+    [1, 0.75, 0.5, 0.25].map((fraction) => ({
+      label: `${Math.round(toUnits(wanted * fraction))} ft`,
+      point: {
+        x: origin.x + ux * wanted * fraction,
+        y: origin.y + uy * wanted * fraction,
+      },
+    })),
+    `toward ${describe(target?.document ?? target)}`,
+  );
+}
+
+/**
+ * Try each candidate destination in turn, and say out loud why the ones that failed did.
+ *
+ * Every rejection used to be a bare `continue`. That silence is the reason this bug survived three
+ * releases: `moveTo` reports refusals in detail, but nothing ever reached `moveTo` — the candidates
+ * were all discarded first, and a creature that never attempted to move looked exactly like a creature
+ * whose move was ignored.
+ */
+async function stepTo(
+  token: any,
+  origin: Point,
+  candidates: Array<{ label: string; point: Point }>,
+  intent: string,
+): Promise<number> {
+  const who = describe(token?.document ?? token);
+  const rejected: string[] = [];
+
+  for (const { label, point } of candidates) {
+    if (!insideScene(point)) {
+      rejected.push(`${label}: outside the scene`);
+      continue;
+    }
+    if (occupied(point, token)) {
+      rejected.push(`${label}: square already taken`);
+      continue;
+    }
+    // ADVISORY ONLY. This used to veto the candidate, which made our own 2-D wall test a second, silent
+    // authority competing with core's — and core is the one that decides. It matters on a scene with
+    // elevation: tokens on top of a structure read as blocked by the walls of the rooms beneath them,
+    // so every candidate was discarded before core ever got a say. Core is asked regardless now.
+    const wall = blocked(origin, point, "move") === true ? " (our wall test says blocked)" : "";
     const travelled = await moveTo(token, point);
     if (travelled > 0) return travelled;
+    rejected.push(`${label}: refused${wall}`);
   }
+
+  log(`movement: ${who} could not step ${intent} — ${rejected.join("; ")}`);
   return 0;
 }
 
@@ -308,9 +383,17 @@ export async function moveAwayFrom(
   budget: number,
   desired: number,
 ): Promise<number> {
+  const who = describe(token?.document ?? token);
   const origin = centerOf(token);
   const threat = centerOf(target);
-  if (!origin || !threat || !(budget > 0)) return 0;
+  if (!origin || !threat) {
+    log(`movement: ${who} cannot back away from a threat with no position`);
+    return 0;
+  }
+  if (!(budget > 0)) {
+    log(`movement: ${who} has no movement budget (speed read as ${budget})`);
+    return 0;
+  }
 
   const separation = Math.hypot(origin.x - threat.x, origin.y - threat.y) || 1;
   const needed = Math.max(0, toPixels(desired) - separation);
@@ -320,18 +403,18 @@ export async function moveAwayFrom(
   const base = Math.atan2(origin.y - threat.y, origin.x - threat.x);
   // Straight back first, then fan out to either side.
   const offsets = [0, Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3];
-  for (const offset of offsets) {
-    const angle = base + offset;
-    const point = {
-      x: origin.x + Math.cos(angle) * distance,
-      y: origin.y + Math.sin(angle) * distance,
-    };
-    if (!insideScene(point) || occupied(point, token)) continue;
-    if (blocked(origin, point, "move") === true) continue;
-    const travelled = await moveTo(token, point);
-    if (travelled > 0) return travelled;
-  }
-  return 0;
+  return stepTo(
+    token,
+    origin,
+    offsets.map((offset) => ({
+      label: `${Math.round((offset * 180) / Math.PI)}\u00b0`,
+      point: {
+        x: origin.x + Math.cos(base + offset) * distance,
+        y: origin.y + Math.sin(base + offset) * distance,
+      },
+    })),
+    `away from ${describe(target?.document ?? target)}`,
+  );
 }
 
 /**
@@ -339,9 +422,17 @@ export async function moveAwayFrom(
  * removed from play by the encounter layer, not here.
  */
 export async function moveOffField(token: any, budget: number): Promise<number> {
+  const who = describe(token?.document ?? token);
   const origin = centerOf(token);
   const rect: any = (canvas as any)?.dimensions?.sceneRect;
-  if (!origin || !rect || !(budget > 0)) return 0;
+  if (!origin || !rect) {
+    log(`movement: ${who} cannot flee — no position or no scene bounds`);
+    return 0;
+  }
+  if (!(budget > 0)) {
+    log(`movement: ${who} has no movement budget to flee with (speed read as ${budget})`);
+    return 0;
+  }
 
   const exits: Point[] = [
     { x: rect.x, y: origin.y },
@@ -355,17 +446,20 @@ export async function moveOffField(token: any, budget: number): Promise<number> 
   );
 
   const distance = toPixels(budget);
-  for (const exit of exits) {
-    const span = Math.hypot(exit.x - origin.x, exit.y - origin.y) || 1;
-    const step = Math.min(distance, span);
-    const point = {
-      x: origin.x + ((exit.x - origin.x) / span) * step,
-      y: origin.y + ((exit.y - origin.y) / span) * step,
-    };
-    if (occupied(point, token)) continue;
-    if (blocked(origin, point, "move") === true) continue;
-    const travelled = await moveTo(token, point);
-    if (travelled > 0) return travelled;
-  }
-  return 0;
+  return stepTo(
+    token,
+    origin,
+    exits.map((exit, i) => {
+      const span = Math.hypot(exit.x - origin.x, exit.y - origin.y) || 1;
+      const step = Math.min(distance, span);
+      return {
+        label: `exit ${i + 1}`,
+        point: {
+          x: origin.x + ((exit.x - origin.x) / span) * step,
+          y: origin.y + ((exit.y - origin.y) / span) * step,
+        },
+      };
+    }),
+    "off the field",
+  );
 }
