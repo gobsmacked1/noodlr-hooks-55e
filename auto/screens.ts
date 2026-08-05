@@ -84,12 +84,26 @@ function candidates(): Candidate[] {
     out.push({ screen, contains: (point) => inRegion(region, point) });
   }
 
+  // A negative light is magical darkness by construction; there is nothing else it can be.
   for (const light of (canvas as any)?.lighting?.placeables ?? []) {
     if (!light?.document?.config?.negative || light.document.hidden) continue;
-    // A negative light is magical darkness by construction; there is nothing else it can be.
     const screen = screenFor("darkness");
     if (!screen) continue;
-    out.push({ screen, contains: (point) => inLight(light, point) });
+    const doc = light.document;
+    out.push({ screen, contains: (point) => inDarkness(point, doc, doc.config) });
+  }
+
+  // Darkness that walks. The warlock with Devil's Sight casts it on themselves and strolls through the
+  // fight seeing perfectly well, which is a real build and not an edge case (user, 2026-08-05). It
+  // renders as light emitted BY the token, which the ambient-light layer above never sees. The line we
+  // walk includes both endpoints, so a creature standing in its own darkness is caught the same way as
+  // one standing behind somebody else's.
+  for (const token of (canvas as any)?.tokens?.placeables ?? []) {
+    const config: any = token?.document?.light;
+    if (!config?.negative) continue;
+    const screen = screenFor("darkness");
+    if (!screen) continue;
+    out.push({ screen, contains: (point) => inDarkness(point, token.center, config) });
   }
 
   return out;
@@ -139,15 +153,18 @@ function inRegion(region: any, point: { x: number; y: number }): boolean {
   }
 }
 
-function inLight(light: any, point: { x: number; y: number }): boolean {
+/** Is a point inside a darkness source centred on `origin` with the given light config? */
+function inDarkness(
+  point: { x: number; y: number },
+  origin: { x: number; y: number },
+  config: any,
+): boolean {
   try {
-    const doc = light.document;
     const grid: any = (canvas as any)?.grid;
     const perUnit = Number(grid?.size) / Number(grid?.distance || 5);
-    const radius =
-      Math.max(Number(doc?.config?.dim) || 0, Number(doc?.config?.bright) || 0) * perUnit;
+    const radius = Math.max(Number(config?.dim) || 0, Number(config?.bright) || 0) * perUnit;
     if (!(radius > 0)) return false;
-    return Math.hypot(point.x - doc.x, point.y - doc.y) <= radius;
+    return Math.hypot(point.x - origin.x, point.y - origin.y) <= radius;
   } catch {
     return false;
   }

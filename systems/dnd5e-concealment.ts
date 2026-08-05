@@ -161,6 +161,22 @@ const CONCEALMENT: Array<Entry<Concealment>> = [
       blocksDivination: false,
     },
   },
+  {
+    // An abstraction, and knowingly a rough one: a druid as a rat is unremarkable and a druid as a
+    // giant ape is not, but Foundry gives us no size-aware notion of "this shape draws no attention".
+    // A flat bonus is the honest middle, and it only ever applies to a creature that is already hiding,
+    // so the giant ape has to have rolled Stealth before the +5 does anything at all.
+    match: /wild shape|wild form|polymorph|transformed/i,
+    source: "effect",
+    value: {
+      label: "wearing another shape",
+      pierced: ["truesight"],
+      bonus: 5,
+      absolute: false,
+      negates: [],
+      blocksDivination: false,
+    },
+  },
 ];
 
 /**
@@ -348,7 +364,13 @@ export function concealmentsOn(actor: any): Concealment[] {
   const effects = effectNames(actor);
   const traits = itemNames(actor);
   const found: Concealment[] = [];
-  for (const entry of CONCEALMENT) {
+
+  // The screens are checked here too, and that is not redundancy. A Darkness or a fog bank is usually a
+  // template on the ground, but it is just as often a spell someone cast on themselves and carries
+  // around — the warlock with Devil's Sight walking the battlefield inside their own Darkness is the
+  // canonical build (user, 2026-08-05). When a module applies that as an effect rather than a placed
+  // template, the geometry finds nothing and only the worn check catches it.
+  for (const entry of [...CONCEALMENT, ...SCREENS]) {
     if (matches(entry, effects, traits)) found.push(entry.value);
   }
   return found;
