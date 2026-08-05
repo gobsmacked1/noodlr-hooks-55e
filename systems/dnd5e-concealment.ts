@@ -44,8 +44,12 @@ export interface Concealment {
   bonus: number;
   /** True when it hides the creature regardless of the Stealth contest, unless pierced. */
   absolute: boolean;
-  /** Capabilities this strips from anyone looking — Nondetection's whole job. */
+  /** Capabilities this strips from anyone looking. Silence takes hearing away. */
   negates: string[];
+  /** Nondetection's whole job: everything the watcher was getting from a Divination spell stops working. */
+  blocksDivination: boolean;
+  /** True when this is a thing placed in the world, and only counts when it stands in the way. */
+  interposed?: boolean;
 }
 
 /** How an entry is recognised, and whether it must be active to count. */
@@ -59,17 +63,17 @@ interface Entry<T> {
 }
 
 /**
- * Concealment, in rough order of how often a table reaches for it.
+ * Concealment worn by the creature itself.
  *
- * Two abstractions worth naming. The illusion spells conceal nothing by RAW — they put a picture
- * somewhere — but they are what a party actually uses to avoid being noticed, so they are modelled as a
- * bonus rather than as a veil that must be pierced. And magical Darkness is deliberately NOT beaten by
- * darkvision, which is the rule people most often get wrong.
+ * Magical Darkness is deliberately NOT beaten by darkvision, which is the rule people most often get
+ * wrong. Note also what is missing from every `pierced` list here: `detectMagic`. Detect Magic senses an
+ * aura "around any visible creature", so by the letter of the spell it does not out someone you cannot
+ * already see — it reveals what a creature is carrying, not where the creature is.
  */
 const CONCEALMENT: Array<Entry<Concealment>> = [
   {
     match: /invisib/i,
-    not: /see invisib|greater invisibility \(see\)/i,
+    not: /see invisib/i,
     source: "effect",
     value: {
       label: "invisible",
@@ -77,6 +81,7 @@ const CONCEALMENT: Array<Entry<Concealment>> = [
       bonus: 0,
       absolute: true,
       negates: [],
+      blocksDivination: false,
     },
   },
   {
@@ -88,6 +93,7 @@ const CONCEALMENT: Array<Entry<Concealment>> = [
       bonus: 0,
       absolute: true,
       negates: [],
+      blocksDivination: false,
     },
   },
   {
@@ -99,49 +105,37 @@ const CONCEALMENT: Array<Entry<Concealment>> = [
       bonus: 0,
       absolute: true,
       negates: [],
-    },
-  },
-  {
-    match: /\bdarkness\b/i,
-    not: /devil'?s sight/i,
-    source: "effect",
-    value: {
-      // Magical darkness, which darkvision does not beat — that is the point of the spell.
-      label: "in magical darkness",
-      pierced: ["truesight", "blindsight", "tremorsense", "devilsSight"],
-      bonus: 0,
-      absolute: true,
-      negates: [],
-    },
-  },
-  {
-    match: /fog cloud/i,
-    source: "effect",
-    value: {
-      label: "lost in fog",
-      pierced: ["truesight", "blindsight", "tremorsense"],
-      bonus: 0,
-      absolute: true,
-      negates: [],
+      blocksDivination: false,
     },
   },
   {
     match: /nondetection/i,
     source: "effect",
     value: {
-      // Hides from divination, not from eyes. It never conceals on its own; it takes magical detection
-      // away from whoever is looking, which is why it has a `negates` list and no `pierced` one.
+      // "The target can't be targeted by any Divination spell or perceived through magical scrying
+      // sensors." It conceals nobody by itself — a warded rogue in plain view is plainly seen. What it
+      // does is take the watcher's Divination magic away, which is why it is a layer and not a veil:
+      // Stealth beats the guard's eyes, and this beats the Locate Creature that would have found them
+      // anyway. Innate truesight is untouched, because a demon's eyes are not a Divination spell.
       label: "warded against divination",
       pierced: [],
       bonus: 0,
       absolute: false,
-      negates: ["divination", "detectMagic", "truesight"],
+      negates: [],
+      blocksDivination: true,
     },
   },
   {
     match: /pass without trace/i,
     source: "effect",
-    value: { label: "passing without trace", pierced: [], bonus: 10, absolute: false, negates: [] },
+    value: {
+      label: "passing without trace",
+      pierced: [],
+      bonus: 10,
+      absolute: false,
+      negates: [],
+      blocksDivination: false,
+    },
   },
   {
     match: /\bsilence\b/i,
@@ -152,23 +146,77 @@ const CONCEALMENT: Array<Entry<Concealment>> = [
       bonus: 0,
       absolute: false,
       negates: ["hearing"],
-    },
-  },
-  {
-    match: /major image|silent image|minor illusion|seeming/i,
-    source: "effect",
-    value: {
-      label: "behind an illusion",
-      pierced: ["truesight", "detectMagic"],
-      bonus: 5,
-      absolute: false,
-      negates: [],
+      blocksDivination: false,
     },
   },
   {
     match: /mask of the wild/i,
     source: "trait",
-    value: { label: "masked by the wild", pierced: [], bonus: 5, absolute: false, negates: [] },
+    value: {
+      label: "masked by the wild",
+      pierced: [],
+      bonus: 5,
+      absolute: false,
+      negates: [],
+      blocksDivination: false,
+    },
+  },
+];
+
+/**
+ * Concealment placed in the world rather than worn: the ball of fog, the illusory hedge, the sphere of
+ * magical darkness a party drops between themselves and the guard.
+ *
+ * These only count when they physically stand in the way — see `auto/screens.ts` for the geometry. The
+ * user's framing on 2026-08-04 is the rule being encoded: a watcher has to get past the interposed thing
+ * before it has any chance at the creature behind it, so each one is absolute until pierced.
+ *
+ * The illusions carry `detectMagic` in their `pierced` list where the solid obscurements do not, because
+ * an illusion is a magical aura in plain sight and fog is just fog. What is NOT modelled is the Study
+ * action: a creature that spends an action examining an image and beats the save DC on an Intelligence
+ * (Investigation) check disbelieves it. That is a deliberate choice made by a player at the table, not
+ * something a six-second poll should perform on an NPC's behalf; when it happens, delete the template.
+ */
+const SCREENS: Array<Entry<Concealment>> = [
+  {
+    match: /\bdarkness\b/i,
+    not: /devil'?s sight/i,
+    source: "effect",
+    value: {
+      label: "behind magical darkness",
+      pierced: ["truesight", "blindsight", "tremorsense", "devilsSight"],
+      bonus: 0,
+      absolute: true,
+      negates: [],
+      blocksDivination: false,
+      interposed: true,
+    },
+  },
+  {
+    match: /fog cloud|stinking cloud|cloudkill|incendiary cloud|sleet storm/i,
+    source: "effect",
+    value: {
+      label: "behind a cloud",
+      pierced: ["truesight", "blindsight", "tremorsense"],
+      bonus: 0,
+      absolute: true,
+      negates: [],
+      blocksDivination: false,
+      interposed: true,
+    },
+  },
+  {
+    match: /major image|silent image|minor illusion|seeming|programmed illusion|mirage arcane/i,
+    source: "effect",
+    value: {
+      label: "behind an illusion",
+      pierced: ["truesight", "detectMagic"],
+      bonus: 0,
+      absolute: true,
+      negates: [],
+      blocksDivination: false,
+      interposed: true,
+    },
   },
 ];
 
@@ -178,11 +226,14 @@ interface Detector {
   grants: string[];
   /** Added to passive Perception. Advantage on Perception is +5 passive, which is how Keen senses work. */
   bonus: number;
+  /** True when this comes from a Divination spell, and therefore stops working against Nondetection. */
+  divination?: boolean;
 }
 
 const DETECTION: Array<Entry<Detector>> = [
   {
-    match: /truesight|true seeing/i,
+    // Innate truesight: a creature's own eyes, and no spell, so Nondetection does not touch it.
+    match: /truesight/i,
     source: "trait",
     value: {
       label: "truesight",
@@ -191,19 +242,37 @@ const DETECTION: Array<Entry<Detector>> = [
     },
   },
   {
-    match: /see invisib|glitterdust|faerie fire/i,
+    // The spell, which is Divination and therefore is exactly what Nondetection was prepared for.
+    match: /true seeing/i,
     source: "effect",
-    value: { label: "sees the invisible", grants: ["seeInvisible"], bonus: 0 },
+    value: {
+      label: "True Seeing",
+      grants: ["truesight", "seeInvisible", "etherealSight", "detectMagic"],
+      bonus: 0,
+      divination: true,
+    },
+  },
+  {
+    match: /see invisib/i,
+    source: "effect",
+    value: { label: "See Invisibility", grants: ["seeInvisible"], bonus: 0, divination: true },
+  },
+  {
+    // Not Divination — Glitterdust and Faerie Fire coat a creature in light rather than scry for it, so
+    // Nondetection is no help at all against either. Worth the separate entry for exactly that reason.
+    match: /glitterdust|faerie fire/i,
+    source: "effect",
+    value: { label: "outlined in light", grants: ["seeInvisible"], bonus: 0 },
   },
   {
     match: /detect magic/i,
     source: "effect",
-    value: { label: "detecting magic", grants: ["detectMagic"], bonus: 0 },
+    value: { label: "Detect Magic", grants: ["detectMagic"], bonus: 0, divination: true },
   },
   {
-    match: /locate creature|gaze of two minds/i,
+    match: /locate creature|gaze of two minds|clairvoyance|scrying/i,
     source: "effect",
-    value: { label: "scrying", grants: ["divination"], bonus: 0 },
+    value: { label: "scrying", grants: ["divination"], bonus: 0, divination: true },
   },
   {
     match: /feral senses|blindsight|blindsense/i,
@@ -285,21 +354,49 @@ export function concealmentsOn(actor: any): Concealment[] {
   return found;
 }
 
-/** Everything this creature brings to seeing through concealment, by name. */
-export function detectorsOn(actor: any): { tags: string[]; bonus: number; labels: string[] } {
-  if (!isDnd5e() || !actor) return { tags: [], bonus: 0, labels: [] };
+/**
+ * Everything this creature brings to seeing through concealment, by name.
+ *
+ * `divined` is the subset that came from a Divination spell, reported separately so a Nondetection ward
+ * can remove precisely those and leave a creature's own senses alone.
+ */
+export function detectorsOn(actor: any): {
+  tags: string[];
+  divined: string[];
+  bonus: number;
+  labels: string[];
+} {
+  if (!isDnd5e() || !actor) return { tags: [], divined: [], bonus: 0, labels: [] };
   const effects = effectNames(actor);
   const traits = itemNames(actor);
   const tags: string[] = [];
+  const divined: string[] = [];
   const labels: string[] = [];
   let bonus = 0;
   for (const entry of DETECTION) {
     if (!matches(entry, effects, traits)) continue;
     tags.push(...entry.value.grants);
+    if (entry.value.divination) divined.push(...entry.value.grants);
     labels.push(entry.value.label);
     bonus += entry.value.bonus;
   }
-  return { tags, bonus, labels };
+  return { tags, divined, bonus, labels };
+}
+
+/**
+ * Is this thing standing in the world a concealing screen, and if so which one?
+ *
+ * Called by `auto/screens.ts` with whatever name it managed to resolve for a template, a region or a
+ * darkness source. Name matching is the only signal available: Foundry stores a measured template with
+ * no indication of what spell put it there beyond a link back to the originating item.
+ */
+export function screenFor(name: string): Concealment | null {
+  if (!isDnd5e() || !name) return null;
+  const lowered = name.toLowerCase();
+  for (const entry of SCREENS) {
+    if (entry.match.test(lowered) && !(entry.not?.test(lowered) ?? false)) return entry.value;
+  }
+  return null;
 }
 
 /**

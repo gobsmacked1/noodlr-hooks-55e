@@ -381,7 +381,7 @@ export async function surveyPerception(): Promise<Record<string, unknown>> {
           detectionModes: modes.length > 0 ? modes.join(", ") : "none (falling back to stat block)",
           passivePerception: passivePerception(spotter),
           spotterSenses: describeSenses(spotter),
-          targetState: describeStealth(target),
+          targetState: describeStealth(target, spotter),
           verdict: perceives(spotter, target, vision) ? "SPOTTED" : "unnoticed",
         });
       }

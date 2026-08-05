@@ -44,6 +44,7 @@ import {
   sheetSenses,
   type Concealment,
 } from "../systems/dnd5e-concealment";
+import { screensBetween } from "./screens";
 
 /** What we store when we bank a Stealth roll ourselves. */
 interface Banked {
@@ -228,14 +229,19 @@ function hasStatus(doc: any, id: string): boolean {
  * or a feature by name are not: their real ranges vary, and guessing wrongly in either direction is worse
  * than taking "I cast See Invisibility" to mean what it says.
  */
-function capabilities(spotter: any, distance: number): { tags: Set<string>; bonus: number } {
+function capabilities(
+  spotter: any,
+  distance: number,
+): { tags: Set<string>; divined: Set<string>; bonus: number } {
   const tags = new Set<string>();
   for (const [tag, range] of Object.entries(sheetSenses(spotter?.actor))) {
     if (distance <= range) tags.add(tag);
   }
   const named = detectorsOn(spotter?.actor);
   for (const tag of named.tags) tags.add(tag);
-  return { tags, bonus: named.bonus };
+  // Only what a Divination spell granted. A creature's own senses are never in here, which is what lets
+  // Nondetection stop a Locate Creature without blinding a demon.
+  return { tags, divined: new Set(named.divined), bonus: named.bonus };
 }
 
 /** Concealment that carries no name we would match: the plain status effects. */
@@ -253,6 +259,7 @@ function statusVeils(target: any): Concealment[] {
       bonus: 0,
       absolute: true,
       negates: [],
+      blocksDivination: false,
     });
   }
   if (hasStatus(doc, "ethereal")) {
@@ -262,15 +269,23 @@ function statusVeils(target: any): Concealment[] {
       bonus: 0,
       absolute: true,
       negates: [],
+      blocksDivination: false,
     });
   }
   return found;
 }
 
-/** Every concealment on a creature, from names and from statuses, without duplicates. */
-function veils(target: any): Concealment[] {
+/**
+ * Every layer between a watcher and a creature: what it wears, what it is, and what stands in the way.
+ *
+ * Concealment is layered, and each layer is judged on its own. A watcher with See Invisibility gets past
+ * the Invisibility but not the fog bank; only something like truesight, which appears in nearly every
+ * `pierced` list, gets through everything at once. That is the intended shape — one capability that
+ * beats all layers exists, but it has to be that good.
+ */
+function veils(spotter: any, target: any): Concealment[] {
   const found = concealmentsOn(target?.actor);
-  for (const veil of statusVeils(target)) {
+  for (const veil of [...statusVeils(target), ...screensBetween(spotter, target)]) {
     if (!found.some((seen) => seen.label === veil.label)) found.push(veil);
   }
   return found;
@@ -281,15 +296,17 @@ function veils(target: any): Concealment[] {
  *
  * Order of resolution, and each step earns its place:
  *   1. Work out what the spotter can do, then let the hider's wards take capabilities away. Nondetection
- *      conceals nobody — it blinds the diviner — so it has to be applied to the watcher, not the hider.
- *   2. Any unpierced absolute concealment hides the creature outright, roll or no roll. An invisible bard
- *      who never touched the Stealth skill is still invisible.
- *   3. Otherwise contest, with every concealment's bonus added to the Stealth DC. This is where Pass
- *      Without Trace earns its +10 and a wolf's keen senses earn their +5 the other way.
+ *      conceals nobody — it blinds the diviner — so it is applied to the watcher, and only to what the
+ *      watcher was getting out of a Divination spell. Innate truesight is a creature's own eyes.
+ *   2. Any unpierced absolute layer hides the creature outright, roll or no roll: an invisible bard who
+ *      never touched the Stealth skill is still invisible, and a guard has to get past the interposed
+ *      fog bank before it has any chance at the people behind it.
+ *   3. Otherwise contest, with every layer's bonus added to the Stealth DC. This is where Pass Without
+ *      Trace earns its +10 and a wolf's keen senses earn their +5 the other way.
  *
  * `useModes` says whether core's own detection modes already ran. When they did, core has enforced plain
  * invisibility itself and we must not judge it twice, or we would disagree with what is on screen.
- * Everything core knows nothing about — which is every entry in the table bar invisibility — still applies.
+ * Everything core knows nothing about — which is every layer bar invisibility — still applies.
  *
  * Distance reaches only the senses. The contest itself is rangeless: 5e gives no distance penalty to
  * Perception, and inventing one would be house-ruling in code.
@@ -300,10 +317,11 @@ export function evades(
   distance: number,
   useModes: boolean,
 ): string | null {
-  const present = veils(target);
-  const { tags, bonus } = capabilities(spotter, distance);
+  const present = veils(spotter, target);
+  const { tags, divined, bonus } = capabilities(spotter, distance);
   for (const veil of present) {
     for (const lost of veil.negates) tags.delete(lost);
+    if (veil.blocksDivination) for (const lost of divined) tags.delete(lost);
   }
 
   for (const veil of present) {
@@ -324,12 +342,12 @@ export function evades(
   return `hidden — ${hiding.from} says DC ${shown} against passive Perception ${perception}`;
 }
 
-/** What a creature is doing to stay unseen, for diagnostics. */
-export function describeStealth(token: any): string {
+/** What a creature is doing to stay unseen from a given watcher, for diagnostics. */
+export function describeStealth(token: any, spotter?: any): string {
   const parts: string[] = [];
   const hiding = hidingState(token);
   if (hiding) parts.push(`hiding at DC ${hiding.dc} (${hiding.from})`);
-  for (const veil of veils(token)) parts.push(veil.label);
+  for (const veil of veils(spotter, token)) parts.push(veil.label);
   return parts.length > 0 ? parts.join("; ") : "not hiding";
 }
 
