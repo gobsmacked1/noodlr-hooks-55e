@@ -36,8 +36,14 @@
 import { log, MODULE_ID } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
 import { readHp } from "../tracker";
-import { getCombatAutomation, getEngageRadius, isAutoEngageEnabled } from "../config";
+import {
+  getCombatAutomation,
+  getEngageRadius,
+  isAutoEngageEnabled,
+  isStealthEnabled,
+} from "../config";
 import { initiativeSettled } from "./hooks";
+import { describeStealth, evades, passivePerception } from "./stealth";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
 const POLL_MS = 6000;
@@ -62,6 +68,9 @@ const SENSES = ["darkvision", "blindsight", "truesight", "tremorsense"];
 /** Creatures already warned about having no way to perceive anything, so the log stays readable. */
 const warnedBlind = new Set<string>();
 
+/** Pairings already reported as "would have been spotted, but they are hidden". */
+const announced = new Set<string>();
+
 let timer: number | null = null;
 let sweeping = false;
 let quietUntil = 0;
@@ -69,6 +78,7 @@ let quietUntil = 0;
 export function registerPerceptionWatch(): void {
   Hooks.on("deleteCombat", () => {
     quietUntil = Date.now() + PEACE_MS;
+    announced.clear();
   });
 
   // Started directly rather than on a `ready` hook: this is registered from inside `ready` already, so
@@ -187,23 +197,51 @@ function perceives(spotter: any, target: any, cache: Map<string, any>): boolean 
   const source = cache.get(id);
 
   const modes = source ? enabledModes(spotter) : [];
-  if (source && modes.length > 0) {
+  const useModes = Boolean(source) && modes.length > 0;
+  let seen = false;
+
+  if (useModes) {
     const config = testConfig(target);
     for (const [modeId, mode] of modes) {
       const detector: any = (globalThis as any).CONFIG?.Canvas?.detectionModes?.[modeId];
       if (typeof detector?.testVisibility !== "function") continue;
       try {
-        if (detector.testVisibility(source, mode, config)) return true;
+        if (detector.testVisibility(source, mode, config)) {
+          seen = true;
+          break;
+        }
       } catch (err) {
         log(`detection mode ${modeId} threw for ${spotter?.name}:`, err);
       }
     }
     // Its senses are properly configured and none of them found the target. That is an answer, not a
     // gap — falling through to the stat block here would quietly undo darkness and invisibility.
-    return false;
+  } else {
+    seen = withinSenses(spotter, target) && hasLineOfSight(spotter, target);
   }
 
-  return withinSenses(spotter, target) && hasLineOfSight(spotter, target);
+  if (!seen) return false;
+  if (!isStealthEnabled()) return true;
+
+  // A clear line of sight is Foundry's answer, not 5e's. Ask the dice too.
+  const evaded = evades(spotter, target, separation(spotter, target), useModes);
+  if (!evaded) return true;
+  announceEvasion(spotter, target, evaded);
+  return false;
+}
+
+/**
+ * Say once, per pair, that a fight did not start because someone was hidden.
+ *
+ * The failure this guards against is silence: a stale hidden state suppressing every encounter forever
+ * while the GM wonders why automatic engagement stopped working. Repeating it every six seconds would
+ * be its own kind of useless, so each pairing is announced once and reset when a fight ends.
+ */
+function announceEvasion(spotter: any, target: any, why: string): void {
+  const key = `${spotter?.id}:${target?.id}`;
+  if (announced.has(key)) return;
+  announced.add(key);
+  log(`perception: ${spotter?.name} would have spotted ${target?.name}, but they are ${why}`);
 }
 
 /**
@@ -316,6 +354,56 @@ function hasLineOfSight(spotter: any, target: any): boolean {
     log("line-of-sight test threw; assuming the view is clear:", err);
   }
   return true;
+}
+
+/**
+ * Report, for every hostile-and-player pairing on this scene, who can see whom and why.
+ *
+ * Perception failures are invisible by nature — the feature declining to start a fight looks exactly
+ * like the feature being broken — so this exists to make the numbers inspectable from the console
+ * before anyone starts guessing.
+ */
+export async function surveyPerception(): Promise<Record<string, unknown>> {
+  const hostiles = tokensOnScene().filter(isHostile);
+  const party = tokensOnScene().filter(isPlayerToken);
+  const vision = new Map<string, any>();
+  const rows: Array<Record<string, unknown>> = [];
+
+  try {
+    for (const spotter of hostiles) {
+      const modes = enabledModes(spotter).map(([id]) => id);
+      for (const target of party) {
+        const distance = separation(spotter, target);
+        rows.push({
+          spotter: spotter.name,
+          target: target.name,
+          distance: Math.round(distance * 10) / 10,
+          detectionModes: modes.length > 0 ? modes.join(", ") : "none (falling back to stat block)",
+          passivePerception: passivePerception(spotter),
+          targetState: describeStealth(target),
+          verdict: perceives(spotter, target, vision) ? "SPOTTED" : "unnoticed",
+        });
+      }
+    }
+  } finally {
+    for (const source of vision.values()) {
+      try {
+        source?.destroy?.();
+      } catch {
+        /* nothing worth failing a report over */
+      }
+    }
+  }
+
+  const report = {
+    scene: String((canvas as any)?.scene?.name ?? "?"),
+    units: String((canvas as any)?.scene?.grid?.units ?? "?"),
+    stealthContest: isStealthEnabled(),
+    engageRadius: getEngageRadius(),
+    pairs: rows,
+  };
+  console.log(`[${MODULE_ID}] perception survey\n${JSON.stringify(report, null, 2)}`);
+  return report;
 }
 
 /**

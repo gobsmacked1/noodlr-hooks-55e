@@ -54,6 +54,24 @@ export function registerCombatSettings(): void {
     type: Number,
     default: 30,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.stealth, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+}
+
+/**
+ * Does a Stealth roll actually stop a creature being noticed?
+ *
+ * On by default, because the alternative is that rogues do not work: Foundry's vision test knows only
+ * about walls and light, so without this a rogue who rolled 27 is spotted by a guard with passive
+ * Perception 10 the moment a corner ends (user, 2026-08-04). The switch exists for tables that would
+ * rather adjudicate hiding themselves than have automation quietly decline to start fights.
+ */
+export function isStealthEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.stealth));
 }
 
 /**
