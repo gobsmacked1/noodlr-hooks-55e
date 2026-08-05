@@ -81,6 +81,8 @@ export function registerPerceptionWatch(): void {
     announced.clear();
   });
 
+  watchForCasualties();
+
   // Started directly rather than on a `ready` hook: this is registered from inside `ready` already, so
   // waiting for another one would leave the timer permanently unstarted.
   if (timer === null) timer = window.setInterval(() => void sweep(), POLL_MS);
@@ -92,16 +94,39 @@ function shouldSweep(): boolean {
   if (!isPrimaryGM()) return false;
   if (getCombatAutomation() === "off" || !isAutoEngageEnabled()) return false;
   if (game.paused) return false;
-  // A fight already in progress needs no starting. Late arrivals are the GM's call for now.
-  if ((game.combat as any)?.started) return false;
+  // A combat that exists but has not begun is someone mid-setup, very likely our own initiative wait.
+  // A combat under way is fine: we keep sweeping, but only for creatures not already in it.
+  const combat = activeCombat();
+  if (combat && !combat.started) return false;
   return Boolean((canvas as any)?.ready && (canvas as any)?.scene?.id);
+}
+
+/** The combat for this scene, by scene id — never `game.combat`, which is the tracker's selection. */
+function activeCombat(): any {
+  const scene: any = (canvas as any)?.scene;
+  if (!scene?.id) return null;
+  return (game.combats as any)?.find?.((c: any) => c?.scene?.id === scene.id) ?? null;
+}
+
+/** Token ids already in the fight. */
+function enlisted(combat: any): Set<string> {
+  const ids = new Set<string>();
+  for (const combatant of combat?.combatants ?? []) {
+    const id = String(combatant?.tokenId ?? combatant?.token?.id ?? "");
+    if (id) ids.add(id);
+  }
+  return ids;
 }
 
 async function sweep(): Promise<void> {
   if (!shouldSweep()) return;
   sweeping = true;
   try {
-    const hostiles = tokensOnScene().filter(isHostile);
+    // Creatures already fighting have nothing to notice. Everyone else keeps watching, so a warband
+    // that was out of earshot when the fight started can still wander into it (user, 2026-08-05).
+    const combat = activeCombat();
+    const already = combat?.started ? enlisted(combat) : new Set<string>();
+    const hostiles = tokensOnScene().filter((t) => isHostile(t) && !already.has(String(t.id)));
     const party = tokensOnScene().filter(isPlayerToken);
     if (hostiles.length === 0 || party.length === 0) return;
 
@@ -121,7 +146,11 @@ async function sweep(): Promise<void> {
     try {
       for (const { spotter, target } of pairs) {
         if (!perceives(spotter, target, vision)) continue;
-        await engage(spotter, target);
+        if (combat?.started) {
+          await reinforce(combat, spotter, `${spotter.name} spots ${target.name}`);
+        } else {
+          await engage(spotter, target);
+        }
         return;
       }
     } finally {
@@ -457,6 +486,100 @@ function combatants(spotter: any): any[] {
 function reach(a: any, b: any): number {
   const rise = Number(b?.document?.elevation ?? 0) - Number(a?.document?.elevation ?? 0);
   return Math.hypot(separation(a, b), rise || 0);
+}
+
+/**
+ * Bring a creature, and whoever it can shout to, into a fight that is already running.
+ *
+ * Two ways in. It noticed someone — the ordinary sweep, still running for everyone not already in the
+ * tracker. Or someone hurt it, which needs no perception at all: an arrow out of the dark does not
+ * require you to have seen the archer to know you are in a fight. The second case is the one that
+ * prompted this (user, 2026-08-05): a hostile outside the original shout radius was deliberately shot at
+ * over several rounds and never joined, because sweeping stopped the moment combat began.
+ */
+async function reinforce(combat: any, spotter: any, why: string): Promise<void> {
+  const already = enlisted(combat);
+  const radius = getEngageRadius();
+  const joining = tokensOnScene().filter(
+    (t) =>
+      isHostile(t) &&
+      !already.has(String(t.id)) &&
+      (String(t.id) === String(spotter?.id) || reach(spotter, t) <= radius),
+  );
+  if (joining.length === 0) return;
+
+  if (Hooks.call("noodlrPreReinforcement", combat, spotter, joining) === false) {
+    log("perception: something vetoed the reinforcements");
+    return;
+  }
+
+  log(`perception: ${why}; ${joining.length} joining the fight late`);
+  try {
+    const documents = joining.map((t) => t.document ?? t);
+    const TokenDocument: any = (foundry as any).utils.getDocumentClass("Token");
+    if (typeof TokenDocument?.createCombatants === "function") {
+      await TokenDocument.createCombatants(documents, { combat });
+    } else {
+      await combat.createEmbeddedDocuments(
+        "Combatant",
+        documents.map((d: any) => ({
+          tokenId: d.id,
+          sceneId: (canvas as any)?.scene?.id,
+          actorId: d.actor?.id,
+          hidden: Boolean(d.hidden),
+        })),
+      );
+    }
+    // Rolls only combatants who have not rolled, so the creatures already fighting keep their places.
+    // It matters that this happens promptly: turn automation holds while anyone is unrolled.
+    await combat.rollNPC();
+
+    const ChatMessage = (globalThis as any).ChatMessage;
+    const names = joining.map((t) => foundry.utils.escapeHTML(String(t.name ?? "?"))).join(", ");
+    await ChatMessage.create({
+      content: `<p><strong>${names}</strong> ${joining.length > 1 ? "join" : "joins"} the fight.</p>`,
+      flags: { [MODULE_ID]: { autoEngage: true } },
+    });
+    Hooks.callAll("noodlrReinforced", combat, joining);
+  } catch (err) {
+    log("could not bring reinforcements into the fight:", err);
+  }
+}
+
+/**
+ * Being hurt puts you in the fight, seen or unseen.
+ *
+ * Deliberately separate from perception: the creature may have no idea where the attack came from, and
+ * a bystander being picked off from across the room while the tracker ignores it is the exact behaviour
+ * that was reported. Only creatures that are hostile, alive, and not already fighting are considered.
+ */
+function watchForCasualties(): void {
+  // `preUpdateActor`, not `updateActor`, because only a DROP in hit points counts and the old value is
+  // gone by the time the update has landed. Being healed is not being attacked.
+  Hooks.on("preUpdateActor", (actor: any, changes: any) => {
+    if (!isPrimaryGM()) return;
+    if (getCombatAutomation() === "off" || !isAutoEngageEnabled()) return;
+    const next = Number(foundry.utils.getProperty(changes ?? {}, "system.attributes.hp.value"));
+    const before = Number(actor?.system?.attributes?.hp?.value);
+    if (!Number.isFinite(next) || !Number.isFinite(before) || next >= before) return;
+
+    const combat = activeCombat();
+    if (!combat?.started) return;
+    const already = enlisted(combat);
+
+    // An unlinked token's actor is synthetic and reports the BASE actor's id, which every goblin from
+    // the same prototype shares. Its `token` is the only thing that identifies which goblin was hit.
+    const hurt = String(actor?.token?.id ?? "");
+    for (const token of tokensOnScene()) {
+      const isTheOne = hurt
+        ? String(token.id) === hurt
+        : String(token?.actor?.id ?? "") === String(actor?.id ?? "");
+      if (!isTheOne) continue;
+      if (!isHostile(token) || already.has(String(token.id))) continue;
+      void reinforce(combat, token, `${token.name} was attacked`);
+      return;
+    }
+  });
 }
 
 /**
