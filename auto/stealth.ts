@@ -23,6 +23,14 @@
 // Deferring to the other two modules when they are installed is the whole of our integration with them:
 // no dependency, no patching, and the GM's own visible source of truth wins over ours.
 //
+// BEYOND MUNDANE HIDING. A rogue's Stealth roll is only the common case. Invisibility, Fog Cloud,
+// Nondetection, Pass Without Trace and the rest are recognised by name from a table in
+// `systems/dnd5e-concealment.ts`, and so are the things that see through them — truesight, See
+// Invisibility, a wolf's keen senses. This file never learns a spell name: the table speaks a small
+// abstract vocabulary of capabilities (`truesight`, `seeInvisible`, `blindsight`, `tremorsense`,
+// `devilsSight`, `etherealSight`, `detectMagic`, `divination`, `hearing`) and the engine only matches
+// tags against tags. Another game system is a sibling table, not a change here. See that file's header.
+//
 // THE CONTEST is passive Perception against the hider's Stealth total, and it is deliberately
 // deterministic — no per-sweep roll. A poll that re-rolls every six seconds would eventually spot
 // anyone by luck alone, which is a worse rule than either edition's. Ties go to the spotter, because
@@ -30,12 +38,12 @@
 
 import { log, MODULE_ID } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
-
-/** Senses that find a creature it would otherwise be too dark, or too invisible, to see. */
-const PIERCING = ["truesight", "blindsight", "tremorsense"];
-
-/** Vision 5e detection modes that see through concealment, if the GM has that module. */
-const PIERCING_MODES = ["seeAll", "seeInvisibility", "blindsight", "feelTremor", "etherealSight"];
+import {
+  concealmentsOn,
+  detectorsOn,
+  sheetSenses,
+  type Concealment,
+} from "../systems/dnd5e-concealment";
 
 /** What we store when we bank a Stealth roll ourselves. */
 interface Banked {
@@ -213,55 +221,78 @@ function hasStatus(doc: any, id: string): boolean {
   }
 }
 
-/** The ranges of the senses that see through concealment, keyed by sense. */
-function piercingRanges(spotter: any): Record<string, number> {
-  const out: Record<string, number> = {};
-
-  // Vision 5e computes this for every actor whether or not the token has sight switched on, which makes
-  // it strictly better than reading the sheet ourselves. Absent, we read the sheet.
-  const derived: any = spotter?.actor?.detectionModes;
-  if (derived && typeof derived === "object" && !Array.isArray(derived)) {
-    for (const mode of PIERCING_MODES) {
-      const range = Number(derived[mode]);
-      if (Number.isFinite(range) && range !== 0) out[mode] = range < 0 ? Infinity : range;
-    }
-    if (Object.keys(out).length > 0) return out;
+/**
+ * Everything this creature can bring to bear on someone trying not to be seen, at this distance.
+ *
+ * Senses are range-limited, because blindsight 30 is not blindsight. Capabilities that come from a spell
+ * or a feature by name are not: their real ranges vary, and guessing wrongly in either direction is worse
+ * than taking "I cast See Invisibility" to mean what it says.
+ */
+function capabilities(spotter: any, distance: number): { tags: Set<string>; bonus: number } {
+  const tags = new Set<string>();
+  for (const [tag, range] of Object.entries(sheetSenses(spotter?.actor))) {
+    if (distance <= range) tags.add(tag);
   }
-
-  const senses: any = spotter?.actor?.system?.attributes?.senses ?? {};
-  const ranges: any = senses?.ranges ?? senses;
-  for (const sense of PIERCING) {
-    const range = Number(ranges?.[sense]);
-    if (Number.isFinite(range) && range > 0) out[sense] = range;
-  }
-  return out;
+  const named = detectorsOn(spotter?.actor);
+  for (const tag of named.tags) tags.add(tag);
+  return { tags, bonus: named.bonus };
 }
 
-/**
- * Concealment that has nothing to do with dice: invisibility and the Ethereal Plane.
- *
- * Only consulted on the fallback path in `perception.ts` — the one taken by a creature with no detection
- * modes configured, which is most of the bestiary. When real detection modes run, core already enforces
- * all of this and doing it twice would be both redundant and a way to disagree with the screen.
- */
-export function concealed(spotter: any, target: any, distance: number): string | null {
+/** Concealment that carries no name we would match: the plain status effects. */
+function statusVeils(target: any): Concealment[] {
   const doc = target?.document ?? target;
   const special: any = (globalThis as any).CONFIG?.specialStatusEffects ?? {};
-  const piercing = piercingRanges(spotter);
-  const reaches = Object.values(piercing).some((range) => distance <= range);
+  const found: Concealment[] = [];
 
-  if (hasStatus(doc, String(special.INVISIBLE ?? "invisible")) && !reaches) return "invisible";
-  // Vision 5e's status, and harmless to check without it: nothing else sets `ethereal`.
-  if (hasStatus(doc, "ethereal") && !piercing.etherealSight && !piercing.seeAll)
-    return "on the Ethereal Plane";
-  return null;
+  // Folded in here so a token made invisible by any route — a spell, a module, the GM ticking the icon —
+  // reaches the same code as one carrying an effect named "Greater Invisibility".
+  if (hasStatus(doc, String(special.INVISIBLE ?? "invisible"))) {
+    found.push({
+      label: "invisible",
+      pierced: ["truesight", "seeInvisible", "blindsight", "tremorsense"],
+      bonus: 0,
+      absolute: true,
+      negates: [],
+    });
+  }
+  if (hasStatus(doc, "ethereal")) {
+    found.push({
+      label: "on the Ethereal Plane",
+      pierced: ["truesight", "etherealSight"],
+      bonus: 0,
+      absolute: true,
+      negates: [],
+    });
+  }
+  return found;
+}
+
+/** Every concealment on a creature, from names and from statuses, without duplicates. */
+function veils(target: any): Concealment[] {
+  const found = concealmentsOn(target?.actor);
+  for (const veil of statusVeils(target)) {
+    if (!found.some((seen) => seen.label === veil.label)) found.push(veil);
+  }
+  return found;
 }
 
 /**
  * Does `target` evade `spotter` this sweep? Returns why, or null when the creature is plainly seen.
  *
- * `distance` is only used for concealment; the Stealth contest itself is rangeless, because 5e gives no
- * distance penalty to Perception and inventing one would be house-ruling in code.
+ * Order of resolution, and each step earns its place:
+ *   1. Work out what the spotter can do, then let the hider's wards take capabilities away. Nondetection
+ *      conceals nobody — it blinds the diviner — so it has to be applied to the watcher, not the hider.
+ *   2. Any unpierced absolute concealment hides the creature outright, roll or no roll. An invisible bard
+ *      who never touched the Stealth skill is still invisible.
+ *   3. Otherwise contest, with every concealment's bonus added to the Stealth DC. This is where Pass
+ *      Without Trace earns its +10 and a wolf's keen senses earn their +5 the other way.
+ *
+ * `useModes` says whether core's own detection modes already ran. When they did, core has enforced plain
+ * invisibility itself and we must not judge it twice, or we would disagree with what is on screen.
+ * Everything core knows nothing about — which is every entry in the table bar invisibility — still applies.
+ *
+ * Distance reaches only the senses. The contest itself is rangeless: 5e gives no distance penalty to
+ * Perception, and inventing one would be house-ruling in code.
  */
 export function evades(
   spotter: any,
@@ -269,24 +300,46 @@ export function evades(
   distance: number,
   useModes: boolean,
 ): string | null {
-  if (!useModes) {
-    const hidden = concealed(spotter, target, distance);
-    if (hidden) return hidden;
+  const present = veils(target);
+  const { tags, bonus } = capabilities(spotter, distance);
+  for (const veil of present) {
+    for (const lost of veil.negates) tags.delete(lost);
+  }
+
+  for (const veil of present) {
+    if (!veil.absolute) continue;
+    if (useModes && veil.label === "invisible") continue;
+    if (veil.pierced.some((tag) => tags.has(tag))) continue;
+    return veil.label;
   }
 
   const hiding = hidingState(target);
   if (!hiding) return null;
 
-  const perception = passivePerception(spotter);
-  if (perception >= hiding.dc) return null;
+  const dc = hiding.dc + present.reduce((sum, veil) => sum + veil.bonus, 0);
+  const perception = passivePerception(spotter) + bonus;
+  if (perception >= dc) return null;
 
-  const dc = Number.isFinite(hiding.dc) ? hiding.dc : "unreachable";
-  return `hidden — ${hiding.from} says DC ${dc} against passive Perception ${perception}`;
+  const shown = Number.isFinite(dc) ? String(dc) : "unreachable";
+  return `hidden — ${hiding.from} says DC ${shown} against passive Perception ${perception}`;
 }
 
-/** A human-readable line about what a token is doing to stay unseen, for diagnostics. */
+/** What a creature is doing to stay unseen, for diagnostics. */
 export function describeStealth(token: any): string {
+  const parts: string[] = [];
   const hiding = hidingState(token);
-  if (!hiding) return "not hiding";
-  return `hiding at DC ${hiding.dc} (${hiding.from})`;
+  if (hiding) parts.push(`hiding at DC ${hiding.dc} (${hiding.from})`);
+  for (const veil of veils(token)) parts.push(veil.label);
+  return parts.length > 0 ? parts.join("; ") : "not hiding";
+}
+
+/** What a creature brings to spotting people, for diagnostics. */
+export function describeSenses(token: any): string {
+  const senses = Object.entries(sheetSenses(token?.actor)).map(
+    ([tag, range]) => `${tag} ${Number.isFinite(range) ? range : "unlimited"}`,
+  );
+  const named = detectorsOn(token?.actor);
+  const all = [...senses, ...named.labels];
+  if (named.bonus) all.push(`+${named.bonus} passive Perception`);
+  return all.length > 0 ? all.join(", ") : "nothing special";
 }

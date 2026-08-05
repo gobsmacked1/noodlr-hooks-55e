@@ -43,7 +43,7 @@ import {
   isStealthEnabled,
 } from "../config";
 import { initiativeSettled } from "./hooks";
-import { describeStealth, evades, passivePerception } from "./stealth";
+import { describeSenses, describeStealth, evades, passivePerception } from "./stealth";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
 const POLL_MS = 6000;
@@ -380,6 +380,7 @@ export async function surveyPerception(): Promise<Record<string, unknown>> {
           distance: Math.round(distance * 10) / 10,
           detectionModes: modes.length > 0 ? modes.join(", ") : "none (falling back to stat block)",
           passivePerception: passivePerception(spotter),
+          spotterSenses: describeSenses(spotter),
           targetState: describeStealth(target),
           verdict: perceives(spotter, target, vision) ? "SPOTTED" : "unnoticed",
         });
