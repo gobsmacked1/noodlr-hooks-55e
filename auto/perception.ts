@@ -4,6 +4,11 @@
 // automation (user, 2026-08-04): the GM has already said they want the mechanical work offloaded, and
 // the one thing standing between an unattended encounter and a running one is two clicks.
 //
+// Detection is deliberately ONE-WAY: only a hostile creature noticing a player starts anything. A party
+// creeping past a sleeping warband can see every one of them without consequence, because a party that
+// chose to sneak has chosen not to fight, and a system that opened combat on the players' own eyeballs
+// would make stealth impossible (user, 2026-08-04). Nothing here ever tests a player as the spotter.
+//
 // The hard part is asking "can that monster see that player" at all. Three layers of trap, all verified:
 //
 //   1. `token.isVisible` and `canvas.visibility.testVisibility` both answer a DIFFERENT question —
@@ -31,7 +36,7 @@
 import { log, MODULE_ID } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
 import { readHp } from "../tracker";
-import { getCombatAutomation, isAutoEngageEnabled } from "../config";
+import { getCombatAutomation, getEngageRadius, isAutoEngageEnabled } from "../config";
 import { initiativeSettled } from "./hooks";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
@@ -347,11 +352,26 @@ async function waitForInitiative(combat: any): Promise<boolean> {
 }
 
 /**
- * Start the fight.
+ * Everything that joins the fight the spotter just started.
  *
- * Everything hostile and everything player-owned on the scene joins, not just the pair that noticed
- * each other — a lookout spotting the party does not fight them single-handed while the rest of its
- * warband stands idle one room away.
+ * The spotter's side is limited to what it can shout to — see `getEngageRadius`. The party is not:
+ * adventurers arrive together and a scout who is spotted 60 ft ahead of the marching order is not
+ * fighting alone, so every living player-owned token on the scene rolls. The asymmetry is deliberate.
+ */
+function combatants(spotter: any): any[] {
+  const radius = getEngageRadius();
+  const heard = (t: any) => String(t?.id) === String(spotter?.id) || reach(spotter, t) <= radius;
+  return tokensOnScene().filter((t) => (isHostile(t) ? heard(t) : isPlayerToken(t)));
+}
+
+/** Distance between two tokens with height counted, so a sentry on a balcony is as far as it looks. */
+function reach(a: any, b: any): number {
+  const rise = Number(b?.document?.elevation ?? 0) - Number(a?.document?.elevation ?? 0);
+  return Math.hypot(separation(a, b), rise || 0);
+}
+
+/**
+ * Start the fight.
  */
 async function engage(spotter: any, target: any): Promise<void> {
   const scene: any = (canvas as any)?.scene;
@@ -359,7 +379,10 @@ async function engage(spotter: any, target: any): Promise<void> {
   const targetName = String(target?.name ?? "someone");
   log(`perception: ${spotterName} spots ${targetName}; starting combat`);
 
-  const joining = tokensOnScene().filter((t) => isHostile(t) || isPlayerToken(t));
+  const joining = combatants(spotter);
+  const allies = joining.filter((t) => isHostile(t)).length - 1;
+  if (allies > 0)
+    log(`perception: ${spotterName} calls in ${allies} other hostile(s) within earshot`);
 
   // Vetoable, so a GM or another module can call off an engagement it knows better about.
   if (Hooks.call("noodlrPreCombatInitiated", spotter, target) === false) {

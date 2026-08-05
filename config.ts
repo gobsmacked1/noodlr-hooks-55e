@@ -48,6 +48,29 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.engageRadius, {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 30,
+  });
+}
+
+/**
+ * How far a creature that spots the party can call for help, in the scene's distance units.
+ *
+ * Without a limit, one perceptive sentry drags every hostile on the map into the fight, which is both
+ * implausible and unplayable (user, 2026-08-04) — a scene built as four separate encounters becomes one
+ * enormous one the moment a single goblin looks the right way. 30 ft is shouting distance and the
+ * default. 0 means the spotter fights alone; there is no "whole scene" value on purpose, though a large
+ * number gets you there.
+ *
+ * Deliberately measured through walls: this models a shout, and a warband behind a door still hears it.
+ */
+export function getEngageRadius(): number {
+  const raw = Number(game.settings.get(MODULE_ID, COMBAT_SETTINGS.engageRadius));
+  if (!Number.isFinite(raw) || raw < 0) return 30;
+  return raw;
 }
 
 /**
