@@ -164,6 +164,12 @@ export function registerMovementCap(): void {
           if (!budget) return options;
           // The extra Speed is the Dash they have not bought yet: they are allowed to drag into it, and
           // charged for it on arrival.
+          //
+          // ONE Dash of headroom at a time, deliberately, even for a rogue who could afford two. Three
+          // times its Speed remains reachable — the second drag is offered another Speed of headroom the
+          // moment the first Dash is paid for — but each Dash costs a separate deliberate drag rather
+          // than being handed over in one motion. A mis-drag should not be able to spend a creature's
+          // action AND its bonus action before the player has noticed either.
           options.maxCost = budget.allowance + (budget.dash ? budget.speed : 0);
         } catch (err) {
           log("could not work out a movement budget for this drag:", err);
@@ -215,36 +221,51 @@ export function registerMovementCap(): void {
 }
 
 /**
- * Spend the Action if this creature has now gone further than its Speed.
+ * Pay for however far this creature has actually gone.
  *
- * Written by whoever owns the token, which is the same client that just moved it. Guarded on the
- * ledger's own verdict so that a creature with nothing left to spend is never charged for a move that
- * truncation should have prevented.
+ * A loop rather than a single charge, because one move can owe more than one Dash. A rogue in a hurry may
+ * legitimately spend its full movement, its bonus action on Cunning Action, AND its action on a second
+ * Dash, for three times its Speed in one turn (user, 2026-08-06) — and it may cross all of that in a
+ * single drag rather than three tidy ones. Charging once per move event would let the second Dash go
+ * unpaid. Each iteration re-reads the budget, so the allowance grows as the debt is settled and the loop
+ * stops as soon as the distance is covered or the creature runs out of things to spend.
+ *
+ * Written by whoever owns the token, which is the same client that just moved it. `takeDash` updates the
+ * ledger's same-client shadow synchronously, so the re-read sees each charge without waiting on a flag
+ * round trip.
  */
 async function chargeDash(doc: any): Promise<void> {
   try {
-    const budget = budgetFor(doc);
-    if (!budget || budget.spent <= budget.allowance) return;
-    const cost = budget.dash;
-    if (!cost) return;
+    const charged: Array<{ cost: DashCost; speed: number }> = [];
 
-    takeDash(budget.actor, game.combat, budget.combatant, cost.slot);
+    // Bounded purely as a runaway guard: nothing in the rules reaches four Dashes in one turn, and a
+    // budget that never catches up would otherwise spin.
+    for (let guard = 0; guard < 4; guard++) {
+      const budget = budgetFor(doc);
+      if (!budget || budget.spent <= budget.allowance) break;
+      const cost = budget.dash;
+      if (!cost) break;
+      takeDash(budget.actor, game.combat, budget.combatant, cost.slot);
+      charged.push({ cost, speed: budget.speed });
+    }
 
     const ChatMessage = (globalThis as any).ChatMessage;
-    await ChatMessage.create({
-      content: `<p>${game.i18n.format(
-        cost.slot === "bonus"
-          ? "NOODLR.Combat.Movement.DashedBonus"
-          : "NOODLR.Combat.Movement.Dashed",
-        {
-          name: String(doc?.name ?? "?"),
-          source: cost.source,
-          speed: round(budget.speed),
-          units: String((canvas as any)?.scene?.grid?.units ?? ""),
-        },
-      )}</p>`,
-      speaker: { alias: String(doc?.name ?? "") },
-    });
+    for (const { cost, speed } of charged) {
+      await ChatMessage.create({
+        content: `<p>${game.i18n.format(
+          cost.slot === "bonus"
+            ? "NOODLR.Combat.Movement.DashedBonus"
+            : "NOODLR.Combat.Movement.Dashed",
+          {
+            name: String(doc?.name ?? "?"),
+            source: cost.source,
+            speed: round(speed),
+            units: String((canvas as any)?.scene?.grid?.units ?? ""),
+          },
+        )}</p>`,
+        speaker: { alias: String(doc?.name ?? "") },
+      });
+    }
   } catch (err) {
     log("could not charge a Dash:", err);
   }
