@@ -16,6 +16,8 @@
 
 import { log } from "../../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward } from "./movement";
+import { duringAutomation } from "../economy/enforce";
+import { check, slotFor } from "../economy/ledger";
 import type { PlanOption, TurnPlan } from "./planner";
 
 export interface Performed {
@@ -102,17 +104,52 @@ async function useAction(
     attempts.push(() => item.use({ configureDialog: false }));
   }
 
-  let lastError: unknown;
-  for (const attempt of attempts) {
-    try {
-      await attempt();
-      return action.name;
-    } catch (err) {
-      lastError = err;
+  // Asked before it is attempted, not only vetoed in the hook. A hook veto cancels the use without
+  // throwing, so the loop below would see a clean return and report the action as taken — the turn
+  // narration would then describe a swing that never happened, which is worse than the swing.
+  const refusal = unaffordable(action);
+  if (refusal) throw new Error(refusal);
+
+  // Marked as automation throughout, so the action-economy ledger holds this creature to the rules
+  // exactly rather than stopping to ask a question nobody is present to answer.
+  return duringAutomation(async () => {
+    let lastError: unknown;
+    for (const attempt of attempts) {
+      try {
+        await attempt();
+        return action.name;
+      } catch (err) {
+        lastError = err;
+      }
     }
-  }
-  if (lastError) throw lastError;
-  return undefined;
+    if (lastError) throw lastError;
+    return undefined;
+  });
+}
+
+/**
+ * Can this creature still pay for what it is about to do? Returns why not, or nothing.
+ *
+ * Silent outside combat and silent for anything the ledger does not police, so the only creatures this
+ * can stop are ones in a fight spending a slot they have already spent.
+ */
+function unaffordable(action: { item: any; activity?: any; name: string }): string | undefined {
+  const combat: any = game.combat;
+  if (!combat?.started) return undefined;
+
+  const slot = slotFor(action.activity?.activation?.type ?? (action as any).economy);
+  if (!slot) return undefined;
+
+  const actor = action.activity?.actor ?? action.item?.actor;
+  if (!actor) return undefined;
+  const combatant = (combat.combatants ?? []).find?.(
+    (c: any) => String(c?.actor?.uuid ?? "") === String(actor?.uuid ?? ""),
+  );
+  if (!combatant) return undefined;
+
+  const isAttack = String(action.activity?.type ?? "") === "attack";
+  if (check(actor, combat, combatant, slot, isAttack).allowed) return undefined;
+  return `no ${slot} left this turn`;
 }
 
 /**

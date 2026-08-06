@@ -60,6 +60,32 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.economy, {
+    scope: "world",
+    config: false,
+    type: String,
+    default: "warn",
+  });
+}
+
+/**
+ * How hard a player is held to one action, one bonus action and one reaction per turn.
+ *
+ * Creatures Noodlr plays are always held to the rules exactly and this setting does not reach them; it
+ * governs the people at the table, who are a different problem (user, 2026-08-05).
+ *
+ *   off   — count nothing, stop nobody. What Foundry and dnd5e do today.
+ *   warn  — ask, and write every "continue anyway" to the public chat log. The default.
+ *   block — refuse outright. The GM is still only ever asked, never refused.
+ *
+ * "warn" is the default rather than "block" because the rules break their own general case constantly:
+ * Haste hands out an extra action, and a system with no way to say yes turns every such feature into a
+ * bug report. Asking privately and answering publicly keeps the override usable without making it
+ * abusable — the table sees each one, so nobody has to police it.
+ */
+export function getEconomyMode(): "off" | "warn" | "block" {
+  const raw = String(game.settings.get(MODULE_ID, COMBAT_SETTINGS.economy) ?? "warn");
+  return raw === "off" || raw === "block" ? raw : "warn";
 }
 
 /**

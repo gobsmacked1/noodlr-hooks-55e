@@ -22,10 +22,12 @@
 // `preCheckHits` is the last point at which an AC change is still read) plus a native Counterspell via
 // dnd5e's own activity-use hooks. Planned, specified in AGENTS.md, not guessed at here.
 //
-// The bookkeeping is ours too. Whether a creature has spent its reaction this round is tracked in this
-// file, not read from any module's flags, for exactly the same reason.
+// The bookkeeping is ours too. Whether a creature has spent its reaction is read from Noodlr's own
+// action-economy ledger rather than any module's flags, for exactly the same reason — and from the same
+// ledger a player's reaction is drawn against, so automation and the table cannot disagree about it.
 
 import { log } from "../../constants";
+import { hasReaction, spend } from "../economy/ledger";
 import { isPrimaryGM } from "../../util/gm";
 import { readActions, type CreatureAction } from "../actions";
 import { readHp } from "../tracker";
@@ -35,9 +37,6 @@ import { shouldAutomate } from "./registry";
 import { useActionAt } from "./execute";
 import { can, mentalScore, tierForScore, tierProfile } from "./tiers";
 import { turnRandom } from "./random";
-
-/** Reactions spent this round: combatant id -> the round it was spent in. */
-const spent = new Map<string, number>();
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -60,14 +59,8 @@ const DISENGAGED = /disengag|withdraw/i;
 
 export function registerReactionHooks(): void {
   Hooks.on("deleteCombat", () => {
-    spent.clear();
     departing.clear();
     wounded.clear();
-  });
-
-  Hooks.on("updateCombat", (_combat: any, changed: any) => {
-    // A new round returns everyone's reaction. Turn changes do not: a reaction lasts the round.
-    if ("round" in (changed ?? {})) spent.clear();
   });
 
   // `moveToken` carries the whole route: `movement.origin`, `movement.passed.waypoints`, and the action
@@ -218,21 +211,16 @@ function profileFor(actor: any): ReturnType<typeof tierProfile> {
   return tierProfile(mental === null ? 4 : tierForScore(mental));
 }
 
-export function hasReaction(combatant: any): boolean {
-  const id = String(combatant?.id ?? "");
-  if (!id) return false;
-  return spent.get(id) !== Number((game.combat as any)?.round ?? 0);
-}
-
 function spendReaction(combatant: any): void {
-  spent.set(String(combatant?.id ?? ""), Number((game.combat as any)?.round ?? 0));
+  const actor = combatant?.actor;
+  if (actor) spend(actor, game.combat, combatant, "reaction", false);
 
-  // Tell midi as well, when it is there. Not for our own bookkeeping — the ledger above is authoritative
+  // Tell midi as well, when it is there. Not for our own bookkeeping — the ledger is authoritative
   // and works alone — but because midi skips any reaction activity whose owner has spent their reaction,
   // which makes its own prompt suppress itself instead of asking the GM to react a second time.
-  // Silently inert unless the table set midi's "Enforce Reactions" to All or Display Only; harmless then.
+  // Silently inert unless the table set midi's "Enforce Reactions" to All or Display Only (its default
+  // is "none", verified in midi 14.0.11 source); harmless either way.
   const midi: any = (globalThis as any).MidiQOL;
-  const actor = combatant?.actor;
   if (!actor || typeof midi?.setReactionUsed !== "function") return;
   try {
     if (typeof midi.hasUsedReaction === "function" && midi.hasUsedReaction(actor)) return;
