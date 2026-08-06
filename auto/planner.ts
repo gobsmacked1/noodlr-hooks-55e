@@ -23,6 +23,7 @@ import { readActions, type CreatureAction } from "../actions";
 import { isMercifulSort, partyHasCeasedAggression, partyIsDefeated } from "./encounter";
 import { readBoard, type Board, type BoardActor } from "./board";
 import { findConcealment, type Spot } from "./positioning";
+import { findWayOut, hazardsUnder } from "./hazards";
 import { turnRandom } from "./random";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
 
@@ -43,7 +44,8 @@ export type PlanKind =
   | "hide"
   | "help"
   | "surrender"
-  | "mercy";
+  | "mercy"
+  | "escape";
 
 export interface PlanOption {
   kind: PlanKind;
@@ -493,6 +495,47 @@ function hideOptions(
   return [{ kind: "hide", target: nearest, spot, observer: nearest.name, score, reasons }];
 }
 
+/**
+ * Getting out of something that is burning you.
+ *
+ * Scored above a routine attack but not above self-preservation, and only offered when a way out was
+ * actually found — a creature announcing that it steps clear of the fire and then standing in it is
+ * worse than one that never noticed. Below `understandsHazards` on the ladder a creature genuinely does
+ * not work this out: an ooze in a cloud of poison stays in the cloud, and that is correct.
+ *
+ * The scaling is on how hurt it already is. A dragon at full health shrugs off a burning square to keep
+ * fighting; the same dragon at a quarter health leaves.
+ */
+function hazardOptions(board: Board, p: TierProfile): PlanOption[] {
+  if (!can(p, "understandsHazards")) return [];
+
+  const standing = hazardsUnder(board.self.token);
+  if (standing.length === 0) return [];
+
+  const budget = board.speed ?? 0;
+  const spot = findWayOut(board.self.token, budget);
+  if (!spot) return [];
+
+  const worst = Math.max(...standing.map((h) => h.severity));
+  const hp = board.self.hpFraction;
+  const urgency = hp === null ? 1 : 1 + (1 - hp);
+  const trapped = standing.some((h) => h.restrains);
+
+  return [
+    {
+      kind: "escape",
+      spot,
+      // Halved when something is holding it in place: it may not get out at all, and a creature that
+      // spends its whole turn failing to escape a web should sometimes just attack from inside it.
+      score: worst * urgency * (trapped ? 0.5 : 1),
+      reasons: [
+        `standing in ${standing.map((h) => h.label).join(" and ")}`,
+        `clear ground ${spot.travel} ${board.units} ${spot.bearing}`,
+      ],
+    },
+  ];
+}
+
 function survivalOptions(board: Board, p: TierProfile): PlanOption[] {
   const options: PlanOption[] = [];
   const hp = board.self.hpFraction;
@@ -556,7 +599,14 @@ function coverIntent(
 ): { text: string; spot: Spot } | undefined {
   if (!can(p, "seekCover")) return undefined;
   // Already leaving, already breaking away, or already hiding: the movement is spoken for.
-  if (chosen.kind === "flee" || chosen.kind === "kite" || chosen.kind === "hide") return undefined;
+  if (
+    chosen.kind === "flee" ||
+    chosen.kind === "kite" ||
+    chosen.kind === "hide" ||
+    chosen.kind === "escape"
+  ) {
+    return undefined;
+  }
   if (board.speed === null || board.speed <= 0) return undefined;
 
   const shooters = board.enemies.filter((e) => threat(e).hasRanged);
@@ -609,6 +659,7 @@ export function planTurn(combatant: any): TurnPlan | null {
     ...helpOptions(board, profile, threat),
     ...yieldOptions(board, profile, actor),
     ...survivalOptions(board, profile),
+    ...hazardOptions(board, profile),
   ];
   if (options.length === 0) return null;
 

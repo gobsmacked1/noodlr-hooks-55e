@@ -66,6 +66,40 @@ export function registerCombatSettings(): void {
     type: String,
     default: "warn",
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.movement, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.autoEnd, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+}
+
+/**
+ * Does a creature's Speed actually limit how far a player can drag it in a turn?
+ *
+ * Nothing else enforces this. Core Foundry records how far a token has moved this turn and dnd5e
+ * colours the drag ruler green/amber/red against Speed, but neither ever stops anyone — a player can
+ * cross the whole map on one turn and the only consequence is that the ruler turns red (user,
+ * 2026-08-05). On by default, since a movement budget nobody applies is not a rule.
+ */
+export function isMovementCapEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.movement));
+}
+
+/**
+ * Does the tracker clear itself when the last hostile falls?
+ *
+ * On by default. The alternative is what the table saw: a finished fight that still hands out turns,
+ * so the GM plays out an initiative order in which nobody has an enemy left (user, 2026-08-05).
+ */
+export function isAutoEndEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoEnd));
 }
 
 /**

@@ -74,6 +74,8 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} lowers its weapon and spares the party.`;
     case "flee":
       return `${me} breaks off and tries to escape.`;
+    case "escape":
+      return `${me} ${travel.close} ${o.spot?.travel ?? 0} ${units} ${o.spot?.bearing ?? "clear"} to get out of ${o.reasons[0]?.replace(/^standing in /, "") ?? "danger"}.`;
     case "call":
       return `${me} calls out for help.`;
     default:

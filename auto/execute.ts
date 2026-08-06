@@ -172,7 +172,7 @@ export async function useActionAt(
 }
 
 /** Plans whose whole point is that the creature ends up somewhere else. */
-const MOVING_PLANS = new Set(["close", "kite", "hide", "advance", "help", "flee"]);
+const MOVING_PLANS = new Set(["close", "kite", "hide", "advance", "help", "flee", "escape"]);
 
 /** Movement budget left for the mechanical part of the turn, in scene units. */
 function speedOf(plan: TurnPlan): number {
@@ -239,6 +239,13 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
       }
 
       case "hide":
+        if (option.spot) result.moved = await moveTo(selfToken, option.spot);
+        break;
+
+      // Getting clear of something harmful is the whole turn. It carries no item to use afterwards:
+      // the creature has spent its movement leaving, and whether anything is still in reach from
+      // where it lands is next turn's question.
+      case "escape":
         if (option.spot) result.moved = await moveTo(selfToken, option.spot);
         break;
 

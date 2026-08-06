@@ -17,6 +17,7 @@ import { isPrimaryGM } from "../../util/gm";
 import { runTurnFor } from "../npc-turn";
 import { shouldAutomate } from "./registry";
 import { hasResolved } from "./encounter";
+import { readHp } from "../tracker";
 
 /**
  * Floor on how long an automated turn occupies the table, in milliseconds.
@@ -47,7 +48,12 @@ let consecutive = 0;
  * `startedAt` is when the turn began, so the configured pace is measured across the whole turn rather
  * than added to it.
  */
-async function endAutomatedTurn(combat: any, playedId: string, startedAt: number): Promise<void> {
+async function endAutomatedTurn(
+  combat: any,
+  playedId: string,
+  startedAt: number,
+  opts: { pace?: boolean } = {},
+): Promise<void> {
   if (!combat?.started) return;
   // The GM may have advanced manually while the turn was resolving, or the encounter may have ended on
   // a surrender. Either way the tracker has moved on without us and must not be nudged again.
@@ -61,10 +67,15 @@ async function endAutomatedTurn(combat: any, playedId: string, startedAt: number
     return;
   }
 
-  const remaining = paceFloorMs() - (Date.now() - startedAt);
-  if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
-  // Re-check: the pause is long enough for the GM to have acted during it.
-  if (!combat?.started || String(combat.combatant?.id ?? "") !== playedId) return;
+  // The pace exists so the table can follow a turn. A turn in which nothing happened has nothing to
+  // follow, so it is skipped at once (user, 2026-08-05: six-second pauses for dead creatures "become a
+  // huge nuisance as combat comes to a close" — a wiped enemy line meant half a minute of empty waiting).
+  if (opts.pace !== false) {
+    const remaining = paceFloorMs() - (Date.now() - startedAt);
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+    // Re-check: the pause is long enough for the GM to have acted during it.
+    if (!combat?.started || String(combat.combatant?.id ?? "") !== playedId) return;
+  }
 
   try {
     await combat.nextTurn();
@@ -88,6 +99,19 @@ export function initiativeSettled(combat: any): boolean {
     if (combatant?.initiative === null || combatant?.initiative === undefined) return false;
   }
   return true;
+}
+
+/**
+ * Is this creature out of the fight?
+ *
+ * Read from the tracker's own defeated mark AND from hit points, because the two disagree often enough
+ * to matter: a creature killed by a module that never set the status is still a corpse, and a GM who
+ * ticked the skull on something at full health has still said it is out.
+ */
+function isDown(combatant: any): boolean {
+  if (combatant?.isDefeated) return true;
+  const hp = readHp(combatant?.actor);
+  return Boolean(hp && hp.value !== null && hp.value <= 0);
 }
 
 /** The turn currently being played, as combat:round:combatant, so no route plays it twice. */
@@ -127,12 +151,12 @@ function takeTurn(combat: any): void {
   if (playing === token) return;
   playing = token;
 
-  // A creature that ran, gave up, or stood down does not get played again if the tracker still
-  // holds a turn for it. It still needs skipping past, though, or the fight stalls on it.
+  // A creature that ran, gave up, stood down or died does not get played again if the tracker still
+  // holds a turn for it. It still needs skipping past, though, or the fight stalls on it — and it is
+  // skipped without the pace, because there is nothing to watch.
   const startedAt = Date.now();
-  if (hasResolved(id)) {
-    // Nothing happened, so nothing needs watching: skip a spent creature without holding the table.
-    void endAutomatedTurn(combat, id, Date.now());
+  if (hasResolved(id) || isDown(combatant)) {
+    void endAutomatedTurn(combat, id, startedAt, { pace: false });
     return;
   }
 

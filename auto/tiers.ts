@@ -31,6 +31,12 @@ export type Consideration =
   | "targetApparentWeakest"
   /** Break off and run when badly wounded. Instinct, not reasoning — a cornered rat flees. */
   | "fleeWhenHurt"
+  /**
+   * Step out of ground that is hurting it — fire, poison, blades. Instinct rather than tactics, and
+   * deliberately withheld from tier 1: a mindless thing burns where it stands, and moths fly into
+   * flames. Everything with an animal's nervous system leaves.
+   */
+  | "understandsHazards"
   // --- Tier 3: it understands other creatures ---------------------------------------------------
   /** Back away from opponents that have hurt it badly. */
   | "avoidStrongOpponents"
@@ -115,7 +121,7 @@ const LADDER: Array<{ descriptor: string; adds: Consideration[]; noise: number; 
       descriptor: "Animal instincts only",
       // Fleeing moved down from tier 3 (user, 2026-08-02): running from pain is instinct, not
       // reasoning. A cornered rat manages it.
-      adds: ["targetApparentWeakest", "fleeWhenHurt"],
+      adds: ["targetApparentWeakest", "fleeWhenHurt", "understandsHazards"],
       noise: 0.7,
       breadth: 4,
     },

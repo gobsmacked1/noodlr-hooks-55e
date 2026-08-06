@@ -50,6 +50,8 @@ interface Tally {
   bonus: number;
   reaction: number;
   attack: number;
+  /** Dashes bought this turn. Each one is an Action already counted above, and buys another Speed. */
+  dash: number;
 }
 
 const FLAG = "spent";
@@ -63,7 +65,7 @@ const FLAG = "spent";
 const local = new Map<string, Tally>();
 
 function zero(stamp: string): Tally {
-  return { stamp, action: 0, bonus: 0, reaction: 0, attack: 0 };
+  return { stamp, action: 0, bonus: 0, reaction: 0, attack: 0, dash: 0 };
 }
 
 /** The activation types this file is willing to police. Everything else is somebody else's business. */
@@ -101,6 +103,7 @@ function readTally(actor: any, stamp: string): Tally {
         bonus: Number(stored.bonus) || 0,
         reaction: Number(stored.reaction) || 0,
         attack: Number(stored.attack) || 0,
+        dash: Number(stored.dash) || 0,
       };
     }
   } catch {
@@ -113,6 +116,7 @@ function readTally(actor: any, stamp: string): Tally {
     tally.bonus = Math.max(tally.bonus, shadow.bonus);
     tally.reaction = Math.max(tally.reaction, shadow.reaction);
     tally.attack = Math.max(tally.attack, shadow.attack);
+    tally.dash = Math.max(tally.dash, shadow.dash);
   }
   return tally;
 }
@@ -262,6 +266,33 @@ export function spend(
     });
   } catch {
     /* an actor we may not write is an actor we do not police */
+  }
+}
+
+/**
+ * Dashes bought this turn, each worth another Speed of movement.
+ *
+ * Kept in the turn ledger rather than alongside the movement code so that it resets on exactly the same
+ * lazy stamp as the Action that paid for it. A Dash counted anywhere else would have to be reset by
+ * somebody, and whoever that was would eventually disagree with this file about when the turn began.
+ */
+export function dashesTaken(actor: any, combat: any, combatant: any): number {
+  return readTally(actor, stampFor(combat, combatant)).dash;
+}
+
+/** Charge an Action as a Dash, and record the extra Speed it bought. */
+export function takeDash(actor: any, combat: any, combatant: any): void {
+  const stamp = stampFor(combat, combatant);
+  const tally = readTally(actor, stamp);
+  tally.action += 1;
+  tally.dash += 1;
+  local.set(String(actor?.uuid ?? ""), tally);
+  try {
+    void Promise.resolve(actor?.setFlag?.(MODULE_ID, FLAG, tally)).catch(() => {
+      /* see spend() */
+    });
+  } catch {
+    /* ditto */
   }
 }
 

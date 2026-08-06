@@ -223,21 +223,39 @@ function spellSlotAvailable(item: any, actor: any): boolean {
 }
 
 /** Activity-level uses, which are tracked separately from the item's own. */
-function activityAvailable(activity: any, actor: any): boolean {
+function activityAvailable(activity: any, item: any): boolean {
   const max = Number(activity?.uses?.max);
   if (Number.isFinite(max) && max > 0) {
     const spent = Number(activity?.uses?.spent ?? 0);
     if (max - spent <= 0) return false;
   }
 
-  // Ammunition: the empty-quiver case, which is the whole point of tracking any of this.
-  for (const target of activity?.consumption?.targets ?? []) {
-    if (String(target?.type ?? "") !== "ammunition") continue;
-    const ammo = target?.target ? actor?.items?.get?.(target.target) : null;
-    const quantity = Number(ammo?.system?.quantity);
-    if (Number.isFinite(quantity) && quantity <= 0) return false;
-  }
+  // Ammunition: the empty-quiver case, and the reason any of this is tracked at all.
+  //
+  // The first pass looked for a consumption target of type "ammunition", which does not exist. dnd5e
+  // 5.x has exactly six consumption types — activityUses, itemUses, material, hitDice, spellSlots,
+  // attribute (`config.mjs` DND5E.activityConsumptionTypes) — and ammunition is not among them: it is a
+  // property of the WEAPON, resolved against the actor's stock at roll time. So the check never matched
+  // anything, an archer with an empty quiver looked perfectly armed, and the creature spent its turn
+  // trying to fire a bow it could not fire instead of drawing the sword on its own sheet (user,
+  // 2026-08-05). Asking the item's own getter is both correct and version-proof: it already filters the
+  // actor's consumables to the right subtype and marks the empty ones `disabled`.
+  if (outOfAmmunition(item)) return false;
   return true;
+}
+
+/** A weapon that needs ammunition and has none left in the pack. */
+function outOfAmmunition(item: any): boolean {
+  const properties = item?.system?.properties;
+  const needsAmmo =
+    typeof properties?.has === "function" ? properties.has("amm") : Boolean(properties?.amm);
+  if (!needsAmmo) return false;
+
+  const options = item.system?.ammunitionOptions;
+  // A weapon flagged for ammunition on a system that cannot enumerate any is left alone: refusing to
+  // let an unreadable sheet shoot at all would be a worse error than letting it shoot forever.
+  if (!Array.isArray(options)) return false;
+  return !options.some((o: any) => o?.value && !o.disabled);
 }
 
 /**
@@ -427,7 +445,7 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
       melee: !ranged,
       ranged,
       range,
-      available: baseAvailable && activityAvailable(activity, actor),
+      available: baseAvailable && activityAvailable(activity, item),
     });
   }
   return out;

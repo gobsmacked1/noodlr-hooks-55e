@@ -115,7 +115,7 @@ function candidates(): Candidate[] {
  * dnd5e has moved the origin link more than once, and in current versions it can point at an Activity
  * rather than the Item, so the resolved document is asked for its own name and then its item's.
  */
-function templateName(doc: any): string {
+export function templateName(doc: any): string {
   const direct = String(doc?.name ?? "");
   if (direct) return direct;
 
@@ -130,7 +130,7 @@ function templateName(doc: any): string {
   }
 }
 
-function inTemplate(template: any, point: { x: number; y: number }): boolean {
+export function inTemplate(template: any, point: { x: number; y: number }): boolean {
   try {
     const doc = template?.document;
     const shape = template?.shape;
@@ -142,7 +142,7 @@ function inTemplate(template: any, point: { x: number; y: number }): boolean {
   }
 }
 
-function inRegion(region: any, point: { x: number; y: number }): boolean {
+export function inRegion(region: any, point: { x: number; y: number }): boolean {
   try {
     const test = { x: point.x, y: point.y, elevation: 0 };
     if (typeof region?.document?.testPoint === "function") return region.document.testPoint(test);

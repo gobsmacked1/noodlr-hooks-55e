@@ -14,6 +14,8 @@
 
 import { log } from "../../constants";
 import { pickNumber, pickString, systemPaths } from "../system-profiles";
+import { isAutoEndEnabled } from "../config";
+import { isPrimaryGM } from "../../util/gm";
 import { releaseCombatant } from "./registry";
 import {
   awardExperience,
@@ -45,6 +47,24 @@ function stateFor(combat: any): EncounterState {
 export function registerEncounterTracking(): void {
   Hooks.on("deleteCombat", () => {
     state = null;
+  });
+
+  // The two ways a creature stops fighting without anyone announcing it: its hit points reach zero, or
+  // somebody ticks the skull in the tracker. Both are checked one tick later, so the update that
+  // triggered them has landed before the tally is read.
+  Hooks.on("updateActor", (actor: any, changed: any) => {
+    // `hpValue` is a list of candidate paths, because where hit points live is a per-system question.
+    const touched = systemPaths().hpValue.some(
+      (path) => foundry.utils.getProperty(changed ?? {}, path) !== undefined,
+    );
+    if (!touched) return;
+    if (!actor?.getActiveTokens?.().some((t: any) => t?.combatant)) return;
+    setTimeout(() => void endEncounterIfOver(game.combat), 0);
+  });
+
+  Hooks.on("updateCombatant", (combatant: any, changed: any) => {
+    if (!("defeated" in (changed ?? {}))) return;
+    setTimeout(() => void endEncounterIfOver(combatant?.parent), 0);
   });
 
   // Same version split as the artifact controls: registering the legacy name on v13 emits a
@@ -160,13 +180,36 @@ export async function resolveCombatant(combatant: any, outcome: Outcome): Promis
   await announceEncounterEndIfOver(combat);
 }
 
+/** Guard against the several routes into the end-of-fight check racing each other. */
+let closing = false;
+
+/**
+ * Check whether the fight is finished, from anywhere.
+ *
+ * Originally this ran only when a creature fled, surrendered or was spared, which meant the commonest
+ * ending of all — the party killing everything — never reached it (user, 2026-08-05: "the combat
+ * encounter didn't automatically end after all enemy NPCs had been slain"). Death is now a trigger too.
+ */
+export async function endEncounterIfOver(combat: any): Promise<void> {
+  if (!combat?.started || !isPrimaryGM() || closing) return;
+  closing = true;
+  try {
+    await announceEncounterEndIfOver(combat);
+  } catch (err) {
+    log("could not check whether the fight is over:", err);
+  } finally {
+    closing = false;
+  }
+}
+
 /**
  * A fight is over when no hostile creature is still willing and able to fight. At that point the
  * addendum's arithmetic runs: full experience for the slain and the surrendered, half for those that
  * escaped, and nothing at all if the party accepted mercy.
  *
- * Ending the encounter itself is still the GM's to press. Awarding experience is not reversible in
- * any tidy way, so it happens once, at the end, from a tally the GM can read in the same card.
+ * Awarding experience is not reversible in any tidy way, so it happens once, at the end, from a tally
+ * the GM can read in the same card. Clearing the tracker afterwards is governed by a setting, because
+ * a GM who wants to loot the bodies in initiative order should be allowed to.
  */
 async function announceEncounterEndIfOver(combat: any): Promise<void> {
   const P = systemPaths();
@@ -228,6 +271,15 @@ async function announceEncounterEndIfOver(combat: any): Promise<void> {
         : ""),
     whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
   });
+
+  if (!isAutoEndEnabled()) return;
+  // Deleted rather than ended: `Combat#endCombat` raises a confirmation dialog, and a prompt is exactly
+  // the click this is meant to save. Losing the tracker loses nothing that is not on the sheets.
+  try {
+    await combat.delete();
+  } catch (err) {
+    log("could not clear the encounter after it ended:", err);
+  }
 }
 
 /** The undo button on the mercy card. GM only — it writes to player-owned sheets. */
