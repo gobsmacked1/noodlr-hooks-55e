@@ -40,6 +40,7 @@ import { isMovementCapEnabled } from "../config";
 import { pickNumber, systemPaths } from "../system-profiles";
 import { check, dashesTaken, takeDash } from "./ledger";
 import { isAutomating } from "./enforce";
+import { bonusDashSource } from "../systems/dnd5e-dash";
 
 /**
  * What a creature may cross this turn, and what it has crossed already.
@@ -54,10 +55,35 @@ interface Budget {
   spent: number;
   /** Speed plus every Dash already paid for. */
   allowance: number;
-  /** Whether one more Dash could still be bought with an Action in hand. */
-  dashable: boolean;
+  /** How one more Dash would be paid for, or null when nothing is left to pay with. */
+  dash: DashCost | null;
   combatant: any;
   actor: any;
+}
+
+interface DashCost {
+  slot: "action" | "bonus";
+  /** The feature that makes a bonus action legal, for the chat line. Empty on the ordinary Action path. */
+  source: string;
+}
+
+/**
+ * Which slot the next Dash comes out of.
+ *
+ * The bonus action wins whenever the creature has something that grants it and the slot is free, because
+ * that is what those features are FOR — charging a rogue's Action for a Dash quietly deletes Cunning
+ * Action, on the most routine thing a rogue does all night (user, 2026-08-06). Dash remains legal as an
+ * Action, so a creature that has already spent its bonus action falls back to that.
+ */
+function dashCost(actor: any, combat: any, combatant: any): DashCost | null {
+  const source = bonusDashSource(actor);
+  if (source && check(actor, combat, combatant, "bonus", false).allowed) {
+    return { slot: "bonus", source };
+  }
+  if (check(actor, combat, combatant, "action", false).allowed) {
+    return { slot: "action", source: "" };
+  }
+  return null;
 }
 
 function budgetFor(doc: any): Budget | null {
@@ -82,7 +108,7 @@ function budgetFor(doc: any): Budget | null {
     speed,
     spent: spentThisTurn(doc),
     allowance: speed * (1 + dashes),
-    dashable: check(actor, combat, combatant, "action", false).allowed,
+    dash: dashCost(actor, combat, combatant),
     combatant,
     actor,
   };
@@ -138,7 +164,7 @@ export function registerMovementCap(): void {
           if (!budget) return options;
           // The extra Speed is the Dash they have not bought yet: they are allowed to drag into it, and
           // charged for it on arrival.
-          options.maxCost = budget.allowance + (budget.dashable ? budget.speed : 0);
+          options.maxCost = budget.allowance + (budget.dash ? budget.speed : 0);
         } catch (err) {
           log("could not work out a movement budget for this drag:", err);
         }
@@ -160,7 +186,7 @@ export function registerMovementCap(): void {
 
       const proposed =
         Number(movement?.passed?.cost ?? 0) + Number(movement?.pending?.cost ?? 0) + budget.spent;
-      const ceiling = budget.allowance + (budget.dashable ? budget.speed : 0);
+      const ceiling = budget.allowance + (budget.dash ? budget.speed : 0);
       // Rounded because grid arithmetic produces 30.000000000000004 and refusing a legal move over a
       // rounding error is worse than letting a fifteenth of a foot through.
       if (Math.round(proposed * 100) <= Math.round(ceiling * 100)) return true;
@@ -199,17 +225,24 @@ async function chargeDash(doc: any): Promise<void> {
   try {
     const budget = budgetFor(doc);
     if (!budget || budget.spent <= budget.allowance) return;
-    if (!budget.dashable) return;
+    const cost = budget.dash;
+    if (!cost) return;
 
-    takeDash(budget.actor, game.combat, budget.combatant);
+    takeDash(budget.actor, game.combat, budget.combatant, cost.slot);
 
     const ChatMessage = (globalThis as any).ChatMessage;
     await ChatMessage.create({
-      content: `<p>${game.i18n.format("NOODLR.Combat.Movement.Dashed", {
-        name: String(doc?.name ?? "?"),
-        speed: round(budget.speed),
-        units: String((canvas as any)?.scene?.grid?.units ?? ""),
-      })}</p>`,
+      content: `<p>${game.i18n.format(
+        cost.slot === "bonus"
+          ? "NOODLR.Combat.Movement.DashedBonus"
+          : "NOODLR.Combat.Movement.Dashed",
+        {
+          name: String(doc?.name ?? "?"),
+          source: cost.source,
+          speed: round(budget.speed),
+          units: String((canvas as any)?.scene?.grid?.units ?? ""),
+        },
+      )}</p>`,
       speaker: { alias: String(doc?.name ?? "") },
     });
   } catch (err) {
@@ -238,12 +271,13 @@ export function surveyMovement(): unknown {
     dashesTaken: doc?.combatant
       ? dashesTaken(doc.actor, game.combat, doc.combatant)
       : "not in combat",
+    bonusDashFrom: bonusDashSource(doc?.actor) ?? "— none, Dash costs its action —",
     budget: budget
       ? {
           speed: budget.speed,
           allowance: budget.allowance,
-          dashable: budget.dashable,
-          ceiling: budget.allowance + (budget.dashable ? budget.speed : 0),
+          nextDashCostsA: budget.dash ? budget.dash.slot : "nothing left to pay with",
+          ceiling: budget.allowance + (budget.dash ? budget.speed : 0),
         }
       : "not applicable — see the flags above for why",
     units: String((canvas as any)?.scene?.grid?.units ?? ""),

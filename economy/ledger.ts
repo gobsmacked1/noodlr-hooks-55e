@@ -50,7 +50,10 @@ interface Tally {
   bonus: number;
   reaction: number;
   attack: number;
-  /** Dashes bought this turn. Each one is an Action already counted above, and buys another Speed. */
+  /**
+   * Dashes bought this turn, each worth another Speed of movement. The slot that paid for it is already
+   * counted above — an Action normally, a bonus action for anything with Cunning Action or its relatives.
+   */
   dash: number;
 }
 
@@ -280,11 +283,17 @@ export function dashesTaken(actor: any, combat: any, combatant: any): number {
   return readTally(actor, stampFor(combat, combatant)).dash;
 }
 
-/** Charge an Action as a Dash, and record the extra Speed it bought. */
-export function takeDash(actor: any, combat: any, combatant: any): void {
+/**
+ * Charge a Dash, and record the extra Speed it bought.
+ *
+ * The slot is the caller's decision, not this file's: Dash costs an Action by the general rule, but
+ * Cunning Action, Step of the Wind and Expeditious Retreat all make it a bonus action instead, and which
+ * of those applies is a system-specific reading of the sheet.
+ */
+export function takeDash(actor: any, combat: any, combatant: any, slot: "action" | "bonus"): void {
   const stamp = stampFor(combat, combatant);
   const tally = readTally(actor, stamp);
-  tally.action += 1;
+  tally[slot] += 1;
   tally.dash += 1;
   local.set(String(actor?.uuid ?? ""), tally);
   try {

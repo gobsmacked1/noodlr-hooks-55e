@@ -1,0 +1,102 @@
+// Who may Dash with a bonus action instead of an action. D&D 5e ONLY.
+//
+// Dash costs your Action by the general rule, and the general rule is wrong for two of the twelve base
+// classes. A Rogue with Cunning Action and a Monk with Step of the Wind Dash as a **bonus action, for
+// free**, and Expeditious Retreat hands the same thing to Sorcerers, Wizards and Warlocks for the
+// duration of the spell (user, 2026-08-06). Charging a rogue's Action for a Dash is not a rounding error:
+// it silently deletes the class feature the player took the subclass for, and it does so on the most
+// routine thing a rogue does all night.
+//
+// The bonus action is preferred whenever a source for it exists and the slot is free, because that is the
+// entire purpose of these features — nobody takes Cunning Action in order to keep paying full price. The
+// Action remains a legal way to Dash and is used when the bonus action is already spent.
+//
+// HOW EACH IS RECOGNISED, in the order tried:
+//   * `flags.noodlr.bonusDash` — the escape hatch, for anything this list has never heard of. Set it with
+//     an ordinary Active Effect and no code here needs to change.
+//   * `system.identifier` on a feature the creature owns. Stable across dnd5e versions and localisations,
+//     which item names are not: this is the same mechanism that reads Extra Attack.
+//   * an Active Effect whose name mentions the spell. dnd5e's concentration effect is named
+//     "Concentrating: <spell>", so the spell's own name is what has to be matched rather than the prefix.
+//   * an item name, as a last resort, for homebrew and imported sheets that carry no identifier.
+
+export interface DashSource {
+  label: string;
+  /** `system.identifier` values on an owned feature that grant it. */
+  identifiers?: string[];
+  /** Matched against the names of the creature's items and active effects. */
+  pattern?: RegExp;
+  /** True when the grant only holds while an effect is running, so an owned item is not enough. */
+  effectOnly?: boolean;
+}
+
+const BONUS_DASH: DashSource[] = [
+  {
+    label: "Cunning Action",
+    identifiers: ["cunning-action"],
+    pattern: /cunning\s*action/i,
+  },
+  {
+    // 2024 folds Step of the Wind into Monk's Focus; 2014 has it as its own feature under Ki. Both
+    // spellings are listed because a table may be running either, and a converted sheet may carry both.
+    label: "Step of the Wind",
+    identifiers: ["step-of-the-wind", "monks-focus", "fleet-step", "ki"],
+    pattern: /step\s*of\s*the\s*wind/i,
+  },
+  {
+    // Owning the spell grants nothing; it has to be running. Named without the "Concentrating:" prefix
+    // on purpose — that prefix is localised, and the spell's name inside it is not.
+    label: "Expeditious Retreat",
+    pattern: /expeditious\s*retreat/i,
+    effectOnly: true,
+  },
+];
+
+function names(collection: any): string[] {
+  const out: string[] = [];
+  for (const entry of collection ?? []) {
+    const name = String(entry?.name ?? "").trim();
+    if (name) out.push(name);
+  }
+  return out;
+}
+
+/** Identifiers of every feature the creature owns, lower-cased. */
+function identifiers(actor: any): Set<string> {
+  const out = new Set<string>();
+  for (const item of actor?.items ?? []) {
+    const id = String(item?.system?.identifier ?? "")
+      .trim()
+      .toLowerCase();
+    if (id) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * What lets this creature Dash as a bonus action, if anything. Returns the feature's name, for the
+ * chat line, or null when the Action is the only way it can Dash.
+ */
+export function bonusDashSource(actor: any): string | null {
+  if (!actor) return null;
+
+  try {
+    const flagged = actor.getFlag?.("noodlr", "bonusDash");
+    if (flagged) return typeof flagged === "string" ? flagged : "a feature";
+  } catch {
+    /* absent is the normal case */
+  }
+
+  const owned = identifiers(actor);
+  const effectNames = names(actor.appliedEffects ?? actor.effects);
+  const itemNames = names(actor.items);
+
+  for (const source of BONUS_DASH) {
+    if (source.pattern && effectNames.some((name) => source.pattern!.test(name)))
+      return source.label;
+    if (source.effectOnly) continue;
+    if (source.identifiers?.some((id) => owned.has(id))) return source.label;
+    if (source.pattern && itemNames.some((name) => source.pattern!.test(name))) return source.label;
+  }
+  return null;
+}
