@@ -130,6 +130,27 @@ export function hidesWithAdvantage(actor: any, inCombat: boolean): boolean {
   return inCombat && owns(actor, SKULKER);
 }
 
+/**
+ * What lets this creature Hide for a bonus action, or null when Hide costs its Action.
+ *
+ * The mirror of `bonusDashSource`, and needed for the same reason: `auto/hide.ts` is the only way most of
+ * the party can take the Hide action at all, and until now it charged nothing — so the button was free
+ * while the 2024 PHB's own Hide item costs an Action. Unlike Dash, no spell grants this, so there is no
+ * effect-only case to handle.
+ */
+const BONUS_HIDE: Array<FeatSource & { label: string }> = [
+  { label: "Cunning Action", identifiers: ["cunning-action"], pattern: /cunning\s*action/i },
+  { label: "Nimble Escape", identifiers: ["nimble-escape"], pattern: /nimble\s*escape/i },
+  { label: "Shadow Stealth", identifiers: ["shadow-stealth"], pattern: /shadow\s*stealth/i },
+];
+
+export function bonusHideSource(actor: any): string | null {
+  if (!isDnd5e() || !actor) return null;
+  if (hasFlag(actor, "bonusHide")) return "a feature";
+  for (const source of BONUS_HIDE) if (owns(actor, source)) return source.label;
+  return null;
+}
+
 /** Is this a spell that gives you away by being cast — one with a Verbal component? */
 export function isVerbalSpell(item: any): boolean {
   if (!isDnd5e() || item?.type !== "spell") return false;

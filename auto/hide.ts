@@ -23,14 +23,34 @@
 // because Foundry models no such quantity. It is stated here rather than hidden so nobody later mistakes
 // it for exact.
 //
-// A GM can always overrule the check. `force` skips the prerequisites and keeps the roll, because the
-// interesting failure is a table that cannot hide in a situation the rules did not anticipate — a rafter,
-// a crowd, a dust storm — and a hard refusal there is a worse experience than a permissive one.
+// A GM can always overrule the check. `force` skips the prerequisites and the action cost while keeping
+// the roll, because the interesting failure is a table that cannot hide in a situation the rules did not
+// anticipate — a rafter, a crowd, a dust storm — and a hard refusal there is a worse experience than a
+// permissive one.
+//
+// WHAT IT COSTS. An Action, or a bonus action for anything with Cunning Action, Nimble Escape or Shadow
+// Stealth. Until v0.4.48 it cost nothing at all, which the census caught: a world carrying the 2024 PHB
+// action items has a `Hide` feature that claims a real Action, so the two routes to the same outcome were
+// priced differently and this was the free one.
+//
+// Unlike the activity veto in `economy/enforce.ts`, a creature with nothing left to spend is refused
+// outright rather than asked. That is a deliberate divergence: the dialog there exists for features that
+// legitimately break the general rule, and the ones that matter — Haste and its relatives — already work
+// by raising the allowance through `flags.noodlr.extraAction`, so they never reach a refusal. Anything
+// stranger than that is what `force` is for.
 
 import { log, MODULE_ID } from "../../constants";
 import { narrator, speakerFor } from "../../util/speaker";
+import { getEconomyMode } from "../config";
+import { check, spend } from "../economy/ledger";
 import { isDnd5e } from "../systems/dnd5e-rewards";
-import { HIDING_STATUS, hideDc, hidesWithAdvantage, rulesVersion } from "../systems/dnd5e-stealth";
+import {
+  bonusHideSource,
+  HIDING_STATUS,
+  hideDc,
+  hidesWithAdvantage,
+  rulesVersion,
+} from "../systems/dnd5e-stealth";
 import { blocked, centerOf } from "./positioning";
 import { screensBetween } from "./screens";
 
@@ -60,6 +80,41 @@ function fightIsOn(): boolean {
   if (!sceneId) return false;
   const combat: any = (game.combats as any)?.find?.((c: any) => String(c?.scene?.id) === sceneId);
   return Boolean(combat?.started);
+}
+
+/** What taking the Hide action costs, and who to bill. */
+interface HideCost {
+  slot: "action" | "bonus";
+  /** The feature that makes the bonus action legal, for the log. Empty on the ordinary Action path. */
+  source: string;
+  combat: any;
+  combatant: any;
+  actor: any;
+}
+
+/**
+ * What Hide costs this creature right now, or null when nothing should be charged.
+ *
+ * Null outside a started fight and outside the creature's own turn, matching the movement cap and the
+ * activity veto: there is no turn to be over budget in during downtime, and a GM hiding a token during prep
+ * is not spending anything. The bonus action wins when something grants it, falling back to the Action once
+ * it is gone — Hide remains legal as an Action for everybody.
+ */
+function hideCost(token: any): HideCost | null {
+  const combat: any = game.combat;
+  if (!combat?.started) return null;
+
+  const combatant = token?.document?.combatant;
+  if (!combatant || String(combatant.id) !== String(combat.combatant?.id ?? "")) return null;
+
+  const actor = token?.actor;
+  if (!actor) return null;
+
+  const source = bonusHideSource(actor);
+  if (source && check(actor, combat, combatant, "bonus", false).allowed) {
+    return { slot: "bonus", source, combat, combatant, actor };
+  }
+  return { slot: "action", source: "", combat, combatant, actor };
 }
 
 /** Creatures this one is trying not to be seen by: anything of the opposing disposition. */
@@ -179,13 +234,28 @@ export function canHide(token: any): HideCheck {
  * the chat watcher to notice, because this client already knows the number and should not depend on which
  * other client saw the message.
  */
-export async function takeHideAction(token: any, options: { force?: boolean } = {}): Promise<HideResult> {
+export async function takeHideAction(
+  token: any,
+  options: { force?: boolean } = {},
+): Promise<HideResult> {
   const actor = token?.actor;
   if (!actor) return { hidden: false, total: null, dc: null, reason: "no actor to hide" };
 
-  const check = canHide(token);
-  if (!check.allowed && !options.force) {
-    return { hidden: false, total: null, dc: null, reason: check.reason };
+  const prerequisites = canHide(token);
+  if (!prerequisites.allowed && !options.force) {
+    return { hidden: false, total: null, dc: null, reason: prerequisites.reason };
+  }
+
+  // Hide costs a slot, and this is the one route to the action that was not charging for it. Refused
+  // before the roll rather than after, so a player is not asked for dice they were never going to keep;
+  // charged after, so a cancelled dialog costs nothing. A failed check still spends the action, which is
+  // the rule.
+  const cost = hideCost(token);
+  if (cost && !options.force && getEconomyMode() !== "off") {
+    if (!check(cost.actor, cost.combat, cost.combatant, cost.slot, false).allowed) {
+      const slot = cost.slot === "bonus" ? "bonus action" : "action";
+      return { hidden: false, total: null, dc: null, reason: `no ${slot} left this turn` };
+    }
   }
 
   const advantage = hidesWithAdvantage(actor, fightIsOn());
@@ -200,7 +270,16 @@ export async function takeHideAction(token: any, options: { force?: boolean } = 
     return { hidden: false, total: null, dc: null, reason: "the Stealth roll failed" };
   }
   // A cancelled roll dialog is a player changing their mind, not a failure to hide.
-  if (total === null) return { hidden: false, total: null, dc: null, reason: "the roll was cancelled" };
+  if (total === null)
+    return { hidden: false, total: null, dc: null, reason: "the roll was cancelled" };
+
+  if (cost) {
+    spend(cost.actor, cost.combat, cost.combatant, cost.slot, false);
+    log(
+      `hide: ${String(token?.name)} spent its ${cost.slot} action` +
+        `${cost.source ? ` (${cost.source})` : ""}`,
+    );
+  }
 
   const dc = hideDc();
   if (dc !== null && total < dc) {
@@ -221,7 +300,7 @@ export async function takeHideAction(token: any, options: { force?: boolean } = 
     `hide: ${String(token.name)} is hidden at DC ${total}` +
       `${advantage ? " (Fog of War gave advantage)" : ""}`,
   );
-  return { hidden: true, total, dc, reason: check.reason };
+  return { hidden: true, total, dc, reason: prerequisites.reason };
 }
 
 /**
@@ -266,11 +345,15 @@ export async function hideSelected(options: { force?: boolean } = {}): Promise<v
 /** What the prerequisites say about every selected token, without rolling anything. */
 export function surveyHide(): unknown {
   const rows = ((canvas as any)?.tokens?.controlled ?? []).map((token: any) => {
-    const check = canHide(token);
+    const prerequisites = canHide(token);
+    const cost = hideCost(token);
     return {
       token: String(token?.name ?? "?"),
-      allowed: check.allowed,
-      reason: check.reason,
+      allowed: prerequisites.allowed,
+      reason: prerequisites.reason,
+      costs: cost
+        ? `${cost.slot}${cost.source ? ` (${cost.source})` : ""}`
+        : "nothing — not its turn",
       advantage: hidesWithAdvantage(token?.actor, fightIsOn()),
       dc: hideDc(),
       watchers: enemiesOf(token).map((e: any) => ({

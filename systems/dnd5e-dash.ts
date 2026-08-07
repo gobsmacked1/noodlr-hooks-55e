@@ -20,6 +20,8 @@
 //     "Concentrating: <spell>", so the spell's own name is what has to be matched rather than the prefix.
 //   * an item name, as a last resort, for homebrew and imported sheets that carry no identifier.
 
+import { isDnd5e } from "./dnd5e-rewards";
+
 export interface DashSource {
   label: string;
   /** `system.identifier` values on an owned feature that grant it. */
@@ -99,4 +101,46 @@ export function bonusDashSource(actor: any): string | null {
     if (source.pattern && itemNames.some((name) => source.pattern!.test(name))) return source.label;
   }
   return null;
+}
+
+/** An activity or item that IS the Dash action, rather than one that changes what Dash costs. */
+const DASH = /^\s*dash\s*$/i;
+
+function flagged(doc: any, key: string): boolean {
+  try {
+    return Boolean(doc?.flags?.noodlr?.[key]);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is pressing this the Dash action?
+ *
+ * Needed because Dash exists twice over: as a thing the module infers from movement, and — in any world
+ * carrying the 2024 PHB action items — as a real feature with a real activation that a player can click,
+ * which Argon puts on the action bar. Charging both is how a rogue lost its bonus action to Cunning Action
+ * and then its whole Action to the movement that followed (measured in the 2026-08-07 census). Whoever
+ * charges has to record the Dash itself, not merely the slot, and that means recognising one.
+ *
+ * The activity name is the primary signal and is checked first: a multi-purpose feature keeps its
+ * activities named ("Cunning Action" holds Dash, Disengage and Hide), and midi only renames the ones whose
+ * names were left at the default. The single-purpose Dash item is the case midi DOES rename — its activity
+ * reads "Midi Use" — so that one is recognised by the item's identifier instead.
+ */
+export function isDashActivity(item: any, activity: any): boolean {
+  if (!isDnd5e()) return false;
+  const owner = item ?? activity?.item ?? null;
+  if (!owner) return false;
+
+  if (flagged(activity, "dash") || flagged(owner, "dashActivity")) return true;
+  if (DASH.test(String(activity?.name ?? ""))) return true;
+
+  const identifier = String(owner?.system?.identifier ?? "")
+    .trim()
+    .toLowerCase();
+  if (identifier === "dash") return true;
+  // Only when the sheet states no identifier, so a world that deliberately re-identified the feature is
+  // not overruled by what it happens to be called. Same discipline as the damage-rider table.
+  return !identifier && DASH.test(String(owner?.name ?? ""));
 }

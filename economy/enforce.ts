@@ -27,12 +27,14 @@
 // token that this file recognises and consumes on the way back through.
 
 import { log } from "../../constants";
+import { speakerFor } from "../../util/speaker";
 import { getEconomyMode, isConditionAutomationEnabled } from "../config";
 import { shouldAutomate } from "../auto/registry";
 import { ac5eOwnsIncapacitatedUse, isIncapacitated } from "../systems/dnd5e-conditions";
+import { isDashActivity } from "../systems/dnd5e-dash";
 import { damageRiderOf } from "../systems/dnd5e-riders";
 import { isDnd5e } from "../systems/dnd5e-rewards";
-import { check, slotFor, spend, type Slot } from "./ledger";
+import { check, slotFor, spend, takeDash, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
 const cleared = new Set<string>();
@@ -72,6 +74,30 @@ export function registerEconomyHooks(): void {
       }
     },
   );
+}
+
+/**
+ * Take the slot, and record what it bought.
+ *
+ * Everything goes through `spend` except a Dash, which has to be recorded as a Dash so that the movement
+ * cap knows the extra Speed has already been paid for. Without this the two layers charge separately for
+ * one Dash: pressing the button spends the slot, and then the movement it was bought for spends another —
+ * which for a rogue means Cunning Action takes its bonus action AND its Action (census, 2026-08-07).
+ */
+function charge(
+  actor: any,
+  combat: any,
+  combatant: any,
+  slot: Slot,
+  isAttack: boolean,
+  activity: any,
+): void {
+  if (slot !== "reaction" && isDashActivity(activity?.item, activity)) {
+    takeDash(actor, combat, combatant, slot);
+    log(`action economy: charged ${combatant?.name}'s ${slot} for a Dash`);
+    return;
+  }
+  spend(actor, combat, combatant, slot, isAttack);
 }
 
 /** The combatant this actor is fighting as, if it is in the fight at all. */
@@ -123,9 +149,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   ) {
     const name = String(actor.name ?? "This creature");
     log(`conditions: ${name} is incapacitated; refused ${String(activity?.name ?? "an activity")}`);
-    ui.notifications?.warn(
-      game.i18n.format("NOODLR.Combat.Conditions.Incapacitated", { name }),
-    );
+    ui.notifications?.warn(game.i18n.format("NOODLR.Combat.Conditions.Incapacitated", { name }));
     return false;
   }
 
@@ -143,7 +167,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   const verdict = check(actor, combat, combatant, slot, isAttack);
 
   if (verdict.allowed) {
-    spend(actor, combat, combatant, slot, isAttack);
+    charge(actor, combat, combatant, slot, isAttack, activity);
     return true;
   }
 
@@ -155,7 +179,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
 
   const mode = getEconomyMode();
   if (mode === "off") {
-    spend(actor, combat, combatant, slot, isAttack);
+    charge(actor, combat, combatant, slot, isAttack, activity);
     return true;
   }
 
@@ -219,7 +243,7 @@ async function askThenRetry(
   );
   if (!proceed) return;
 
-  spend(over.actor, over.combat, over.combatant, over.slot, over.isAttack);
+  charge(over.actor, over.combat, over.combatant, over.slot, over.isAttack, activity);
   await announce(over, activity, what);
 
   const key = String(activity?.uuid ?? "");
@@ -259,7 +283,7 @@ async function announce(over: Overrun, activity: any, what: string): Promise<voi
           user: esc(String(game.user?.name ?? "")),
         }) +
         `</p>`,
-      speaker: { alias: name },
+      speaker: speakerFor(over.actor, name),
     });
   } catch (err) {
     log("action economy: could not log the override to chat:", err);
