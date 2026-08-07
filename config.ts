@@ -78,6 +78,31 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.forced, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+}
+
+/**
+ * Does a push, pull or shove actually move the creature it lands on?
+ *
+ * Nothing in the stack does this today. The D&D 5e system automates no forced movement whatsoever — no
+ * activity type has a field that could express a distance, the Push weapon mastery is a tooltip, and
+ * every distance in the published content sits in description prose (verified against 5.3.3,
+ * 2026-08-06). Repelling Blast is shipped as an enchantment whose entire mechanical content is appending
+ * ", Repelling" to the cantrip's name as a reminder for the human. midi-qol ships two movement helpers
+ * and calls them from nothing. The premades packages cover about a dozen items between them.
+ *
+ * On by default, because a battlefield-control build that never moves anybody is not a build. Applied
+ * automatically with an undo control on every card, rather than by prompting: most of these rules are
+ * permissive ("you CAN push"), and a confirmation dialog on every hit would cost more table time than
+ * the occasional undo.
+ */
+export function isForcedMovementEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.forced));
 }
 
 /**

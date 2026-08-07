@@ -53,7 +53,7 @@ function toUnits(pixels: number): number {
  * it records a claim for the ruler and undo history and snaps nothing itself, so setting it on an
  * unaligned coordinate just files a false statement.
  */
-function cornerFor(token: any, point: Point): { point: Point; snapped: boolean } {
+export function cornerFor(token: any, point: Point): { point: Point; snapped: boolean } {
   const doc = token?.document ?? token;
   const size = gridSize();
   const corner = {

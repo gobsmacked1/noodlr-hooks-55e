@@ -37,6 +37,7 @@ import { shouldAutomate } from "./registry";
 import { useActionAt } from "./execute";
 import { can, mentalScore, tierForScore, tierProfile } from "./tiers";
 import { turnRandom } from "./random";
+import { isForcedMovement } from "./shove";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -68,9 +69,9 @@ export function registerReactionHooks(): void {
   // of reach and back again inside one move still provokes, which a simple before-and-after comparison
   // misses entirely. And a teleport provokes nothing, which is only knowable from the waypoint's action.
   // Neither hook is awaited by core, so nothing here may block it.
-  Hooks.on("moveToken", (doc: any, movement: any) => {
+  Hooks.on("moveToken", (doc: any, movement: any, operation: any) => {
     if (!active()) return;
-    void provoke(doc, movement).catch((err) => log("opportunity attack failed:", err));
+    void provoke(doc, movement, operation).catch((err) => log("opportunity attack failed:", err));
   });
 
   // Fallback for a move that arrives as a plain document update, with no movement operation attached.
@@ -277,7 +278,7 @@ function watchersOf(moverDoc: any): Watcher[] {
   return out;
 }
 
-async function provoke(moverDoc: any, movement: any): Promise<void> {
+async function provoke(moverDoc: any, movement: any, operation?: any): Promise<void> {
   const mover = moverDoc?.object ?? moverDoc;
   if (!mover?.center) return;
   if (opportunityTaken()) return;
@@ -287,10 +288,12 @@ async function provoke(moverDoc: any, movement: any): Promise<void> {
   // Cleared on a timer, not immediately: the fallback's `updateToken` fires just after this one.
   setTimeout(() => handled.delete(id), 2000);
 
-  // A displacement is a teleport, and a creature that was never between the two points provokes nothing.
-  // Misty Step, Blink and Dimension Door all arrive this way.
+  // Neither a teleport nor a shove provokes. A creature that was never between the two points cannot be
+  // swung at on the way past (Misty Step, Blink and Dimension Door all arrive as displacements), and
+  // under the 2024 rules an opportunity attack triggers only on movement a creature SPENDS — being
+  // pushed, pulled or dragged is somebody else's expenditure.
   const waypoints: any[] = movement?.passed?.waypoints ?? [];
-  if (waypoints.some((w: any) => String(w?.action ?? "") === "displace")) return;
+  if (isForcedMovement(movement, operation)) return;
 
   const route: Array<{ x: number; y: number }> = [];
   const origin = movement?.origin;
