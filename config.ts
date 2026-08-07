@@ -90,6 +90,18 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.dying, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.importantNpcSaves, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
 }
 
 /**
@@ -121,6 +133,27 @@ export function isForcedMovementEnabled(): boolean {
  */
 export function isConditionAutomationEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.conditions));
+}
+
+/**
+ * Does dropping to 0 HP apply Unconscious (or Dead), and does further damage tick death failures?
+ *
+ * Stock floors hit points at zero and never writes those statuses. Instant death when excess damage
+ * meets or exceeds max HP is journal prose only. On by default. Stands aside when midi-qol's
+ * "Add Dead" mechanic is enabled, so the two do not double-apply.
+ */
+export function isDyingAutomationEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.dying));
+}
+
+/**
+ * Do NPCs with `traits.important` get death saves and Unconscious at 0, like PCs?
+ *
+ * Ordinary NPCs still die at 0. The Important flag is what the 5e sheet uses to show death-save UI;
+ * this makes that flag mean something mechanically. On by default.
+ */
+export function honorImportantNpcDeathSaves(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.importantNpcSaves));
 }
 
 /**
