@@ -114,6 +114,12 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.concentration, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
 }
 
 /**
@@ -166,6 +172,19 @@ export function isDyingAutomationEnabled(): boolean {
  */
 export function honorImportantNpcDeathSaves(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.importantNpcSaves));
+}
+
+/**
+ * Does damage actually threaten a concentration spell?
+ *
+ * Stock dnd5e gets everything right except the two ends of it: it computes the DC and posts a
+ * whispered button, and nothing in the system ends concentration when that save fails. With this on,
+ * the save is rolled on the client that owns the creature and a failure drops the spell — as does
+ * being Incapacitated, dying, or hitting 0 hit points, which no part of the stack enforces. On by
+ * default. Stands aside when midi-qol's concentration handling is anything but "None".
+ */
+export function isConcentrationAutomationEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.concentration));
 }
 
 /**
