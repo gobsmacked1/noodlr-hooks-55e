@@ -27,8 +27,10 @@
 // token that this file recognises and consumes on the way back through.
 
 import { log } from "../../constants";
-import { getEconomyMode } from "../config";
+import { getEconomyMode, isConditionAutomationEnabled } from "../config";
 import { shouldAutomate } from "../auto/registry";
+import { isIncapacitated } from "../systems/dnd5e-conditions";
+import { isDnd5e } from "../systems/dnd5e-rewards";
 import { check, slotFor, spend, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
@@ -87,6 +89,27 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
     return true;
   }
 
+  const actor = activity?.actor;
+  if (!actor) return true;
+
+  // Incapacitated (and everything that nests it) forbids actions/bonus/reactions. Stock applies the
+  // status and never consults it. Check before slot accounting so a stunned creature cannot spend
+  // its one action on a swing that should never have started. Runs outside combat too — the
+  // condition does not care whether initiative is up.
+  if (
+    isDnd5e() &&
+    isConditionAutomationEnabled() &&
+    isIncapacitated(actor) &&
+    slotFor(activity?.activation?.type)
+  ) {
+    const name = String(actor.name ?? "This creature");
+    log(`conditions: ${name} is incapacitated; refused ${String(activity?.name ?? "an activity")}`);
+    ui.notifications?.warn(
+      game.i18n.format("NOODLR.Combat.Conditions.Incapacitated", { name }),
+    );
+    return false;
+  }
+
   const slot = slotFor(activity?.activation?.type);
   if (!slot) return true;
 
@@ -94,8 +117,6 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   const combat: any = game.combat;
   if (!combat?.started) return true;
 
-  const actor = activity?.actor;
-  if (!actor) return true;
   const combatant = combatantFor(combat, actor);
   if (!combatant) return true;
 

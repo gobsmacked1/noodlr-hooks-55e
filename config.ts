@@ -84,6 +84,12 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.conditions, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
 }
 
 /**
@@ -103,6 +109,18 @@ export function registerCombatSettings(): void {
  */
 export function isForcedMovementEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.forced));
+}
+
+/**
+ * Do statuses actually change attack rolls, saves, and whether you can act?
+ *
+ * Stock dnd5e applies nested Incapacitated for Paralyzed/Stunned/etc., lists Poisoned under
+ * `conditionEffects.attackDisadvantage`, and never reads either when building a roll. Auto-fail
+ * Strength/Dexterity and critical hits within 5 ft of a Paralyzed or Unconscious creature live only
+ * as journal prose. On by default: a paralyzed creature that still makes Dex saves is not paralyzed.
+ */
+export function isConditionAutomationEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.conditions));
 }
 
 /**
