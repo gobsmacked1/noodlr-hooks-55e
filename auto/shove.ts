@@ -39,6 +39,7 @@
 // shove landing on top of somebody.
 
 import { log } from "../../constants";
+import { speakerFor } from "../../util/speaker";
 import { getMoveSpeed } from "../config";
 import { actionFor, readLocomotion } from "./locomotion";
 import { cornerFor } from "./movement";
@@ -589,7 +590,9 @@ async function announce(doc: any, request: ShoveRequest, result: ShoveResult): P
         `<button type="button" data-action="noodlr-undo-shove">${game.i18n.localize(
           "NOODLR.Combat.Forced.Undo",
         )}</button>`,
-      speaker: { alias: String(request.by?.name ?? doc?.name ?? "") },
+      // Through the helper rather than a bare alias: an empty alias string is no better than no speaker
+      // at all, because core's renderer falls through both to the author's assigned character.
+      speaker: speakerFor(request.by ?? doc, String(request.by?.name ?? doc?.name ?? "")),
     });
   } catch (err) {
     log("could not announce a forced move:", err);

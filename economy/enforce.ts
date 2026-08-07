@@ -30,6 +30,7 @@ import { log } from "../../constants";
 import { getEconomyMode, isConditionAutomationEnabled } from "../config";
 import { shouldAutomate } from "../auto/registry";
 import { ac5eOwnsIncapacitatedUse, isIncapacitated } from "../systems/dnd5e-conditions";
+import { damageRiderOf } from "../systems/dnd5e-riders";
 import { isDnd5e } from "../systems/dnd5e-rewards";
 import { check, slotFor, spend, type Slot } from "./ledger";
 
@@ -91,6 +92,19 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
 
   const actor = activity?.actor;
   if (!actor) return true;
+
+  // Extra damage on a hit that has already happened is not a second action. Checked before everything
+  // else, including the Incapacitated refusal: a rider is never used on its own, so if the attack it
+  // rides on was legal then so is it, and there is nothing here worth having an opinion about.
+  //
+  // Sneak Attack is why this is here. A rogue hit, was offered its Sneak Attack, and was told it had
+  // already used its action — because something in that world had given the feature a real activation,
+  // which stock dnd5e does not. See `systems/dnd5e-riders.ts` for why this is a table and not a rule.
+  const rider = damageRiderOf(activity?.item, activity);
+  if (rider) {
+    log(`action economy: ${rider} is extra damage, not an action; not counted`);
+    return true;
+  }
 
   // Incapacitated (and everything that nests it) forbids actions/bonus/reactions. Stock applies the
   // status and never consults it. Check before slot accounting so a stunned creature cannot spend

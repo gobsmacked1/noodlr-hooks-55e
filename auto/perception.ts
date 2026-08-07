@@ -35,6 +35,7 @@
 
 import { log, MODULE_ID } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
+import { narrator, speakerFor } from "../../util/speaker";
 import { readHp } from "../tracker";
 import {
   getCombatAutomation,
@@ -480,6 +481,7 @@ async function waitForInitiative(combat: any): Promise<boolean> {
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({
     content: `<p><em>${game.i18n.localize("NOODLR.Combat.AutoEngage.RolledFor")}</em></p>`,
+    speaker: narrator(),
   });
   try {
     await combat.rollAll();
@@ -558,6 +560,7 @@ async function reinforce(combat: any, spotter: any, why: string): Promise<void> 
     const names = joining.map((t) => foundry.utils.escapeHTML(String(t.name ?? "?"))).join(", ");
     await ChatMessage.create({
       content: `<p><strong>${names}</strong> ${joining.length > 1 ? "join" : "joins"} the fight.</p>`,
+      speaker: narrator(),
       flags: { [MODULE_ID]: { autoEngage: true } },
     });
     Hooks.callAll("noodlrReinforced", combat, joining);
@@ -691,6 +694,7 @@ async function applySurprise(joining: any[]): Promise<void> {
     content: `<p><strong>${names}</strong> ${caught.length > 1 ? "are" : "is"} ${game.i18n.localize(
       "NOODLR.Combat.AutoEngage.Surprised",
     )}</p>`,
+    speaker: narrator(),
     flags: { [MODULE_ID]: { autoEngage: true } },
   });
 }
@@ -773,6 +777,8 @@ async function engage(spotter: any, target: any, why?: string): Promise<void> {
         `<strong>${foundry.utils.escapeHTML(targetName)}</strong>.`;
     await ChatMessage.create({
       content: `<p>${opening} Roll for initiative!</p>`,
+      // The spotter when there is one; a fight opened by damage has no spotter to speak for it.
+      speaker: why ? narrator() : speakerFor(spotter, spotterName),
       flags: { [MODULE_ID]: { autoEngage: true } },
     });
 

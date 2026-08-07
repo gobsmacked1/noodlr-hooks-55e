@@ -32,6 +32,7 @@
 //     Treating empty as "not melee" mislabelled every natural attack a creature has.
 
 import { log } from "../constants";
+import { isDamageRider } from "./systems/dnd5e-riders";
 import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "./system-profiles";
 
 /** What the planner needs to know about one thing a creature can do. */
@@ -378,6 +379,10 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
   // collection still means activities-world, so we return [] rather than null: dropping through to
   // `system.actionType` there would hit dnd5e's deprecation shim and log a warning per item.
   if (collection === undefined || collection === null) return null;
+  // Extra damage folded into another action is never a turn option: a creature cannot decide to Sneak
+  // Attack, only to attack and then add it. Discarded here rather than scored low, because a planner that
+  // can choose it will occasionally choose it, and that turn does nothing at all.
+  if (isDamageRider(item)) return [];
   const list: any[] = collection.contents ?? (Array.isArray(collection) ? collection : []);
 
   const baseAvailable = itemAvailable(item, actor, P);
@@ -457,6 +462,7 @@ const RANGED_TYPES = new Set(["rwak", "rsak", "ranged"]);
 function fromActionType(item: any, actor: any, P: SystemPaths): CreatureAction | null {
   const actionType = pickString(item, P.itemActionType).toLowerCase();
   if (!actionType) return null;
+  if (isDamageRider(item)) return null;
 
   const melee = MELEE_TYPES.has(actionType);
   const ranged = RANGED_TYPES.has(actionType);

@@ -9,6 +9,7 @@
 // Register on EVERY client: the hooks fire on the rolling client, which is often a player.
 
 import { log, MODULE_ID } from "../../constants";
+import { speakerFor } from "../../util/speaker";
 import { isConditionAutomationEnabled } from "../config";
 import {
   ac5eOwnsConditions,
@@ -190,7 +191,7 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
         ability: abLabel,
         status: reason,
       }),
-      speaker: ChatMessage.getSpeaker?.({ actor }) ?? { alias: name },
+      speaker: speakerFor(actor, name),
       flags: {
         [MODULE_ID]: { conditionAutoFail: { ability, status: reason } },
       },

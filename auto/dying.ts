@@ -7,6 +7,7 @@
 // Register on every client: the updating user's client is the one that writes (same gate as bloodied).
 
 import { log, MODULE_ID } from "../../constants";
+import { speakerFor } from "../../util/speaker";
 import { isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../config";
 import {
   deathFailuresFromDamage,
@@ -150,7 +151,7 @@ async function announce(actor: any, text: string, undoable: boolean): Promise<vo
       : "";
     await ChatMessage.create({
       content: `<p>${escape(text)}</p>${button}`,
-      speaker: ChatMessage.getSpeaker?.({ actor }) ?? { alias: String(actor?.name ?? "") },
+      speaker: speakerFor(actor),
       flags: { [MODULE_ID]: { dying: true } },
     });
   } catch (err) {

@@ -36,6 +36,7 @@
 // turn it is rather than how far they have come.
 
 import { log } from "../../constants";
+import { speakerFor } from "../../util/speaker";
 import { isMovementCapEnabled } from "../config";
 import { pickNumber, systemPaths } from "../system-profiles";
 import { check, dashesTaken, takeDash } from "./ledger";
@@ -263,7 +264,7 @@ async function chargeDash(doc: any): Promise<void> {
             units: String((canvas as any)?.scene?.grid?.units ?? ""),
           },
         )}</p>`,
-        speaker: { alias: String(doc?.name ?? "") },
+        speaker: speakerFor(doc),
       });
     }
   } catch (err) {

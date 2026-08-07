@@ -16,6 +16,7 @@ import { log } from "../../constants";
 import { pickNumber, pickString, systemPaths } from "../system-profiles";
 import { isAutoEndEnabled } from "../config";
 import { isPrimaryGM } from "../../util/gm";
+import { narrator, speakerFor } from "../../util/speaker";
 import { releaseCombatant } from "./registry";
 import {
   awardExperience,
@@ -174,6 +175,7 @@ export async function resolveCombatant(combatant: any, outcome: Outcome): Promis
     content:
       `<p><strong>${foundry.utils.escapeHTML(String(combatant?.name ?? "?"))}</strong> — ` +
       `${game.i18n.localize(CONSEQUENCE[outcome])}</p>`,
+    speaker: speakerFor(combatant?.token ?? combatant?.actor, String(combatant?.name ?? "")),
     whisper: (globalThis as any).ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
   });
 
@@ -269,6 +271,7 @@ async function announceEncounterEndIfOver(combat: any): Promise<void> {
             "NOODLR.Combat.Resolution.Undo",
           )}</button>`
         : ""),
+    speaker: narrator(),
     whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
   });
 

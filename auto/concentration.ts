@@ -25,6 +25,7 @@
 import { log, MODULE_ID } from "../../constants";
 import { isConcentrationAutomationEnabled } from "../config";
 import { isRollerFor, rollerForActor } from "../../util/gm";
+import { speakerFor } from "../../util/speaker";
 import { isDnd5e } from "../systems/dnd5e-rewards";
 import {
   breaksConcentration,
@@ -68,7 +69,7 @@ async function announce(actor: any, text: string): Promise<void> {
     const ChatMessage = (globalThis as any).ChatMessage;
     await ChatMessage.create({
       content: `<p>${foundry.utils.escapeHTML(text)}</p>`,
-      speaker: ChatMessage.getSpeaker?.({ actor }) ?? { alias: String(actor?.name ?? "") },
+      speaker: speakerFor(actor),
       flags: { [MODULE_ID]: { concentration: true } },
     });
   } catch (err) {

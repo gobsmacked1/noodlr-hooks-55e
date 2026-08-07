@@ -28,6 +28,7 @@
 // a crowd, a dust storm — and a hard refusal there is a worse experience than a permissive one.
 
 import { log, MODULE_ID } from "../../constants";
+import { narrator, speakerFor } from "../../util/speaker";
 import { isDnd5e } from "../systems/dnd5e-rewards";
 import { HIDING_STATUS, hideDc, hidesWithAdvantage, rulesVersion } from "../systems/dnd5e-stealth";
 import { blocked, centerOf } from "./positioning";
@@ -255,6 +256,9 @@ export async function hideSelected(options: { force?: boolean } = {}): Promise<v
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({
     content: `<p>${lines.join("</p><p>")}</p>`,
+    // One token means the card is that creature's; several means it is a summary and belongs to nobody.
+    // Named either way, because an unsigned card is stamped with the author's assigned character.
+    speaker: selected.length === 1 ? speakerFor(selected[0]) : narrator(),
     flags: { [MODULE_ID]: { hide: true } },
   });
 }

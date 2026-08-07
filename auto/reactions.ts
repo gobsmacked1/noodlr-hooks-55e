@@ -29,6 +29,7 @@
 import { log } from "../../constants";
 import { hasReaction, spend } from "../economy/ledger";
 import { isPrimaryGM } from "../../util/gm";
+import { narrator } from "../../util/speaker";
 import { readActions, type CreatureAction } from "../actions";
 import { readHp } from "../tracker";
 import { pickNumber, systemPaths } from "../system-profiles";
@@ -432,6 +433,7 @@ async function strike(watcher: Watcher, target: any, phrasing: string): Promise<
     log(`reaction: ${name} could not use ${watcher.action.name}:`, err);
     await ChatMessage.create({
       content: `<p><em>${foundry.utils.escapeHTML(name)}'s reaction did not resolve — roll it by hand.</em></p>`,
+      speaker: narrator(),
       whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
     });
   }

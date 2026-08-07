@@ -20,6 +20,7 @@
 // off-turn reaction layer does not exist yet — see the gaps note in AGENTS.md. Turn-start only, today.
 
 import { log } from "../../constants";
+import { speakerFor } from "../../util/speaker";
 import { getTtsEnabled } from "../../media/config";
 import { speakShared } from "../../media/tts";
 import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "../system-profiles";
@@ -190,7 +191,7 @@ export async function maybeTaunt(combatant: any, target: any): Promise<string | 
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({
     content: `<p class="noodlr-banter">"${foundry.utils.escapeHTML(line.text)}"</p>`,
-    speaker: { alias: String(combatant.name ?? "") },
+    speaker: speakerFor(combatant.token ?? combatant.actor, String(combatant.name ?? "")),
   });
 
   // Spoken only if the table already has voice switched on; banter never turns it on by itself.

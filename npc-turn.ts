@@ -16,6 +16,7 @@
 // a GM resolving one attack by hand has lost a click, whereas a thrown exception loses the turn.
 
 import { log } from "../constants";
+import { narrator } from "../util/speaker";
 import { prewarmCastSpells } from "./actions";
 import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./auto/planner";
 import { performPlan } from "./auto/execute";
@@ -165,6 +166,7 @@ export async function runTurnFor(combatant: any): Promise<void> {
       log(`execution problem for ${plan.board.self.name}: ${performed.problem}`);
       await ChatMessage.create({
         content: `<p><em>${foundry.utils.escapeHTML(plan.board.self.name)}: Noodlr could not carry that out (${foundry.utils.escapeHTML(performed.problem)}). Resolve it manually.</em></p>`,
+        speaker: narrator(),
         whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
       });
     }
