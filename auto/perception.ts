@@ -41,9 +41,18 @@ import {
   getEngageRadius,
   isAutoEngageEnabled,
   isStealthEnabled,
+  isSurpriseEnabled,
 } from "../config";
+import { SURPRISED_STATUS } from "../systems/dnd5e-stealth";
 import { initiativeSettled } from "./hooks";
-import { describeSenses, describeStealth, evades, passivePerception } from "./stealth";
+import {
+  describeSenses,
+  describeStealth,
+  evades,
+  hidingState,
+  passivePerception,
+  reveal,
+} from "./stealth";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
 const POLL_MS = 6000;
@@ -79,6 +88,7 @@ export function registerPerceptionWatch(): void {
   Hooks.on("deleteCombat", () => {
     quietUntil = Date.now() + PEACE_MS;
     announced.clear();
+    if (isPrimaryGM()) void clearSurprise();
   });
 
   watchForCasualties();
@@ -145,7 +155,7 @@ async function sweep(): Promise<void> {
     const vision = new Map<string, any>();
     try {
       for (const { spotter, target } of pairs) {
-        if (!perceives(spotter, target, vision)) continue;
+        if (!perceives(spotter, target, vision, true)) continue;
         if (combat?.started) {
           await reinforce(combat, spotter, `${spotter.name} spots ${target.name}`);
         } else {
@@ -220,7 +230,7 @@ function separation(a: any, b: any): number {
  * Elevation is not considered beyond what core's own modes do: Foundry's vision is largely planar, and
  * modelling a creature's vertical arc of sight would be inventing precision we do not have.
  */
-function perceives(spotter: any, target: any, cache: Map<string, any>): boolean {
+function perceives(spotter: any, target: any, cache: Map<string, any>, live = false): boolean {
   const id = String(spotter?.id ?? "");
   if (!cache.has(id)) cache.set(id, buildVision(spotter));
   const source = cache.get(id);
@@ -253,10 +263,20 @@ function perceives(spotter: any, target: any, cache: Map<string, any>): boolean 
   if (!isStealthEnabled()) return true;
 
   // A clear line of sight is Foundry's answer, not 5e's. Ask the dice too.
+  const wasHiding = live && Boolean(hidingState(target));
   const evaded = evades(spotter, target, separation(spotter, target), useModes);
-  if (!evaded) return true;
-  announceEvasion(spotter, target, evaded);
-  return false;
+  if (evaded) {
+    announceEvasion(spotter, target, evaded);
+    return false;
+  }
+
+  // "An enemy finds you" is one of the four things that end the 2024 Hide, and this is that moment. Only
+  // on a real sweep: the diagnostic survey asks the same question about every pairing on the map and must
+  // not change the world by being run.
+  if (live && wasHiding) {
+    void reveal(target, `${String(spotter?.name ?? "an enemy")} found them`);
+  }
+  return true;
 }
 
 /**
@@ -564,8 +584,10 @@ function watchForCasualties(): void {
     if (!Number.isFinite(next) || !Number.isFinite(before) || next >= before) return;
 
     const combat = activeCombat();
-    if (!combat?.started) return;
-    const already = enlisted(combat);
+    // A combat that exists but has not started is someone mid-setup, very likely our own initiative wait.
+    if (combat && !combat.started) return;
+    if (Date.now() < quietUntil) return;
+    const already = combat ? enlisted(combat) : new Set<string>();
 
     // An unlinked token's actor is synthetic and reports the BASE actor's id, which every goblin from
     // the same prototype shares. Its `token` is the only thing that identifies which goblin was hit.
@@ -576,20 +598,124 @@ function watchForCasualties(): void {
         : String(token?.actor?.id ?? "") === String(actor?.id ?? "");
       if (!isTheOne) continue;
       if (!isHostile(token) || already.has(String(token.id))) continue;
-      void reinforce(combat, token, `${token.name} was attacked`);
+
+      // The half of this that was missing until v0.4.43, and the reason a rogue could kill a whole camp
+      // one sleeping guard at a time: with no combat running at all, being stabbed did nothing whatsoever.
+      // Perception was never involved — an arrow out of the dark does not need to be seen to start a
+      // fight, which is exactly why this path exists separately from the sweep.
+      if (!combat?.started) {
+        // The same guard the poll uses, and for a sharper reason here: `engage` holds for up to a minute
+        // waiting on initiative, so without it a second creature taking damage during that wait would
+        // start a second Combat on the same scene.
+        if (sweeping) return;
+        sweeping = true;
+        void engage(token, nearestPlayer(token), `${token.name} was attacked`).finally(() => {
+          sweeping = false;
+        });
+      } else {
+        void reinforce(combat, token, `${token.name} was attacked`);
+      }
       return;
     }
   });
 }
 
+/** The player-owned token closest to a creature, for naming who it is presumably fighting. */
+function nearestPlayer(token: any): any {
+  let best: any = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const candidate of tokensOnScene()) {
+    if (!isPlayerToken(candidate)) continue;
+    const distance = reach(token, candidate);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+/**
+ * Everyone joining who cannot see a single member of the party is caught unawares.
+ *
+ * 2024 made Surprise a Disadvantage on the Initiative roll rather than a lost turn, and dnd5e already
+ * implements that half — `conditionEffects.initiativeDisadvantage` contains `surprised` and initiative
+ * preparation reads it. What the system never does is decide WHO is surprised, so the status is applied by
+ * hand or not at all. We are the one part of the stack that already knows, because we just asked every
+ * hostile whether it can perceive anybody.
+ *
+ * The test is deliberately the literal definition and nothing cleverer: a guard punched in the open can
+ * see who punched it and is not surprised, while one shot out of the dark by a hidden rogue cannot see a
+ * soul and is. It has to run BEFORE any initiative is rolled, which is why it sits above `rollNPC`.
+ *
+ * Players are never marked. Perception is one-way by design — nothing here ever tests a player as the
+ * spotter — so we have no honest basis for saying a character was unaware, and inventing one would hand
+ * out Disadvantage on a guess. Ambushing the party stays the GM's call.
+ */
+async function applySurprise(joining: any[]): Promise<void> {
+  if (!isSurpriseEnabled()) return;
+  const party = tokensOnScene().filter(isPlayerToken);
+  if (party.length === 0) return;
+
+  const vision = new Map<string, any>();
+  const caught: any[] = [];
+  try {
+    for (const token of joining) {
+      if (!isHostile(token)) continue;
+      if (party.some((player) => perceives(token, player, vision))) continue;
+      caught.push(token);
+    }
+  } finally {
+    for (const source of vision.values()) {
+      try {
+        source?.destroy?.();
+      } catch {
+        /* nothing worth failing an engagement over */
+      }
+    }
+  }
+  if (caught.length === 0) return;
+
+  for (const token of caught) {
+    try {
+      await token.actor?.toggleStatusEffect?.(SURPRISED_STATUS, { active: true });
+    } catch (err) {
+      log(`could not mark ${token?.name} as surprised:`, err);
+    }
+  }
+
+  const names = caught.map((t) => foundry.utils.escapeHTML(String(t.name ?? "?"))).join(", ");
+  log(`perception: ${caught.length} caught unawares — ${names}`);
+  const ChatMessage = (globalThis as any).ChatMessage;
+  await ChatMessage.create({
+    content: `<p><strong>${names}</strong> ${caught.length > 1 ? "are" : "is"} ${game.i18n.localize(
+      "NOODLR.Combat.AutoEngage.Surprised",
+    )}</p>`,
+    flags: { [MODULE_ID]: { autoEngage: true } },
+  });
+}
+
+/** Lift the surprise once the fight it applied to is over. */
+async function clearSurprise(): Promise<void> {
+  for (const token of tokensOnScene()) {
+    try {
+      if (token?.document?.hasStatusEffect?.(SURPRISED_STATUS)) {
+        await token.actor?.toggleStatusEffect?.(SURPRISED_STATUS, { active: false });
+      }
+    } catch {
+      /* a status that will not lift is not worth failing on */
+    }
+  }
+}
+
 /**
  * Start the fight.
  */
-async function engage(spotter: any, target: any): Promise<void> {
+async function engage(spotter: any, target: any, why?: string): Promise<void> {
   const scene: any = (canvas as any)?.scene;
   const spotterName = String(spotter?.name ?? "Something");
   const targetName = String(target?.name ?? "someone");
-  log(`perception: ${spotterName} spots ${targetName}; starting combat`);
+  log(`perception: ${why ?? `${spotterName} spots ${targetName}`}; starting combat`);
 
   const joining = combatants(spotter);
   const allies = joining.filter((t) => isHostile(t)).length - 1;
@@ -631,16 +757,22 @@ async function engage(spotter: any, target: any): Promise<void> {
       if (additions.length > 0) await combat.createEmbeddedDocuments("Combatant", additions);
     }
 
+    // Before any die is cast, because Surprise in 2024 is a modifier ON the initiative roll. Marking a
+    // creature after it has rolled would be decoration.
+    await applySurprise(joining);
+
     // NPCs only. Rolling a player's initiative for them takes away the one die roll they expect to make
     // at the start of a fight, and it is not the work the GM asked to be relieved of — they asked not to
     // have to roll for a dozen monsters and press "begin". The players' own buttons are waiting for them.
     await combat.rollNPC();
 
     const ChatMessage = (globalThis as any).ChatMessage;
+    const opening = why
+      ? `<strong>${foundry.utils.escapeHTML(String(why))}</strong>.`
+      : `<strong>${foundry.utils.escapeHTML(spotterName)}</strong> spots ` +
+        `<strong>${foundry.utils.escapeHTML(targetName)}</strong>.`;
     await ChatMessage.create({
-      content:
-        `<p><strong>${foundry.utils.escapeHTML(spotterName)}</strong> spots ` +
-        `<strong>${foundry.utils.escapeHTML(targetName)}</strong>. Roll for initiative!</p>`,
+      content: `<p>${opening} Roll for initiative!</p>`,
       flags: { [MODULE_ID]: { autoEngage: true } },
     });
 

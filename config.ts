@@ -60,6 +60,18 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: true,
   });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.surprise, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
+  game.settings.register(MODULE_ID, COMBAT_SETTINGS.invisBreak, {
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true,
+  });
   game.settings.register(MODULE_ID, COMBAT_SETTINGS.economy, {
     scope: "world",
     config: false,
@@ -208,6 +220,28 @@ export function getEconomyMode(): "off" | "warn" | "block" {
  */
 export function isStealthEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.stealth));
+}
+
+/**
+ * Are creatures that cannot see anybody marked Surprised when a fight starts?
+ *
+ * On by default. dnd5e already turns the status into Disadvantage on initiative under 2024 rules and never
+ * applies it to anyone, so this costs a table nothing it was already getting and gives ambushes the
+ * mechanical weight the edition intended. Off for tables that would rather rule on surprise themselves.
+ */
+export function isSurpriseEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.surprise));
+}
+
+/**
+ * Does the Invisibility spell end itself when its target attacks, deals damage, or casts?
+ *
+ * On by default, and deliberately NOT coupled to the hiding clear the way midi couples them: the whole
+ * point of Greater Invisibility is that attacking does not end it, and a single switch over both spells
+ * silently deletes the difference between a second-level spell and a fourth-level one.
+ */
+export function isInvisibilityBreakEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.invisBreak));
 }
 
 /**
