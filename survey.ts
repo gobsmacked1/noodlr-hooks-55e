@@ -11,10 +11,19 @@
 // The output is deliberately a CENSUS rather than a dump: counts of shapes, not hundreds of statblocks,
 // so it fits in a chat message and answers questions like "does every attack activity state its range?"
 // and "which module is injecting an activity onto every weapon?" at a glance.
+//
+// Extended 2026-08-07 to cover PLAYER characters as well. The original scan skipped them on purpose and
+// that was right for its purpose, but every question the action economy raises — what claims an action
+// slot, how many attacks one Action buys, what lets a rogue Dash for a bonus action — is a question about
+// a character, so those went unmeasurable. Characters are a separate arm rather than extra rows, so the
+// creature tallies stay comparable with earlier runs.
 
 import { log, MODULE_ID } from "../constants";
 import { saveMedia } from "../media/storage";
 import { prewarmCastSpells, readActions } from "./actions";
+import { notable, slotClaims, type SlotClaim } from "./economy/claims";
+import { explainAttacksPerAction } from "./economy/ledger";
+import { bonusDashSource } from "./systems/dnd5e-dash";
 import { pick, systemPaths } from "./system-profiles";
 
 /** Count occurrences of a value, tolerating undefined as its own bucket. */
@@ -100,8 +109,51 @@ interface Survey {
     actorsWithNoTurnAction: string[];
     actorsWithNoTurnActionCount: number;
   };
+  /**
+   * The player characters, reported separately rather than folded into the counts above.
+   *
+   * Everything else here exists to learn monster sheets for the planner, which is why PCs were originally
+   * skipped outright — their sheets are shaped differently enough to muddy the tallies. But the action
+   * economy, the Dash rules and the damage riders all apply to characters and *only* really bite there, so
+   * the questions those raise were unanswerable from a census that could not see a rogue (2026-08-07).
+   * Kept as its own arm so the NPC numbers stay comparable with earlier runs.
+   */
+  characters: {
+    scanned: number;
+    rows: CharacterRow[];
+  };
+  /**
+   * What could be charged an action slot, across the whole world.
+   *
+   * `unexemptedFeatures` is the interesting list: a feature that claims an Action or a bonus action and is
+   * not recognised as a damage rider. Most entries are legitimate — dnd5e's own content has a good few,
+   * Holy Nimbus and thrown oil among them — but this is exactly where a mis-authored ability hides, which
+   * is what turned a rogue's Sneak Attack into a spent Action.
+   */
+  claims: {
+    total: number;
+    byItemType: Record<string, number>;
+    ridersExempted: number;
+    unexemptedFeatureCount: number;
+    unexemptedFeatures: SlotClaim[];
+  };
   /** One real example per distinct activity type, for eyeballing the fields we do not tally. */
   examples: Record<string, unknown>;
+}
+
+/** The reads that decide what one character is permitted to do on its turn. */
+interface CharacterRow {
+  name: string;
+  level: number | null;
+  classes: string[];
+  /** Detected, not counted — and the one value here most likely to be wrong. */
+  attacksPerAction: number;
+  attacksPerActionFrom: string;
+  /** What lets them Dash for a bonus action, or null if the Action is their only way. */
+  bonusDash: string | null;
+  slotClaims: number;
+  notableClaimCount: number;
+  notableClaims: SlotClaim[];
 }
 
 function describeShape(value: unknown): string {
@@ -124,7 +176,7 @@ function flagScopes(doc: any): string[] {
 }
 
 /**
- * Census the world's non-player actors.
+ * Census the world's sheets: the creatures the planner drives, and the characters it does not.
  *
  * `saveToFile` writes the JSON alongside Noodlr's other output so it can be attached to a bug report or
  * ingested later; the compact summary always goes to the console regardless.
@@ -177,6 +229,14 @@ export async function surveyActions(
       actorsWithNoTurnAction: [],
       actorsWithNoTurnActionCount: 0,
     },
+    characters: { scanned: 0, rows: [] },
+    claims: {
+      total: 0,
+      byItemType: {},
+      ridersExempted: 0,
+      unexemptedFeatureCount: 0,
+      unexemptedFeatures: [],
+    },
     examples: {},
   };
 
@@ -194,15 +254,38 @@ export async function surveyActions(
   const creatureTypes = new Tally();
   const readerKinds = new Tally();
   const readerEconomies = new Tally();
+  const claimItemTypes = new Tally();
+
+  /** Fold one actor's slot claims into the world-wide totals. */
+  const countClaims = (actor: any): SlotClaim[] => {
+    const claims = slotClaims(actor);
+    survey.claims.total += claims.length;
+    for (const claim of claims) {
+      claimItemTypes.add(claim.itemType);
+      if (claim.treatedAsRider) {
+        survey.claims.ridersExempted++;
+      } else if (notable(claim)) {
+        survey.claims.unexemptedFeatureCount++;
+        // A hundred rows is a dump, not a finding; the count above carries the scale.
+        if (survey.claims.unexemptedFeatures.length < 80)
+          survey.claims.unexemptedFeatures.push(claim);
+      }
+    }
+    return claims;
+  };
+
+  const isCharacter = (actor: any): boolean =>
+    actor?.type === "character" || Boolean(actor?.hasPlayerOwner);
 
   const max = opts.max ?? Number.POSITIVE_INFINITY;
   for (const actor of (game as any).actors ?? []) {
     // Player characters are not what the combat planner drives, and their sheets are shaped
-    // differently enough to muddy the counts.
-    if (actor?.type === "character" || actor?.hasPlayerOwner) continue;
+    // differently enough to muddy the counts. They get their own arm, below.
+    if (isCharacter(actor)) continue;
     if (survey.actorsScanned >= max) break;
     survey.actorsScanned++;
 
+    countClaims(actor);
     languageShapes.add(describeShape(pick(actor, P.languages)));
     creatureTypes.add(pick(actor, P.creatureType));
 
@@ -290,6 +373,35 @@ export async function surveyActions(
     }
   }
 
+  // The characters. Deliberately not put through `readActions` or the prewarm: that reader exists to
+  // decide a monster's turn, nothing drives a PC on its owner's behalf, and prewarming every character's
+  // spellbook would cost pack loads for an answer nobody asks. What is read here is only what the rules
+  // layers actually consult about a character.
+  for (const actor of (game as any).actors ?? []) {
+    if (!isCharacter(actor)) continue;
+    survey.characters.scanned++;
+    const claims = countClaims(actor);
+    if (survey.characters.rows.length >= 40) continue;
+
+    const level = Number(actor?.system?.details?.level);
+    const per = explainAttacksPerAction(actor);
+    const interesting = claims.filter(notable);
+    survey.characters.rows.push({
+      name: String(actor?.name ?? "?"),
+      level: Number.isFinite(level) ? level : null,
+      classes: Object.keys(actor?.classes ?? {}),
+      attacksPerAction: per.value,
+      attacksPerActionFrom: per.source,
+      bonusDash: bonusDashSource(actor),
+      slotClaims: claims.length,
+      notableClaimCount: interesting.length,
+      // A fully kitted character carries dozens of features that legitimately cost an action; the count
+      // above is the scale, and thirty rows is enough to spot one that should not be there.
+      notableClaims: interesting.slice(0, 30),
+    });
+  }
+
+  survey.claims.byItemType = claimItemTypes.top();
   survey.itemTypes = itemTypes.top();
   survey.activityTypes = activityTypes.top();
   survey.activationTypes = activationTypes.top();
@@ -309,7 +421,9 @@ export async function surveyActions(
   // A hundred names is not a finding; a count and a handful of examples is.
   survey.actorsWithNoActivities = survey.actorsWithNoActivities.slice(0, 20);
 
-  console.group(`Noodlr | sheet survey: ${survey.actorsScanned} actors`);
+  console.group(
+    `Noodlr | sheet survey: ${survey.actorsScanned} creatures, ${survey.characters.scanned} characters`,
+  );
   console.log(survey);
   // A GM whose Foundry runs on another machine cannot easily fetch the written file, and copying a
   // deeply nested console object is fiddly. `asText` prints one selectable block instead.

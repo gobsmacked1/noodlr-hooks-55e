@@ -165,9 +165,21 @@ const COUNTS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five
  * report. `flags.noodlr.attacksPerAction` overrides the lot.
  */
 export function attacksPerAction(actor: any): number {
+  return explainAttacksPerAction(actor).value;
+}
+
+/**
+ * The same answer, plus what produced it.
+ *
+ * A diagnostic that reports only the number cannot distinguish a fighter correctly read at 3 from a
+ * monster whose Multiattack failed to parse and defaulted to 2 — and those want opposite fixes. This is
+ * where the real detection lives; `attacksPerAction` is the thin caller so the two can never disagree.
+ */
+export function explainAttacksPerAction(actor: any): { value: number; source: string } {
   try {
     const override = Number(actor?.getFlag?.(MODULE_ID, "attacksPerAction"));
-    if (Number.isFinite(override) && override > 0) return override;
+    if (Number.isFinite(override) && override > 0)
+      return { value: override, source: "flags.noodlr.attacksPerAction" };
   } catch {
     /* fall through to detection */
   }
@@ -178,20 +190,25 @@ export function attacksPerAction(actor: any): number {
     const id = String(item?.system?.identifier ?? "").toLowerCase();
     if (id) ids.add(id);
   }
-  if (ids.has("three-extra-attacks")) return 4;
-  if (ids.has("two-extra-attacks")) return 3;
-  if (ids.has("extra-attack")) return 2;
+  if (ids.has("three-extra-attacks"))
+    return { value: 4, source: "identifier: three-extra-attacks" };
+  if (ids.has("two-extra-attacks")) return { value: 3, source: "identifier: two-extra-attacks" };
+  if (ids.has("extra-attack")) return { value: 2, source: "identifier: extra-attack" };
 
   const multi = items.find((i: any) => /^multiattack\b/i.test(String(i?.name ?? "")));
   if (multi) {
     const text = String(multi?.system?.description?.value ?? "").replace(/<[^>]*>/g, " ");
     const worded = /\b(one|two|three|four|five|six)\b\s+(?:\w+\s+){0,3}attacks?\b/i.exec(text);
-    if (worded) return COUNTS[worded[1].toLowerCase()] ?? 2;
+    if (worded)
+      return {
+        value: COUNTS[worded[1].toLowerCase()] ?? 2,
+        source: "Multiattack prose (number word)",
+      };
     const digits = /\b([1-9])\b\s+(?:\w+\s+){0,3}attacks?\b/.exec(text);
-    if (digits) return Number(digits[1]);
-    return 2;
+    if (digits) return { value: Number(digits[1]), source: "Multiattack prose (digit)" };
+    return { value: 2, source: "Multiattack present but unparsed (default 2)" };
   }
-  return 1;
+  return { value: 1, source: "no Extra Attack or Multiattack found" };
 }
 
 /** Actions a tally has actually consumed, attacks folded back into the actions that bought them. */
