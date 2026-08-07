@@ -11,6 +11,7 @@
 import { log, MODULE_ID } from "../../constants";
 import { isConditionAutomationEnabled } from "../config";
 import {
+  ac5eOwnsConditions,
   attackIsMelee,
   attackModifiers,
   autoFailsSave,
@@ -21,7 +22,7 @@ import {
 import { isDnd5e } from "../systems/dnd5e-rewards";
 
 function enabled(): boolean {
-  return isDnd5e() && isConditionAutomationEnabled();
+  return isDnd5e() && isConditionAutomationEnabled() && !ac5eOwnsConditions();
 }
 
 function tokenCenter(token: any): { x: number; y: number; elev: number } | null {
@@ -260,8 +261,12 @@ export function registerConditionHooks(): void {
     }
   });
 
+  // The gate is repeated here rather than left to `autoFailSave`: cancelling is the synchronous
+  // `return false`, so a check that lives only in the async announcement would kill the roll while
+  // saying nothing about it — silently, and with the feature switched off.
   Hooks.on("dnd5e.preRollSavingThrow", (config: any, dialog: any, message: any) => {
     try {
+      if (!enabled()) return;
       // Synchronous hook; kick the async post and cancel immediately when auto-fail applies.
       const actor = config?.subject;
       const ability = String(config?.ability ?? "");
@@ -275,6 +280,7 @@ export function registerConditionHooks(): void {
   });
   Hooks.on("dnd5e.preRollSavingThrowV2", (config: any, dialog: any, message: any) => {
     try {
+      if (!enabled()) return;
       const actor = config?.subject;
       const ability = String(config?.ability ?? "");
       if (autoFailsSave(actor, ability)) {
@@ -317,6 +323,8 @@ export function surveyConditions(): unknown {
     actor && target?.token && token ? tokenDistance(token, target.token) : null;
   return {
     enabled: enabled(),
+    settingOn: isConditionAutomationEnabled(),
+    ac5eOwns: ac5eOwnsConditions(),
     system: String((game as any).system?.id ?? ""),
     attacker: actor?.name ?? null,
     incapacitated: actor ? isIncapacitated(actor) : null,

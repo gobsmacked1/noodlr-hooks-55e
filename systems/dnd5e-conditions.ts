@@ -160,3 +160,51 @@ export function attackModifiers(
 export function critOnHitWithin5(target: any): string | null {
   return hasAnyStatus(target, CRIT_ON_HIT_WITHIN_5);
 }
+
+const AC5E = "automated-conditions-5e";
+
+function ac5eSetting(key: string): unknown {
+  try {
+    if (!(game as any).modules?.get?.(AC5E)?.active) return undefined;
+    return game.settings.get(AC5E, key);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Is Automated Conditions 5e handling the condition-to-roll rules, so that we must not?
+ *
+ * Read from AC5e's source rather than its README, which is out of date. Its `automateStatuses`
+ * setting (default ON) drives a status table covering everything this file does and a good deal
+ * more — attacker Prone and Restrained disadvantage, Invisible, Grappled, visibility-aware Blinded,
+ * legacy Exhaustion — through the same `preRollAttack` and `preRollSavingThrow` hooks we use.
+ *
+ * Standing down whole rather than merging is deliberate, and it is what AC5e itself does when
+ * midi owns range. The two implementations disagree on mechanism even where they agree on the
+ * rule: we cancel an auto-failed save outright, AC5e rolls it against DC 999 with the critical
+ * threshold pushed to 21; we force a critical after a hit is confirmed, AC5e marks the damage roll
+ * critical up front. Whichever module's hook registers first silently wins, which is not a rule to
+ * build on — and since AC5e is a superset here, deferring costs the table nothing.
+ *
+ * AC5e offers an override API (`ac5e.statusEffectsOverrides.register`) that could suppress its
+ * rules one status at a time. Not used: it would make us the module that reaches into another's
+ * internals to win a fight neither of us needs to have.
+ */
+export function ac5eOwnsConditions(): boolean {
+  if (!isDnd5e()) return false;
+  return ac5eSetting("automateStatuses") === true;
+}
+
+/**
+ * Is AC5e also refusing activity use by Incapacitated creatures?
+ *
+ * Narrower than the above, because AC5e's veto is gated behind `autoArmorSpellUse`, which ships
+ * `"off"`. At stock settings it warns about nothing and blocks nothing, so our refusal is the only
+ * one and must stay. A GM who has set that to warn or enforce has asked AC5e to own it.
+ */
+export function ac5eOwnsIncapacitatedUse(): boolean {
+  if (!isDnd5e()) return false;
+  const mode = ac5eSetting("autoArmorSpellUse");
+  return Boolean(mode && mode !== "off");
+}

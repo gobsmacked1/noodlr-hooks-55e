@@ -29,7 +29,7 @@
 import { log } from "../../constants";
 import { getEconomyMode, isConditionAutomationEnabled } from "../config";
 import { shouldAutomate } from "../auto/registry";
-import { isIncapacitated } from "../systems/dnd5e-conditions";
+import { ac5eOwnsIncapacitatedUse, isIncapacitated } from "../systems/dnd5e-conditions";
 import { isDnd5e } from "../systems/dnd5e-rewards";
 import { check, slotFor, spend, type Slot } from "./ledger";
 
@@ -96,9 +96,14 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   // status and never consults it. Check before slot accounting so a stunned creature cannot spend
   // its one action on a swing that should never have started. Runs outside combat too — the
   // condition does not care whether initiative is up.
+  //
+  // This survives the AC5e stand-down that switches the rest of the condition rules off, because
+  // AC5e's own refusal is gated behind a setting that ships disabled. Ours is the only one at stock
+  // settings; it steps aside only once the GM has asked AC5e to enforce.
   if (
     isDnd5e() &&
     isConditionAutomationEnabled() &&
+    !ac5eOwnsIncapacitatedUse() &&
     isIncapacitated(actor) &&
     slotFor(activity?.activation?.type)
   ) {
