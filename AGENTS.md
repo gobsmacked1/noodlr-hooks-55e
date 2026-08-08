@@ -1,0 +1,1301 @@
+# AGENTS.md — noodlr-hooks-55e
+
+Durable memory for **noodlr-hooks-55e**, the D&D 5e (2024) rules-automation module. Auto-loaded as
+context; keep it current with durable facts and decisions, never secrets.
+
+## What this is
+
+A standalone Foundry VTT module that enforces the rules D&D 5e states and nothing enforces. It was
+split out of [`noodlr`](../noodlr-main/AGENTS.md) on 2026-08-08 — noodlr had started game-system
+agnostic and accumulated months of 5e-specific enforcement, which made it hard to maintain and would
+have made a second game system impossible. That module is now an AI game master with no opinion about
+which game is being played; this one is the rules, with no AI in it.
+
+**Neither module depends on the other.** noodlr-hooks-55e alone is a complete automation module that
+runs a fight with nobody narrating. noodlr alone is a chatbot and media generator that never touches a
+rule. Together they are what shipped as noodlr v0.4.48.
+
+## Design principles inherited from noodlr
+
+0. **No third-party module is ever a dependency.** Midi QoL is the case that prompted it: superb,
+   widely installed, and repeatedly quiet for months at a stretch, so anything built on it strands the
+   table when it lapses. Learn from them, depend on none of them. Where a module IS present it may
+   raise fidelity — the item-use path routes through midi when it exists — but every feature must work
+   with nothing installed but Foundry and dnd5e. Prefer detection signals core cannot take away: token
+   position hooks and a hit-point decrease exist in every version; "the attack roll is about to
+   resolve" does not.
+1. **Rules versus tactics.** This module may know **where the system keeps its numbers** and **which of
+   a creature's options are worth considering**. Deciding "close with the wizard and swing the rusty
+   scimitar" is tactics and is ours. Working out whether the swing lands is the system's and midi's.
+   The planner picks a verb, an implement and a target; it never computes an attack roll, damage, a
+   save, a DC or a condition.
+2. **Mechanics belong to mechanics modules.** Where midi-qol, DAE, Chris's Premades, Gambit's or
+   Automated Conditions 5e already resolve something, stand aside rather than compete. Each stand-aside
+   check lives beside the code it guards, and every one of them was read from that module's source
+   rather than assumed.
+
+## Layout, and why it is this shape
+
+Four folders. The split is the plan for a second game system rather than tidiness:
+
+- `src/system/` — everything that knows a D&D name: spell tables, feat identifiers, sheet paths,
+  condition rules, reward arithmetic. **A `noodlr-hooks-pf2e` replaces this folder and nothing else.**
+  Rules-as-data, not branches: nothing in `rules/` or `tactics/` ever learns a spell name.
+- `src/rules/` — enforcement. Conditions, dying, concentration, stealth and hiding, perception and
+  encounter initiation, reactions, forced movement, and `rules/economy/` (action slots and Speed).
+- `src/tactics/` — what a creature does with its turn: the planner, the cognition tiers, the dossier,
+  the per-encounter registry, banter profiling, the turn hooks.
+- `src/core/` — geometry and measurement with no rules in it: the board, token movement, cover and
+  hiding searches, sight screens, hazard containment, seeded randomness. Portable as-is.
+
+Plus `src/integration/contract.ts` (what we tell noodlr), `src/settings.ts` (all sixteen settings and
+the reasoning behind each default), and `src/util/`.
+
+## The integration contract
+
+Four hooks, named `noodlrHooks.*` rather than after this module, so a future `noodlr-hooks-pf2e` fires
+the same four and a listener is written once. Full shapes in `src/integration/contract.ts`.
+
+- `noodlrHooks.preRuling` — stopping (`Hooks.call`). Returning false cancels the ruling. Synchronous by
+  necessity, because callers are inside Foundry `pre*` hooks; a model cannot answer here, which is why
+  noodlr deliberately does not listen to it.
+- `noodlrHooks.ruling` — `{kind, module, systemId, summary, detail, actor, token, combat, undo?}` after
+  the fact. Six kinds fire today: `condition`, `dying`, `concentration`, `forced`, `surprise`,
+  `encounter`. `undo` is present only where a reversal really exists.
+- `noodlrHooks.behavior` — `{verb, ...}` for a social move. `FLEE`, `SURRENDER` and `MERCY` fire from
+  `tactics/encounter.ts`; `BRIBE`, `PARLEY`, `INTIMIDATE`, `PERSUADE`, `DECEIVE`, `AMBUSH` and
+  `DISTRACT` are declared with no trigger yet, so adding one is a call site rather than a contract change.
+- `noodlrHooks.turn` — a planned turn, before it is announced, carrying the intent, the GM-only
+  reasoning, and a `BanterProfile` read off the sheet. A listener may rewrite the intent.
+
+**`waitFor` is the reason these work at all.** Foundry hooks are synchronous; a listener that wants to
+post a card or generate a line pushes its promise into `waitFor` and this module awaits it before
+continuing. Without it a narration lands after the dice it was meant to introduce.
+
+**Nothing here is required.** Every hook is fire-and-forget when nobody is listening, and the rules
+consequence is identical either way. A behavior request returning false is the normal case.
+
+## Flags are a user-facing contract
+
+Every escape hatch — `extraAction`, `extraBonus`, `extraReaction`, `attacksPerAction`, `bonusDash`,
+`damageRider`, `sniper`, `bonusHide` — was documented under `flags.noodlr.*` before the split, and GMs
+have Active Effects built against those paths. **`src/util/flags.ts` reads this module's namespace and
+falls back to `noodlr`'s; writes only ever go to this module's own.** The fallback is permanent, not a
+migration window: there is no way to rewrite an Active Effect somebody authors next year against the
+older documentation, and an effect targeting a flag nobody reads fails silently.
+
+Two live-state flags get the same treatment for sharper reasons. Banked stealth (`stealth`) clears from
+both namespaces, because a hide nobody can clear would suppress every encounter forever and look exactly
+like the module being broken. The mercy forfeiture (`mercyForfeit`) restores from whichever namespace
+holds the payload, because that flag is the only copy of a stripped party's gear.
+
+Settings migrate once: `migrateLegacySettings()` copies `noodlr.combat.*` into this module's namespace on
+first load, reading through `game.settings.storage` because the old keys are no longer registered and
+`get` throws on an unregistered key.
+
+
+## The design: deterministic NPC combatants
+
+Carried over verbatim from noodlr's AGENTS.md, where this was "Phase 7". Paths in the older text below
+predate the 2026-08-08 reorganization: `system-profiles.ts` is now `system/profiles.ts`, `combat/auto/`
+is split across `rules/`, `tactics/` and `core/`, and `combat/systems/` is `system/`.
+
+> **PIVOT, 2026-08-02 (supersedes the AI-driven design below).** After vetting the v0.4.21 turn loop
+> with others, the user cut the per-turn model call: one request per beat per creature makes every
+> encounter slow and a horde fight unaffordable. Combat decisions are now made **locally, by a
+> deterministic planner, with zero AI calls**. The LLM turn loop is removed outright (user's choice of
+> three offered options), not kept as a mode. What survives from N1/N2: `system-profiles.ts`, the
+> dossier's live sheet reading, and the per-encounter lifecycle. Everything below about beats, `END
+> TURN`, and `MAX_TURN_STEPS` is history — kept for the reasoning, not as a description of the code.
+>
+> **The engine (user chose utility scoring over a literal branching tree):** generate every legal
+> option, score each by the considerations the creature's tier unlocks, then choose by *weighted
+> random* rather than by maximum. That last step is the design, not an implementation detail. Argmax
+> produces tournament-grinder monsters; pure randomness produces noise; score-proportional choice with
+> tier-set sharpness produces an owlbear that usually mauls what is closest and a lich that almost
+> always does the clever thing. "Most appropriate, not best" is literally the temperature dial.
+>
+> **Competence is two dials, not one.** Gating alone yields a creature with two options that plays
+> both flawlessly, which reads as eerily precise rather than stupid. So each tier carries `unlocks`
+> (what it can conceive of), `noise` (0.85 at insect → 0.08 at god-like: how reliably it acts on the
+> best option), and `breadth` (how many options it weighs — its attention span and the CPU ceiling).
+>
+> **Tier ladder** (`src/combat/auto/tiers.ts`), thresholds from the user's table on (INT+WIS)/2:
+> 1 its entire action economy (move, action, bonus action, features, spell-likes, reactions, recharge
+> abilities, legendary actions) + call for help · 2 + target the apparent weakest, flee when hurt ·
+> 3 + avoid strong opponents, use inventory, Help an ally, surrender · 4 + stealth, deception, control
+> maneuvers, advanced casting, self-healing, keep distance, seek cover, mercy · 5 + heal and protect
+> allies · 6 + target the real threats, focus fire · 7 + reposition for advantage, hold resources ·
+> 8 + manipulate enemies, resource denial · 9 + the long game.
+>
+> **Two relocations the user made on 2026-08-02 that are easy to undo by accident:** fleeing lives at
+> tier 2, not 3 — running from pain is instinct, and a cornered rat manages it. Access to the full
+> action economy lives at tier 1: even an insect uses everything it physically has, because competence
+> is about *choosing*, never about access. Tier 1's limits are `breadth` and `noise`, not a shorter kit.
+>
+> **The inverted withdrawal rule (subtle, easy to "fix" backwards).** Tier 4 steps out of melee only
+> "when not at risk of an opportunity attack". The naive reading backs away when something is adjacent
+> — the exact moment leaving costs a free hit. So an already-engaged creature stays and fights, and one
+> that is merely *about to be* closed on (enemy within reach + speed) gives ground while it is still
+> free to. Refusing the melee before it starts is the competent play.
+>
+> **`TIER_CAVEAT = 7` — where the ladder stops being honest.** Tiers 1-6 are fully mechanical. Tier 7
+> is stretching: "bait them into the trap room" needs authored terrain the planner cannot invent.
+> Tiers 8-9 (manipulation, generational scheming) are campaign-scale fiction; no per-turn automaton
+> runs a decades-long con. Those tiers get the best of what *is* mechanical plus GM hints and voice.
+> This is written into the code, not just here, so nobody later mistakes the gap for a bug.
+>
+> **Seeded, not merely random.** The choice is seeded from fight + round + combatant, so a turn
+> replays identically: no reroll-shopping by clicking twice, and tests can assert real decisions.
+>
+> **Principle 0** (top of this file) was amended in the same breath to permit system-specific
+> *tactics* behind an adapter while still forbidding system *rules*. The planner picks a verb, an
+> implement, and a target; it never computes an attack roll, damage, a save, a DC, or a condition.
+
+Original AI-driven spec, agreed with the user 2026-08-02 and superseded the same day. The largest feature in the module, built in layers, each one
+shippable alone. Goal: hostile combatants that behave plausibly *for what they actually are* —
+partially aware of the rules (via the `system_rules` silo) and fully aware of their own sheet
+(movement, abilities, feats, spells, inventory, consumables). Worked examples the user set as the
+bar: a skeletal archer that runs out of arrows, switches to a melee weapon, and closes to reach; a
+caster that heals itself or an ally; a bloodied, intelligent creature that flees or drinks a potion
+rather than dying in place.
+
+Why today's "Act as NPC" cannot do any of that: `runCurrentNpcTurn()` makes ONE completion, asks for
+"their single action", and injects only the combat-tracker block — which carries initiative, HP
+tiers, and conditions, and explicitly says positions are narrative zones. **The creature's own
+capabilities are never sent.** The model improvises a statblock from the creature's name, on a
+battlefield it cannot see, without ever seeing a die result (macros resolve after generation). Three
+missing inputs, one missing loop. Not a prompt-wording problem.
+
+Organizing principle: **we count, the model reasons, the automation modules resolve.** Noodlr never
+learns what a "bonus action" is. It reads the actor's items as Foundry stores them, including the
+system's own activation labels, and enforces only what is checkable as data — does this ability exist
+on this actor, does it have uses/ammo left, has that activation slot already been spent this turn.
+Meaning stays with the model plus the rules silo. Principle #1 survives intact.
+
+**The dossier** (user's term and framing): each hostile combatant gets a briefing generated from its
+sheet, live for the duration of the skirmish and discarded at death or combat end. Volatile numbers
+(uses, ammo, HP) are re-read every turn — a cached count is a wrong count the moment something is
+spent — while accumulated *notes* (what it did on previous turns, morale state) persist for the
+combat only.
+
+Layers:
+
+- **N1 — Dossier + perception briefing.** `src/combat/system-profiles.ts` (candidate-path data table,
+  D&D 5e filled in first, generic probing fallback — user chose the profile approach) and
+  `src/combat/dossier.ts`. Read-only; no behavior change beyond the model finally knowing its own
+  statblock. Includes the closing constraint "only these abilities exist" — the anti-improvisation clause.
+- **N2 — The turn loop.** Replace the single completion with propose → resolve dice → feed authoritative
+  results back → next step, until the model writes END TURN or a step cap trips. Same shape as the GM
+  chat continuation, generalized; multiattack, bonus actions, and move-then-shoot fall out of it.
+- **N3 — Structured intents + legality gate + execution.** The model proposes intents rather than prose;
+  the module validates them against the activation budget and the actor's real item list, then executes
+  through the item's own use path so Midi QoL/DAE/CPR resolve the mechanics. GM approval on by default.
+  Execution sits behind a thin adapter with a narrate-only fallback, because `item.use()` is dnd5e-shaped.
+- **N4 — Cognition tiers from the sheet** (user chose auto-from-INT/WIS with a per-actor override). The
+  strongest lever is *information scope*, and it is free: a beast is told only what it perceives (nearest
+  threat, who hurt it last, whether it is badly hurt), a tactician gets the full tracker, ally intent, and
+  what `npc_state` remembers about the party. Doctrine text, planning depth, and self-critique scale with
+  it; low tiers can route to a cheaper model, which matters when eight skeletons each take a turn.
+  Deliberate blunders come from a real seeded Foundry roll, not from temperature, so they are auditable
+  and reproducible in tests.
+- **N5 — Positioning.** Movement, cover, line of sight, morale/retreat, and coordination between
+  high-intelligence enemies. Hardest layer; deliberately last.
+
+Still refused, per principle #2: damage application, condition management, concentration, attack
+resolution. Those are Midi QoL's job and always will be.
+
+#### Deterministic planner — what landed in v0.4.22, and what to distrust
+
+Shipped:
+
+- `src/combat/config.ts` — `combat.automation` (`full` | `partial` | `off`, default full) and
+  `combat.banter` (default on), both in Text Generation under the ruleset field.
+- `src/combat/auto/registry.ts` — per-encounter opt-in set keyed by **combatant id**, cleared on
+  `deleteCombat`. Deliberately in memory: a flag on the actor would silently change every future copy
+  of that goblin. PCs are refused in every mode.
+- `src/combat/auto/control.ts` — Act-as-NPC toggles the selected token(s); multi-select honored;
+  pressing again takes the creature back mid-fight with no dialog. Tool is rendered **only** in
+  `partial` mode.
+- `src/combat/auto/tiers.ts`, `board.ts` (measurement only, tolerant of grid-API drift and gridless
+  scenes), `planner.ts` (options → scoring → seeded weighted choice), `hooks.ts` (`updateCombat`,
+  primary GM only, so an assistant GM does not double-plan).
+- `src/combat/npc-turn.ts` rewritten: **decides and announces only.** Intent posts publicly; the tier
+  and scoring rationale go to the console, never to chat — players must not be shown how the monster
+  thinks.
+
+Reservations and known gaps:
+
+- **Nothing is executed yet.** No movement, no `item.use()`, no turn advance. The GM resolves what the
+  card announces. Execution is the next layer and lands with GM approval on by default.
+- **NPC Banter is registered but inert.** With the LLM loop gone, combat currently makes zero AI
+  calls, which is what "remove it entirely" meant. Banter returns as one optional short line.
+- **Threat detection is a proxy.** "Carries many spells" stands in for "is artillery"; a martial
+  damage dealer reads as harmless to tier 6. Needs no rules knowledge, which is why it was chosen.
+- **Tier 4's deception and disarm are unimplemented.** Stealth is real (see positioning below); only
+  `save`-type items are identifiable generically as control options, and the rest need identifiers
+  the adapter cannot read yet.
+- **Cover and hiding are computed for real, against ONE observer each** (user's call, 2026-08-02,
+  after the announce-only version was rejected as too valuable to skip). `auto/positioning.ts` scans
+  12 bearings × 3 radii nearest-first and returns the first square that is reachable (straight-line
+  move ray, not pathfinding) and out of sight of the reference observer. Cover tests the **furthest**
+  player, hiding the **nearest**. Known hole, accepted: cover from the far archer is not cover from
+  the near one. Upgrading is one parameter — the search takes an observer, so passing two costs one
+  extra ray per candidate. The angular start is seeded, so identical creatures don't all break left.
+- **The cover budget is half the creature's speed**, because movement already spent acting is not
+  tracked. Deliberately under-promises rather than proposing a shuffle it could not afford.
+- **Collision API is v13-verified** (`ClockwiseSweepPolygon.testCollision(origin, dest, {type, mode:
+  "any"})`) with two older shapes tried in turn. An unreadable API returns null and is treated as "no
+  cover found", never as "cover found" — the failure mode must be a creature standing in the open,
+  not one claiming cover that isn't there.
+- **Keeping distance reads the opponent's sheet too.** An enemy whose items are unreadable is assumed
+  to threaten one grid step, deliberately: guessing "harmless" would walk archers into a grapple on
+  every unfamiliar system. The reverse error (an archer that over-respects a spellcaster's reach) is
+  cheap by comparison.
+- **Reach defaults to one grid step** when an item states no range. Deliberate: exact reach is a rules
+  detail we refuse to model, so a 10-ft polearm may be planned as if adjacent.
+- **Unreadable INT/WIS lands at tier 4, not tier 1** — a missing number turning a dragon into a beetle
+  is the worse failure.
+- **Encounter resolution** (`auto/encounter.ts`, addendum of 2026-08-02): a fight can end by flight,
+  surrender, or mercy rather than a body count. The module records the outcome, flips the token from
+  Hostile to Neutral for surrender and mercy (one reversible field), and posts a GM-whispered card
+  stating what the addendum says the outcome is worth. It deliberately does **not** award experience,
+  divide loot, or strip the party's currency/weapons/armour on a mercy — experience and loot are
+  system-specific arithmetic — see the rewards adapter below, which the user approved on 2026-08-02.
+- **`combat/systems/dnd5e-rewards.ts` is the one place Noodlr does system arithmetic, deliberately
+  fenced.** Gated on `game.system.id === "dnd5e"`, returns a no-op report elsewhere, and nothing in
+  `auto/` imports system knowledge — a second system is a sibling file, not edits in the planner.
+  Holds: the published CR→XP table (the actor's own `details.xp.value` wins when present, since
+  homebrew overrides it), even splitting across PC combatants (floored — no XP conjured from a
+  remainder), and the mercy forfeiture.
+- **XP counts what is left on the field: the dead and the surrendered, nothing for escapees**
+  (revised by the user 2026-08-02, replacing the original half-value-for-fleeing rule). Two reasons,
+  both worth keeping: a fled token is often deleted, so its value was never reliably countable, and
+  parties frequently rout enemies deliberately — intimidation, pity, protecting a faction's regard —
+  which is a fight they chose not to have rather than one they won. Do not "restore" the half rule.
+- **Forfeiture is destructive, so it is recorded before it happens.** Every removed item's full data
+  and every coin is written to an actor flag (`noodlr.mercyForfeit`) *before* deletion;
+  `restoreForfeited()` puts it all back, reachable from a button on the mercy card and from
+  `api.restoreForfeitedGear()`. A mercy ruling that lands wrong mid-session must be one click to undo,
+  not a reconstruction from memory. Forfeiture and the XP award both run once, at encounter end, not
+  at the moment of the ruling — "no experience from the combat encounter" is an encounter-level rule.
+- **Aggression is inferred from players rolling dice** during combat, which is what mercy hangs on.
+  A proxy, and deliberately a generous one: a false positive costs a withheld mercy, a false negative
+  spares a party that is still stabbing. Needs round ≥ 2, so it cannot fire on the opening round.
+- **Banter** (`combat/banter/`, user-supplied library 2026-08-03). `banter/banter.txt` ships in the
+  package and is **fetched at runtime, not bundled**, so a GM can edit, cut, or translate lines in
+  place with no build step. Missing file = silent monsters, never an error.
+  - Frequency: `INT + 2·CHA − 2·WIS`, clamped 0-10, 10% per point. **The signs are intentional and
+    confirmed — do not "fix" the subtraction.** Cleverness makes a creature pleased with its own
+    commentary, charisma makes it a show-off (doubled), and wisdom is knowing when to shut up
+    (subtracted, doubled). The minus also runs in reverse for free: a negative WIS modifier flips
+    positive, so fools are the loudest things on the field. One term, both behaviours.
+  - Hard gate: **no language, no lines**, whatever the modifiers say. Anything that *can* talk is
+    then floored at 1 point (10%). Checked against published stat blocks before adding the floor:
+    the raw formula puts goblins, hobgoblins, bandits, orcs, and ogres at exactly 0 (a goblin's −1 WIS
+    gives +2, its −1 CHA takes −2 back), which muted every mook while dragons ran at 90%. The floor
+    sits outside the formula, after the language gate, so the arithmetic itself stays as specified.
+  - **Banter draws from its own seeded RNG stream** (`auto/random.ts`, stream `"banter"`). If it
+    shared the tactics stream, switching banter off would shift every subsequent number and silently
+    change what creatures *do*. Any future per-turn randomness needs its own stream for the same reason.
+  - Tagging is by section heading plus per-line detection, with ancestry words LATCHING onto the
+    following lines (the race section names a race once and then continues about it). A wrong-ancestry
+    or wrong-sex taunt scores 0 — excluded outright, not merely disfavoured, because "Elf!" thrown at
+    a dwarf is worse than silence. Gender markers are deliberately few: `hag-seed` is neutral (it is
+    the *spawn* of a hag, aimed at Caliban) and `fellows` is a crowd, both verified against the file.
+  - Speech follows the table's existing TTS switch; banter never enables voice on its own.
+- **Reactions and legendary actions are readable but not yet triggered** — which also means the
+  "or during a reaction" half of the banter trigger is unbuilt; turn-start only today. Recharge state is honored
+  (a spent breath weapon is not offered). Reactions, counterspell, and legendary actions all fire on
+  *other* creatures' turns, which needs an off-turn hook and a cost model the sheet does not state
+  machine-readably. Tier 1 grants the access; the trigger layer is still to build.
+- **Alignment gates mercy**, read as free text: lawful-anything, or anything not evil. An unreadable
+  alignment is treated as *not* merciful — inventing a conscience the GM never wrote is the worse error.
+- Revert map: the pivot is self-contained in `src/combat/auto/` plus the rewritten `npc-turn.ts`.
+  Restoring the AI loop means restoring that one file from v0.4.21.
+
+## Research method: the corpus, subagents, and not losing the work
+
+Every "nobody automates this" finding in this file came from reading source, never from asking a model
+what it remembered. That is only affordable because the sources are already on disk.
+
+- **The corpus lives at `C:\Project\_research\`** (outside all three workspace roots, so tools must be
+  pointed at it explicitly and a plain workspace search will not find it):
+  - `dnd5e\` — dnd5e **5.3.3** system source. `module\*.mjs`, `module\config.mjs`, `lang\en.json`, and
+    crucially `packs\_source\` — the unpacked authored CONTENT, which is where the "it's only prose"
+    verdicts are actually decided. `dnd5e533\` is a duplicate of the same version; ignore it.
+  - `fvtt13\foundryvtt\` — a full Foundry v13 install with **readable client source** under
+    `resources\app\`. This is what makes claims like "`#initializeMovementActions` overwrites the cost
+    function" checkable rather than plausible.
+  - `ftypes14\` — Foundry **v14** API type definitions, carrying the doc comments. The only way to answer
+    "does this API exist in 14 but not 13", which has bitten us (`maxCost` arrived in 14.357).
+  - `midi-v14\`, `midi-qol\`, `gambits\`, `cpr\`, `vision5e\`, `perceptive\`, `patrol\`, `talia\` — the
+    modules we compare against and deliberately stand down for.
+  - `gh_*.py`, `gh_issues_found.json`, `milestones.json` — helpers used to search dnd5e issues and releases
+    when the question is "did they ever intend to build this".
+  - `_audit\` — completed audit reports (see below).
+- **`rg` (ripgrep) over the corpus is the primary instrument.** Absence of evidence is the finding in most
+  of these investigations, so searches must be exhaustive and the negative result stated with the pattern
+  that produced it.
+- **PowerShell output is unreliable in the agent shell (observed 2026-08-06).** `Get-ChildItem` and
+  `Select-String` have silently returned empty output where the paths plainly existed. `cmd /c dir` and the
+  file-reading tools were unaffected. Do not conclude a file is missing from a bare PowerShell listing.
+
+**Subagent protocol (adopted 2026-08-06, after losing a batch — twice).** Six research subagents were
+launched as blocking calls in one message. All five that started **finished their work within about a
+minute each and wrote a complete final report**; the batch was then killed 77 minutes later because the
+handoff back to the parent hung. The work was never slow, and it was never lost — but the *delivery* was
+all-or-nothing and there was no copy on disk, because the briefs said "report back" and "modify nothing".
+
+1. **The file is the deliverable, the reply is expendable.** Every research brief names an output path
+   under `_research\_audit\` and instructs the agent to create the file *before* researching and rewrite it
+   after each section. An interrupted run then still leaves a usable artifact.
+2. **Background them** (`run_in_background: true`). A blocking call looks identical whether it is working
+   or hung, which is precisely how 77 minutes went by.
+3. **Cap the fan-out at two or three.** A blocking batch is only as fast as its worst member and the blast
+   radius of one stall is the whole batch.
+4. **Bound the effort** in the brief ("finish within ~60 tool calls; a complete-but-partial file beats an
+   exhaustive one that never gets written").
+
+**Recovery drill — a vanished subagent's work is usually still on disk.** Transcripts persist at
+`C:\Users\Superuser\.cursor\projects\c-Project-noodlr-memory\agent-transcripts\<chat-id>\subagents\<agent-id>.jsonl`,
+one JSON event per line with `role` and `message.content[]`. **The final report is the `text` block of the
+last `role: "assistant"` event**; tool calls appear as `tool_use` entries but their results are stripped, so
+the report is all that is recoverable — which is exactly the part worth having. Sort the folder by write
+time to find the batch. A transcript containing only the opening `user` event is an agent that never
+started. Five reports (~68k characters, fully cited) were recovered this way on 2026-08-06 and now sit in
+`_research\_audit\`: conditions/exhaustion, cover/visibility/surprise, damage/death/hazards, movement rules
+beyond Speed, and spellcasting/resources.
+
+## How to tell whether dnd5e enforces a rule (audited 2026-08-06)
+
+Three times now we have built something after discovering the system does not do it (actions v0.4.38,
+Speed v0.4.39, forced movement v0.4.40). This is the generalised detection method, so the fourth time is
+a five-minute check instead of a five-hour audit. Full report and the citations behind every number:
+`_research\_audit\documentation-signals.md`.
+
+- **There is no warning word. The tell is structural: look at where the rule's number lives.** If the
+  quantity the rule turns on — a distance, a count of actions, a number of feet — appears only in
+  `description.value`, in `chatFlavor`, or in a journal page, and **no schema field could hold it**, then
+  nothing enforces it and nothing will until the schema changes. Quantified: 57 content files state a
+  forced-movement distance in prose, 52 of them have `effects: []`, and no YAML key in any of the 4,674
+  content files can express displacement (every `distance:` is `range.distance`). The orphaned number is
+  the signal; `effects: []` on its own is weak evidence, since plenty of pure-damage items have none.
+- **`CONFIG.DND5E.rules` (`config.mjs:4673`) is the index of the prose surface.** Its own JSDoc: *"List of
+  rules that can be referenced from enrichers."* ~170 entries, every value a bare UUID — `shoving`,
+  `hiding`, `speed`, `bonusaction`, `dash`, `opportunityattacks`, `cover`. **The test only works in one
+  direction:** presence proves nothing (`difficultterrain` is listed *and* implemented), but a rules-table
+  key that appears nowhere in `module/**.mjs` outside the config files is prose-only.
+- **`&Reference[...]` documents; `[[/...]]` does dice.** `enrichReference` returns a content link and a
+  tooltip. The one exception is `&Reference[condition=x]`, which adds a hand-operated "apply status"
+  button. The `[[/attack|damage|save|check|...]]` family produces real rolls — but only rolls: nothing
+  compares the result to anything or applies a consequence. `[[/award]]` is the only enricher that changes
+  actor state on its own. `@Embed[...]` is core, and purely presentational.
+- **A config entry that is only `{label, reference}` exists to be linked to.** `weaponMasteries` is the
+  archetype and the only table in `config.mjs` that is purely that shape throughout. The refined test is
+  the absence of any sibling key beyond `label`/`icon`/`abbreviation`/`fullKey`, and it works *within* a
+  table too: a `conditionTypes` entry carrying `special` is wired into core's `specialStatusEffects`; one
+  carrying only `name`/`icon`/`reference` is not.
+- **A non-empty `chatFlavor` is the content team's to-do list.** Only 129 of 4,674 files have one, it has
+  exactly one consumer (`documents/activity/mixin.mjs:704`, which makes it a chat-card subtitle), and when
+  filled in it reads like a stage direction: *"On Hit: Target pushed 15 feet away."* (fire giant), *"On
+  Failure: Target is pushed 20 feet back."* (air elemental).
+- **Ask which Activity type could express the rule.** The closed list is Attack, Cast, Check, Damage,
+  Enchant, Forward, Heal, Save, Summon, Transform, Utility. None of those verbs moves a target. The wiki's
+  gloss on the last one is the system naming the concept itself: *"Utility: make an arbitrary roll or just
+  indicate something happened."*
+- **The schema JSDoc is more honest than the prose docs.** `documents/activity/_types.mjs:35`:
+  *"`consume.action` — Should action economy be tracked? Currently only handles legendary actions."* That
+  is the system stating the v0.4.38 gap outright, in a doc comment, where nobody would look.
+- **The 5.0.0 release notes' "What's Next" is the only place gaps are published.** It lists "Action
+  tracking", "Range, reach, & cover", and "Ruler integration with movement rules" — all three of the
+  things we have since built — prefaced with *"neither can we promise any firm timelines"*. A roadmap item
+  is a confession. Check the newest release's equivalent section before starting anything.
+- **Two traps.** `movementAutomation` is the only setting whose display name contains "Automation" and it
+  governs terrain cost and token blocking, never Speed. And the gap is usually *not* "automation exists
+  but defaults off" — the enforcement toggles mostly ship ON; the real problem is that the automation is
+  narrower than its name. The genuine off-by-default exceptions worth knowing: `encumbrance` (`"none"`)
+  and `autoRecharge` (`"no"`).
+- **Disproved, so don't bother:** `lang/en.json` contains essentially no "we will not do this" vocabulary
+  (the closest is one "at your DM's discretion" about optional class features), and no limitations or
+  "what is automated" page was found on the dnd5e wiki. Core states its position only in the positive, in
+  developer docs: rules are a system's job, so a rule the system never modelled as data is a rule nobody
+  enforces.
+- **Core adjudicates six statuses and paints the rest.** `CONFIG.statusEffects` entries are `{id, name,
+  img}`; only `CONFIG.specialStatusEffects` (`dead`, `invisible`, `blind`, `burrow`, `hover`, `fly`) is
+  consumed by core, for defeat, vision and elevation.
+
+Five further audits from the same 2026-08-06 batch sit beside that report and have **not** yet been acted
+on: conditions/exhaustion, cover/visibility/surprise, damage/death/hazards, movement rules beyond Speed,
+and spellcasting/resources. Read them before planning the next feature — they are the standing gap list.
+
+## Hard-won invariants
+
+- **A capability read that comes back empty is a bug until proven otherwise.** Found in the first play
+  test of automated combat (2026-08-03, fix in v0.4.23): every creature "called out for help" and did
+  nothing else, because the planner asked each item for `system.actionType` and dnd5e v4+ (the 2024
+  rules) no longer has one — everything doable moved into `item.system.activities`, a collection of
+  typed activities each carrying its own attack type, range and uses. An archmage read as having zero
+  attacks, and the planner *correctly* played a creature with no attacks. The failure mode is the
+  dangerous one: no error, no exception, plausible-looking output. Consequences now baked in —
+  - `src/combat/actions.ts` is the single normalizer from an actor's items to `CreatureAction`s. It
+    duck-types the shape (activities present? use it; otherwise the legacy `actionType`) rather than
+    branching on `game.system.id`, and it **logs** when an actor with items yields no actions.
+  - Never fall through to `system.actionType` on an item that *has* an `activities` field, even an
+    empty one: dnd5e keeps a deprecation shim there and reading it logs a warning per item.
+  - `api.explainTurn()` (`src/combat/auto/explain.ts`) dumps what was read and how every option scored
+    for the selected combatant. Reach for it first when a creature behaves oddly; it turns this class
+    of silent-empty bug into a one-line answer.
+- **dnd5e 5.x facts the combat reader depends on** (researched from system source 2026-08-03, after two
+  releases were lost to inference; `src/combat/actions.ts` is the only place that should know any of it):
+  - `activity.range.units` has INITIAL value `"self"`, and `range.override === false` means "this
+    activity states no range; use the item's". Reading either literally gives a reach of zero, which is
+    why a Dire Wolf could not bite anybody. `"spec"` means see-the-description; `"any"` is unlimited;
+    distances are `ft`/`mi`/`m`/`km`. Melee fallback: `item.system.range.reach`, else 5 ft.
+  - An empty `attack.type.value` means **melee/weapon**, not unknown: the system fills it during data
+    preparation, and its weapon-type map deliberately omits `natural`, so every claw and bite lands
+    there. Only an explicit `"ranged"` makes something ranged.
+  - Spells: `system.method` (was `preparation.mode`) with values `atwill`/`innate`/`ritual`/`pact`/
+    `spell`; `system.prepared` is a NUMBER (0/1/2), and NPCs are never prepared-filtered. Whether a
+    method spends a slot is `CONFIG.DND5E.spellcasting[method]?.slots` — ask the table, do not hardcode.
+  - Limited monster casting is usually a **feat with a `cast` activity**: uses live on the feat, and the
+    spell it points at is where the shape lives. Enumerate the cast activity (for the uses) and skip
+    spell items flagged `flags.dnd5e.cachedFor` (clones the system makes on first use), or you offer the
+    same ability twice with the wrong resource attached.
+  - Action economy is `activity.activation.type`; `CONFIG.DND5E.activityActivationTypes` carries
+    `passive`, `scalar` and `consume.property` metadata. Legendary/mythic draw on
+    `actor.system.resources.legact`; `resources.lair` is a boolean plus an initiative count, not a pool.
+  - Languages: `system.traits.languages.value` is a real `Set` (plus semicolon-delimited `.custom`), and
+    the literal `"ALL"` is a sentinel. `.communication` (telepathy) is NOT a language — a telepath with
+    no tongue cannot be taunted in words.
+- **"Midi Attack" is a label, not a thing.** midi-qol replaces the system's activity document classes and,
+  with its Activity Prefix setting on, an activity displays midi's localized *type title* as its name. Do
+  not match on it, and do not treat it as a duplicate to skip — it IS the creature's real attack. The
+  activities that genuinely must be skipped are `canUse === false`, `isRider`, and
+  `midiProperties.automationOnly`. Because midi may also register `midiAttack`-style types instead of
+  replacing classes, classify activities by what they CARRY (`attack`, `damage.parts`, `save`) rather than
+  by `type` string equality. Execute via `MidiQOL.completeActivityUse` with `midiOptions.targetUuids` +
+  `ignoreUserTargets` when midi is present (falling back to `activity.use`), and set the acting user's
+  targets as well: midi's default is to read `game.user.targets`, so an automated turn otherwise inherits
+  whatever the GM had selected.
+- **Automation owns the tracker; the GM owns their own creatures.** "Combat automation" full/partial is
+  what decides whether Noodlr plays a creature, and playing one now includes ending its turn and
+  advancing initiative (user's call, 2026-08-03). Consequences that must not be regressed: advancement is
+  skipped if the tracker moved while the turn resolved (the GM got there first, or a surrender ended the
+  fight); a resolved creature is skipped PAST rather than replayed, or the fight stalls on its corpse;
+  the console entry point deliberately does not advance; and a runaway brake (`RUNAWAY_LIMIT` in
+  `combat/auto/hooks.ts`) stops the chain after 24 consecutive automated turns, because an NPC-vs-NPC
+  fight or a wiped party is otherwise an unbounded loop issuing real rolls unattended.
+- **What the first real census proved (193 actors, 1689 items, 2067 activities; dnd5e 5.3.3 on Foundry
+  14.365 with midi-qol, chris-premades, ddb-importer, Argon — `noodlr-vtt/noodlr-sheet-survey.json`).**
+  Three of these overturned code written the same day from documentation alone:
+  - **An empty `activation.type` means "not independently usable"** — 109 of 2067 activities, with empty
+    activation *labels* to match, are the companion half of something else (the save rider on a bite, the
+    extra damage on a sneak attack). Preparation fills an activation in when the item has one, so empty on
+    a prepared actor is an assertion. Treating it as an action let a creature spend its turn on the save
+    half of an attack it never made. `economyOf("")` returns null; do not "helpfully" default it.
+  - **Passive activations must not be turn options.** 106 `special` activations exist (grapple-escape
+    checks and the like). They are classified `free` for honesty but excluded from turn planning.
+  - **Wrappers are how monsters cast.** 509 `cast` activities against 524 spell items: "1/day each:
+    fireball" is a feat holding the uses and pointing at a *compendium* spell. `fromUuidSync` on an
+    unloaded pack returns an index stub with no activities, so the spell must be resolved with an await
+    (`prewarmCastSpells`, called before `planTurn`) or every caster reads as having no spells. Where a
+    spell appears both as an item and behind a wrapper, the **wrapper wins** — it owns the resource, and
+    casting the item bypasses the daily limit.
+  - Confirmations, not corrections: `attack.type.value` was never empty on a prepared actor (277 melee,
+    89 ranged); only 17 of 366 attacks state no numeric range, and all 17 are `self` (11) or `touch` (6),
+    which is the population the reach fallback exists for; every spell in that world uses `method:
+    "spell"`; 74 of 193 creatures have no language at all, so banter correctly never reaches them.
+  - **The empty-activation rule is load-bearing, not redundant.** A follow-up census on 0.4.25 came back
+    `riders: 2`, `midiAutomationOnly: 0`, `canUseFalse: 13` out of 2067 activities — so the system's own
+    rider flag does NOT mark the 109 empty-activation companions, and midi links its save/damage halves
+    through its own fields instead. Do not "simplify" by trusting `isRider` to catch them; keep all four
+    checks, and re-measure with the survey if midi's linkage changes.
+  - Also worth knowing: activity *names* are useless as identity — "Midi Use" 379, "Midi Attack" 349,
+    "Midi Save" 298 are all midi's type titles. And `consumption.spellSlot: true` appears on plain
+    weapon attacks, so it means nothing on its own.
+- **Token movement in v13+ (researched from core source, 2026-08-03, after v0.4.24 shipped movement that
+  announced itself and never happened).** All of this lives in `combat/auto/movement.ts`:
+  - `TokenDocument#move(waypoint, options)` returns `Promise<boolean>` and has **four paths that resolve
+    `false` without throwing** — path constrained to nothing, a `preMoveToken` veto, no usable waypoints,
+    or `stopMovement()`. **A boolean-returning core API needs its false branch handled, not just its
+    throw.** And the converse: **`move() === true` is not evidence of movement**, because core sets its
+    success flag *before* `preUpdateToken` fires, so a handler that deletes `x`/`y` (Rideable does this for
+    grappled/mounted tokens; Monk's Active Tiles for teleport cooldowns) yields `true` and a stationary
+    token. Verify against `doc._source.x/y` — never the prepared `x`/`y`, which are animated mid-move.
+  - **Wall constraint applies to API moves and the GM's "Unconstrained Movement" toggle does not**: core
+    reads that setting only in `Token#_getDragConstrainOptions`. "I can drag it there myself" proves
+    nothing. Bypass, when genuinely wanted, is `constrainOptions: {ignoreWalls: true}` or
+    `action: "displace"`. We pass `ignoreCost: true` only, because the planner budgets movement itself.
+  - Waypoint `x`/`y` are **top-left pixel integers**, not centres and not grid offsets. `snapped` is
+    metadata recording a claim, and snaps nothing — call `doc.getSnappedPosition()` to actually snap.
+    An unrecognised `action` **throws**; unknown waypoint keys are silently dropped.
+  - A move **paused** by a region behaviour (Terrain Mapper stairs/elevators) never settles its promise,
+    so every await is raced against a timeout and then `stopMovement()`ed. Without that, one stair tile
+    hangs a creature's turn and the whole automated initiative chain behind it.
+  - `update({x, y})` is not a teleport any more and not a fallback: since v13 it is routed through the
+    same constraint/veto pipeline, and merely hides the outcome behind a truthy return.
+  - Third-party vetoes to suspect first: **NotYourTurn** (`preMoveToken`, never checks `movement.method`,
+    so an API move is treated as a player drag; only warns at default GM setting) and **Token Warp**
+    (clamps out-of-bounds moves, vetoing ours while moving the token itself).
+  - **Do not let our own geometry veto a move (2026-08-04).** v0.4.26 still moved nothing, and the reason
+    was not in `moveTo` at all: the callers discarded every candidate destination first, silently, so core
+    was never asked. Two causes, both ours. `occupied()` compared a Token placeable against a
+    TokenDocument with `===`, so a creature counted *itself* as an obstacle. And our flat
+    `blocked()` wall test vetoed candidates on an elevated scene — a party on top of a barbican reads as
+    walled in by the rooms underneath, because that test knows nothing about elevation. `blocked()` is now
+    advisory in `movement.ts` (logged, never a veto): **core is the authority on whether a move is legal,
+    and a second silent opinion can only subtract moves it would have allowed.** It is still a real veto
+    in `positioning.ts`, where the question is line of sight rather than legality.
+  - Every rejection on the movement path must name the square and the reason. A bare `continue` is what
+    made this cost three releases: `moveTo` reported refusals in detail while nothing ever reached it.
+  - **Turn pace is a floor on duration, gated on completion — never a deadline (2026-08-04).** The clock
+    starts when the tracker reaches the creature, and the tracker only advances after `runTurnFor`'s
+    promise resolves, so a turn that takes longer than the floor simply takes longer. Nothing anywhere
+    cuts a turn short, and nothing keys off "movement finished". Say this plainly when it comes up: the
+    natural reading of "minimum turn duration" is a timer that could truncate a turn, and it is not one.
+    The one place a clock CAN end something early is the move stall watchdog, which is why it counts only
+    time with no visible animation — a twelve-square walk at one square per second is twelve legitimate
+    seconds, and the flat 8-second timeout it replaced would have killed it mid-stride as a hang.
+  - **Off-turn reactions, natively (2026-08-04).** `combat/auto/reactions.ts`, no module required — see
+    design principle #0. Two triggers, chosen because core alone can detect them with certainty:
+    `preUpdateToken`/`updateToken` for "someone left my reach" (snapshot who had the mover in reach
+    BEFORE the change, compare after; these two hooks have been stable for many versions and catch a
+    move made by any means), and a hit-point decrease via `preUpdateActor`/`updateActor` for "I was hurt
+    off-turn" — split across both hooks because the old value only exists before and the reaction must
+    not resolve until the damage has landed. Reaction-spent bookkeeping is OURS, keyed by combatant and
+    cleared on round change, not read from any module's flags.
+    Two things to know before extending it. An opportunity attack is not a sheet entry in any system —
+    it is an ordinary melee attack spent as a reaction — so the code looks for the best melee attack,
+    not a reaction-flagged item. And damage carries no attribution, so the creature whose turn it is
+    gets the blame; that is right nearly always and wrong for traps and lingering area effects, which is
+    why it is logged as an assumption.
+  - **What the midi review established (2026-08-04, read from source; clones under `C:\Project\_research`).**
+    Facts worth not rediscovering:
+    - **Midi does NOT automate opportunity attacks.** Its `reactionmoved`/`isMoved` trigger type is
+      declared but never dispatched from any of the eleven `doReactions` call sites. Its `recordAOO`
+      setting is bookkeeping only: it marks a reaction spent when *you* attack off-turn.
+    - **Gambit's Premades DOES**, via a Region per combatant, and is therefore a hard conflict — two
+      opportunity attacks per departure. Hence the stand-aside check in `reactions.ts`. chris-premades
+      implements no OA and registers no midi hooks, so it is safe. Gambit's is v13-only as of 2.1.44.
+    - **Midi's reaction prompt cannot be answered programmatically** — `ReactionDialog` has no
+      auto-select, and the only supported intervention is the awaited `midi-qol.ReactionFilter`. Do NOT
+      cancel that hook and substitute your own Shield: midi only re-reads AC when the dialog returned a
+      real result, so the attack resolves against the stale AC. Pre-empt earlier instead.
+    - **`MidiQOL.setReactionUsed()` is a silent no-op unless `enforceReactions` is `"all"` or
+      `"displayOnly"`** (it defaults to `"none"`, and `"character"` does not cover NPCs). We call it
+      anyway, purely so midi's own prompt suppresses itself, and never rely on it — hence our own ledger.
+    - dnd5e 5.3.3 has **zero reaction tracking** and **no Disengage flag, item or status effect**; it is
+      prose in stat blocks only. The community convention is an ActiveEffect literally named "disengage",
+      which is what we match.
+    - Reaction uses want `isReaction: true` and `workflowOptions.targetConfirmation: "none"` in
+      `midiOptions`, which is what midi's own reaction path passes.
+  - **Planned, not built: Shield, Parry, Counterspell.** Without midi, dnd5e never compares an attack roll
+    to an AC — a human eyeballs it — so there is no "about to hit" moment and Shield genuinely cannot be
+    timed natively. The shape that respects principle #0 is a two-part job: an optional adapter that
+    lights up when midi is present, hooking `midi-qol.preCheckHits` (the last point at which an AC change
+    is still read by `checkHits`, followed by `actor.reset()`), `midi-qol.hitsChecked` for Parry, and
+    `midi-qol.isDamaged` for retaliation at higher fidelity than our hit-point watcher; plus a NATIVE
+    Counterspell off dnd5e's own activity-use hooks, since "a spell is being cast" is observable without
+    midi. Every midi hook built from `WorkflowState_X` exists as both `midi-qol.preX` and `midi-qol.postX`
+    and is awaited, so an async handler legitimately delays the workflow.
+  - **Asking "can that monster see that player" (2026-08-04, source-verified).** Everything in
+    `combat/auto/perception.ts`. Three separate traps, each of which fails SILENTLY:
+    1. `token.isVisible` and `canvas.visibility.testVisibility` answer whether the CURRENT USER can see
+       something. Core's method iterates `canvas.effects.visionSources` (what is initialized on this
+       client) and short-circuits to `return game.user.isGM` when there are none — a confident "yes" to
+       everything on an automation client. Neither can be scoped to an arbitrary token.
+    2. An uncontrolled NPC has **no vision source on a GM's client**: `Token#_isVisionSource()` refuses
+       for a GM unless the token is controlled. Build one by hand —
+       `new CONFIG.Canvas.visionSourceClass({sourceId, object: token})` then
+       `initialize(token.document._getVisionSourceData())` — and **never call `add()`**, which would
+       register the monster's eyes with the canvas and change what the GM sees. Destroy it after use.
+       `DetectionMode#testVisibility(visionSource, mode, config)` takes the source as a PARAMETER, which
+       is the only reason per-creature perception is possible at all.
+    3. **dnd5e never maps stat-block senses onto detection modes, and NPC tokens ship with sight off.**
+       Its character template sets `prototypeToken.sight.enabled: true`; its NPC template has no
+       prototypeToken block, and core's default is `enabled: sight.range > 0` with range 0.
+       `_prepareDetectionModes()` returns early when sight is disabled, so the token gets NO modes and a
+       vision test returns false for the entire bestiary. Senses live at
+       `system.attributes.senses.ranges.{darkvision,blindsight,truesight,tremorsense}` since dnd5e 5.3
+       (flat path still shimmed); vision-5e is the module that does the mapping properly. Our fallback:
+       no usable modes → stated senses + a wall test, and log the creature once. **Never let an empty
+       capability read pass as "cannot see".**
+    Also: `detectionModes` is a **Record keyed by id in v14, an Array of `{id,...}` in v13** — the wrong
+    shape yields an empty list, i.e. a blind monster, with no error. And running the detection-mode loop
+    is what gets lighting, magical darkness and invisibility right for free; do not hand-roll those.
+    Patrol (theripper93) tests `fov.contains()` only, which is why it ignores all of the above — take its
+    architecture, not its test. Behaviour was the reference; the code is ours, nothing is vendored here.
+  - **Starting a combat unattended (2026-08-04, source-verified).** Find the encounter **by scene**
+    (`game.combats.find(c => c.scene?.id === scene.id)`) — `game.combats.viewed` is the tracker's current
+    selection, i.e. UI state, and is meaningless on an automation client. Then
+    `TokenDocument.createCombatants(docs, {combat})` (handles the already-a-combatant case),
+    `combat.rollNPC()`, `combat.startCombat()`. dnd5e overrides `rollAll`/`rollNPC`/`rollInitiative`, so
+    core's methods already apply the system's initiative configuration — never pass a formula.
+    `rollNPC` not `rollAll` on purpose: rolling a player's initiative for them takes away the one roll
+    they expect to make, and it is not the work the GM asked to be relieved of.
+    `CONFIG.specialStatusEffects.DEFEATED` (default `"dead"`) via `document.hasStatusEffect()` is the
+    defeated test; disposition must be `=== HOSTILE`, never `< 0`, because SECRET is −2 and is GM
+    bookkeeping. Fires vetoable `noodlrPreCombatInitiated` and `noodlrCombatInitiated` hooks.
+  - **Stealth: Foundry's vision question is not 5e's question (2026-08-04).** `combat/auto/stealth.ts`.
+    Core answers "is there an unobstructed line to a lit token"; 5e asks "did you beat their Perception".
+    Nothing connects the two natively — verified in dnd5e 5.3.3 source: the `hiding` status effect
+    (introduced 3.1.0, note the "-ing") has no `special` key and is read by *nothing*, and a Stealth
+    roll's total is never persisted to actor, token or flag; it exists as a chat message and then it is
+    gone. Every piece of stealth state is therefore ours to own.
+    - **We patch nothing, and that is the whole design.** Stealthy wraps each detection mode's
+      `_canDetect` through libWrapper because it must change what every client renders. We do not: our
+      sweep builds its own vision source and calls `testVisibility` itself, so we own the call site and
+      simply refuse our own result. No libWrapper, no prototype-ordering war with Stealthy or Vision 5e,
+      and no chance of an automation query altering the GM's screen. If we ever *do* need to affect
+      rendering, Vision 5e's maintainer gave the recipe in their issue #77: wrap
+      `CONFIG.Canvas.detectionModes.<id>.prototype._canDetect` per mode in a `setup` hook — never
+      `DetectionMode.prototype._canDetect`, which Vision 5e's subclasses override without calling super.
+    - **Only a declared hider is contested.** An ordinary walking player is spotted exactly as before.
+      State comes from the first source that answers: Stealthy's `window.stealthy.getBankedStealth(token)`
+      (returns `undefined` when not hiding — its author's documented integration surface, and there is no
+      `game.modules.get("stealthy").api`), Perceptive's `flags.perceptive.PPDCFlag` (`-1` means
+      "impossible"), our own `flags.noodlr.stealth`, then dnd5e's inert `hiding` status honoured with
+      passive Stealth. Their modules outrank our flag on purpose: when the two disagree the GM should be
+      able to trust the UI in front of them. This is the entire integration — no dependency, no patching.
+    - **Passive Perception versus a static DC, never a re-roll.** A six-second poll that rolled each
+      sweep would eventually spot anyone by luck, which is a worse rule than either edition's. Ties go to
+      the spotter: 2024 makes the Stealth total the DC for a Perception check, and a check meets its DC
+      on equal. 2014's letter wants an *active* check by a creature that searches; passive-vs-DC is the
+      universal convention and we use it under both rulesets deliberately.
+    - **Capture via `createChatMessage`, not `dnd5e.rollSkillV2`.** The hook fires only on the rolling
+      client, so every client would race to write the flag and only some would have permission. The chat
+      hook fires everywhere, letting the primary GM be the single writer. Message shape (verified):
+      `flags.dnd5e.roll = {skillId: "ste", type: "skill"}`, total at `rolls[0].total`. Speaker matching
+      must prefer `speaker.token` and only fall back to `speaker.actor` for linked actors — every
+      unlinked goblin shares one actor id. Hook-name trivia if we ever switch: in dnd5e 5.x *both*
+      `dnd5e.rollSkill` and `dnd5e.rollSkillV2` fire with the same `(rolls, {ability, skill, subject})`
+      shape, so listening to both double-handles every roll.
+    - **Never silent.** A stale hidden state suppressing every encounter forever is this feature's most
+      likely failure, and it looks identical to the feature being broken. Each spotter/target pairing
+      logs its suppression once, hiding clears on an attack roll or a verbally-cast spell and on combat
+      end, and `api.surveyPerception()` dumps the whole matrix with distances, detection modes, passive
+      Perception and each verdict.
+    - **Concealment is only checked on the fallback path.** When real detection modes run, core already
+      enforces invisibility and burrowing in its own `_canDetect`; doing it again would disagree with the
+      screen. The stat-block fallback bypasses all of that, so invisibility and the Ethereal Plane are
+      applied by hand there. Sense ranges come from Vision 5e's `actor.detectionModes` when present — a
+      plain `Record<modeId, range>` computed for every actor *regardless of `sight.enabled`*, which makes
+      it strictly better than reading the sheet — and from `senses.ranges` otherwise.
+    - **Beyond mundane hiding, and the one deliberate breach of Principle 1 (2026-08-04, user's list).**
+      Invisibility, Fog Cloud, Darkness, Nondetection, Pass Without Trace, the illusion spells, Mask of
+      the Wild, Nature's Veil and friends are recognised BY NAME from a table in
+      `combat/systems/dnd5e-concealment.ts` — the module's SECOND and last game-system-specific file,
+      after `dnd5e-rewards.ts`. Rules-as-data, not branches: `auto/stealth.ts` never learns a spell name.
+      The two sides meet through a small abstract capability vocabulary — `truesight`, `seeInvisible`,
+      `blindsight`, `tremorsense`, `devilsSight`, `etherealSight`, `detectMagic`, `divination`,
+      `hearing` — where a concealment declares what `pierced`s it and a sense declares what it `grants`.
+      **To port to another system:** write a sibling file exporting the same three functions
+      (`concealmentsOn`, `detectorsOn`, `sheetSenses`) gated on its own `game.system.id`, and switch on
+      it in `stealth.ts`. A system without invisibility simply never emits `seeInvisible` and the engine
+      is unchanged. Name matching is not laziness: Foundry stores no machine-readable "this conceals"
+      marker and dnd5e's conditions cover only `invisible`, so the name is the only signal that exists.
+      It fails safe — an unrecognised effect does nothing, exactly as before the table existed.
+    - **Concealment placed in the world, not worn (2026-08-04, user's correction).** `auto/screens.ts`.
+      A party does not cast Fog Cloud on itself — it drops the fog, the Darkness sphere or the illusory
+      hedge BETWEEN itself and the guard, so nothing is ever applied to the hider and an effects-only
+      model misses the common case entirely. Screens are found geometrically: walk the line between the
+      two token centres at half a grid square (capped at 80 samples) and test containment against
+      MeasuredTemplates, Regions, and AmbientLights configured as darkness sources. Each is absolute
+      until pierced, so a watcher must get past the interposed thing before it has any chance at what is
+      behind it. **Worn and interposed are both real and the screens table is checked BOTH ways**
+      (user's correction, 2026-08-05): a fog bank is usually placed, but Darkness cast on oneself is the
+      canonical Devil's Sight warlock build — they walk the battlefield inside it, seeing out perfectly
+      while the guard still has to pierce it. That renders as light emitted by the TOKEN, which the
+      ambient-light layer never sees, so token lights with `light.negative` are scanned too; and when a
+      module applies it as an effect instead, the worn check catches it. The sampled line includes both
+      endpoints, so a creature standing in its own darkness is found exactly like one standing behind
+      someone else's. **Naming is the hard part, not the geometry:** Foundry records nothing on a template
+      about which spell placed it beyond an origin link that has moved across dnd5e versions and may now
+      point at an Activity rather than an Item, so several paths are tried and an unresolvable name means
+      the screen is ignored — the correct failure, since an unrecognised template must not start blocking
+      sight. Not modelled: the Study action to disbelieve an illusion, which is a player's declared action
+      and not something a six-second poll should perform on an NPC's behalf.
+    - **Three rules encoded there that are easy to get wrong.** Nondetection is applied to the WATCHER,
+      not the hider: it conceals nobody, it blinds the diviner. It removes ONLY capabilities that came
+      from a Divination spell (`divined`, tracked separately by `detectorsOn`) — a demon's innate
+      truesight is its own eyes and survives, while True Seeing, See Invisibility, Detect Magic and
+      Locate Creature do not. Glitterdust and Faerie Fire also survive, being evocations that coat a
+      creature in light rather than scry for it. Magical Darkness is deliberately not beaten by
+      darkvision. And `trait` versus
+      `effect` is a correctness distinction — an always-on trait (Mask of the Wild, Feral Senses, a
+      wolf's Keen Hearing) is matched against items, an activated ability (Nature's Veil, One with
+      Shadows) only against active effects, or every ranger would be permanently invisible.
+    - **Not modelled, deliberately:** the 2024 prerequisites for Hide (Heavily Obscured or ¾ cover, and
+      out of all enemy line of sight), size, and lighting-based Perception modifiers. Also the wild-shaped
+      flea: no mechanical hook exists for "this shape is unremarkable", and that stays the GM's call.
+  - **Perception is one-way, and shouting has a range (2026-08-04, user's spec).** Only a hostile
+    creature spotting a player token ever starts a fight; nothing tests a player as the spotter, because
+    a party that chose to sneak has chosen not to fight and opening combat on the players' own eyeballs
+    would make stealth impossible. Recruitment is capped by `getEngageRadius()` (default 30, scene units,
+    configurable): only hostiles within that distance of the SPOTTER join, so one sentry cannot pull a
+    whole dungeon. Measured with elevation, and deliberately through walls — it models a shout. The party
+    is deliberately NOT radius-limited: adventurers arrive together, and a scout spotted ahead of the
+    marching order should not be left fighting alone.
+  - **Sweeping does not stop when the fight starts (2026-08-05, user's report).** The radius cap has a
+    necessary consequence: creatures out of earshot legitimately miss the opening, and they must be able
+    to arrive later or they never arrive at all — a hostile outside the original radius was shot at over
+    several rounds and the tracker ignored it. So sweeps continue during combat, restricted to hostiles
+    not already enlisted, and a hit routes to `reinforce()` instead of `engage()`: add the newcomer plus
+    whoever IT can shout to, `rollNPC()` (which rolls only the unrolled, leaving existing places intact),
+    announce, done — never `startCombat()` again. Two entry points, because perception is not the only
+    way into a fight: **being hurt joins you regardless of what you saw**, on `preUpdateActor` (not
+    `updateActor` — only a DROP counts and the old value is gone afterwards), matching the victim by
+    `actor.token.id` because an unlinked token's synthetic actor reports the shared BASE actor id.
+    Sweeps still stand down for a combat that exists but has not started: that is someone mid-setup, and
+    usually our own initiative wait.
+  - **A turn order is not real until everyone has a number (2026-08-04, from a live test).** Rolling the
+    monsters and calling `startCombat()` in the same breath put a monster at turn zero of a provisional
+    order and automation played the whole round: the player was unconscious before ever rolling. Two
+    independent guards now, and both are wanted. `perception.ts` posts the "roll for initiative" call,
+    then holds up to `INITIATIVE_WAIT_MS` (60 s, polled once a second) for `initiativeSettled()` before
+    `startCombat()`; on expiry it `rollAll()`s the stragglers and says so in chat, because an absent
+    player must not be able to freeze an encounter. `hooks.ts` `takeTurn()` independently refuses to play
+    any turn while a non-defeated combatant has no initiative, which also covers a combat the GM began by
+    hand, and picks the fight back up from an `updateCombatant` hook the moment the last straggler rolls
+    (guarded by a `combat:round:combatant` token so the two entry points cannot both play the same turn).
+    Defeated combatants are excluded from the check so a corpse cannot deadlock the fight.
+  - **Movement is not just walking (2026-08-04).** `combat/auto/locomotion.ts` reads every mode on the
+    sheet and is the only place allowed to decide which one a creature uses. Two rules encoded there,
+    both deliberate: flight wins over walking whenever it is faster (a dragon does not jog), while swim,
+    burrow and climb are last resorts for creatures with nothing else, because Foundry models no terrain
+    types and choosing "swim" for a land creature crossing a dungeon floor would be inventing a rule.
+    The chosen mode sets the movement BUDGET as well as the action passed to `move()` — reading walk
+    speed alone gave a wyvern 20 ft instead of 80 and gave aquatic monsters 0.
+  - **Let core do the cost accounting.** `moveTo` passes `maxCost: budget` rather than `ignoreCost: true`.
+    The old flag was a quiet rules violation: difficult terrain costs double, so 30 ft of movement buys
+    15 ft of bog, and core already knows the multiplier for every movement action — including that a
+    flyer pays nothing for the bog. Do not reintroduce `ignoreCost` to "fix" a short move.
+  - **Reach is three-dimensional.** `BoardActor.elevation` exists and the planner measures separation as
+    `hypot(horizontal, rise)`. A creature that can neither fly nor climb is not offered a melee option
+    against something above it, which is what stopped ground troops from walking hopefully at a hovering
+    caster and burning the turn. Horizontal-only measurement remains elsewhere (kiting, cover) on purpose.
+  - `api.testMove()` (`combat/auto/diagnose.ts`) is the ground truth when this recurs: it really moves the
+    selected token one square, escalating walls-enforced → walls-ignored → `displace` → `noHook`, reports
+    core's answer at each stage, and restores the position. Whichever attempt first succeeds names the
+    cause without any inference.
+- **Observe the world, don't infer it.** `api.surveyActions({ saveToFile: true })` censuses every sheet in
+  the world — activity types, activation types, range units, flag namespaces, spell methods, language
+  shapes, and one worked example per activity type. When a data shape is in question, run it before writing
+  code against a guess. Both v0.4.22 and v0.4.23 shipped bugs that this would have caught in seconds
+  (user's suggestion, 2026-08-03: "we can map whatever you need dynamically from within the running world
+  itself"). Written to `<mediaFolder>/survey/noodlr-sheet-survey.json`, i.e.
+  `assets/noodlr-out/survey/` by default; `asText: true` prints one selectable block instead, for a GM
+  whose Foundry is on another host.
+  - **The instrument has to be aimed at the current question before asking for a run** (2026-08-07). It
+    skipped player characters by design — the planner drives monsters — and that quietly made it useless
+    for everything the action economy raises, since action slots, attacks-per-action and bonus-action Dash
+    are all character problems. v0.4.47 added a `characters` arm (separate from the creature tallies, so
+    older runs stay comparable) plus a world-wide `claims` section listing every FEATURE that would be
+    charged a slot and is not exempted as a damage rider. Before asking the user to re-run this, check
+    that it actually measures what is currently in doubt.
+  - `attacksPerAction` is the one value in the economy that is detected rather than counted, so
+    `explainAttacksPerAction()` in `economy/ledger.ts` returns its source alongside the number and
+    `attacksPerAction()` is a thin caller — the two can never disagree, which a separate reimplementation
+    in the survey would eventually have done.
+  - `economy/claims.ts` is shared by the census and by `api.surveyEconomy()` for the same reason. It
+    deliberately depends on no settings: a census must be askable with every automation switched off.
+  - `notable()` filters on the ITEM being a feature rather than on the activity being damage-typed. The
+    narrower test was tried first and would have missed the Sneak Attack that prompted all this, because
+    nothing guarantees an importer typed it as damage.
+- **Probe Foundry globals lazily, one at a time.** Building an array of fallback candidates evaluates
+  every entry, and merely *touching* a deprecated global (`ClockwiseSweepPolygon`) emits a console
+  warning even when the modern namespace already answered. `src/combat/auto/positioning.ts` stores
+  thunks and resolves them in order for exactly this reason.
+
+- **The declaration is the status; a Stealth roll is only a number (v0.4.43, 2026-08-07).** Reported from
+ play: a rogue who never took the Hide action was never spotted by anything, never triggered an encounter,
+ and killed hostiles one at a time while they stood oblivious. Root cause was the trigger, not the contest —
+ `stealth.ts` banked a hidden state on ANY `ste` roll appearing in chat, with no prerequisite and no expiry,
+ and the flag persisted in the world save. **The bug was inherited:** Stealthy's README says outright
+ *"Rolling a Stealth skill check will apply the Hidden effect"*, Perceptive does the same on
+ `flags.dnd5e.roll.skillId === "ste"`, and neither clears on an attack. They survive it because midi's
+ `removeHiddenInvis` (default ON, `Workflow.ts:2239`, `utils.ts:4389`) toggles the `hidden`/`hiding`
+ statuses off after every attack roll — and it had never heard of `flags.noodlr.stealth`. Only Chris's
+ Premades gates on the Hide action. Full comparison: `_research\_audit\stealth-modules-comparison.md`;
+ rules audit: `_research\_audit\stealth-hide-raw.md`.
+ - **`hidingState()` must not read our banked flag unless the `hiding` status is present.** That single
+ ordering is what makes a stale flag structurally incapable of hiding anyone, and it means every way of
+ removing the status — token HUD, midi, an effect expiring, our own reveal — ends the state without
+ knowing we exist. Do not "optimise" it by reading the flag first.
+ - **Reveal off `dnd5e.rollAttack`, never a chat message.** Midi merges the attack into its own card and
+ posts no separate attack message, so the old `createChatMessage` listener waited for something that
+ never came. The system hook fires inside midi's flow (midi itself registers
+ `Hooks.once("dnd5e.rollAttack")` at `AttackActivity.ts:446` to catch the ammo update). It fires only on
+ the rolling client, which is fine and is the point: a creature giving itself away is always acted by
+ someone who owns it, so that client can always write. Consequence — **`registerStealthWatch()` must be
+ registered on every client, not inside the GM-only block.** Note `enrichers.mjs:281` fires the same hook
+ with `subject: null` for a bare `[[/attack]]`, and both `rollAttack` and `rollAttackV2` fire, so listen
+ to one and guard the subject.
+ - **A missed attack DOES reveal you, in both editions** — the hit-only rule the user remembered is
+ **Skulker's Sniper** benefit (2024 PHB p. 208), not a house rule, so it is a feat lookup rather than a
+ setting. Skulker ships in NO dnd5e compendium (PHB, not SRD), so there is no authored identifier to
+ trust: `dnd5e-stealth.ts` tries `flags.noodlr.sniper`, then `system.identifier`, then the item name.
+ Its Fog of War (advantage on Hide in combat) is honoured too; its Blindsight 10 needs nothing, because
+ `sheetSenses` already reads the range off the sheet.
+ - Sniper is the only reason we ever need hit-or-miss, and `attackConnected()` is deliberately NOT
+ `forced.ts`'s `hitTargets`: an empty target list means "nobody" there and "no idea" here. **Unknown
+ reveals.** Crit and fumble are answered before the AC loop, or a single unreadable AC would discard the
+ one fact the die already settled.
+ - **We do NOT apply the `invisible` condition for mundane hiding**, even though 2024 Hide grants the
+ Invisible condition. Perceptive does, and it makes hiding indistinguishable from magical invisibility to
+ every sense-aware module; dnd5e's own content shares our instinct and stamps only `hiding`.
+ - **`auto/hide.ts` exists because dnd5e ships no Hide action** outside Cunning Action, Nimble Escape and
+ Shadow Stealth. With the status as the declaration, no button would mean most of the party can never
+ hide. Cover is estimated by counting blocked corner rays (3 of 4 = three-quarters); that is an
+ approximation of a rule 5e states as a fraction of the target obscured, it is what every cover module
+ does, and it is stated in the file so nobody mistakes it for exact. Prerequisites are evaluated
+ per-watcher, because every term in the rule is relative to an observer.
+ - **Invisibility's break is separate from the hiding clear, deliberately.** Midi couples them under one
+ rule and therefore deletes Greater Invisibility on the first attack — the entire difference between a
+ second-level spell and a fourth-level one. `auto/invisibility.ts` skips concentration effects
+ (`actor.concentration.effects.has(effect)`, not the localised "Concentrating:" prefix) so a wizard who
+ made someone else invisible does not lose their own spell by swinging.
+ - **Surprise was free capability.** dnd5e already lists `surprised` in
+ `CONFIG.DND5E.conditionEffects.initiativeDisadvantage` and reads it during initiative prep; it just never
+ decides who is surprised. We do, using the literal test (a joining hostile that cannot perceive one
+ party member), applied before `rollNPC()` since it modifies the roll. Players are never marked —
+ perception is one-way by design, so we have no honest basis for it.
+ - The damage-starts-a-fight path shares the sweep's `sweeping` guard: `engage()` holds for up to 60 s
+ waiting on initiative, so without it a second casualty during that wait creates a second Combat.
+
+- **Nobody counts actions, so we do (v0.4.38, 2026-08-05).** Verified in dnd5e 5.3.3 source, not assumed:
+  `CONFIG.DND5E.activityActivationTypes` gives each activation type an optional `consume` property naming
+  an actor resource pool, and exactly three declare one — `legendary`, `mythic` and `crew`. `action`,
+  `bonus` and `reaction` carry a label, a header and a group and nothing else, which means the whole
+  consumption block at `mixin.mjs:540` (gated on `activationConfig?.consume`) never runs for them and the
+  system's own "not enough actions" warnings are unreachable. No per-turn counter exists anywhere in the
+  data model. This is intentional — the system's JSDoc says *"Currently only handles legendary actions"*
+  and "Action tracking" is an unshipped 5.0.0 roadmap item — and no module fills the gap either: midi's
+  `enforceReactions`/`enforceBonusActions` default to `"none"`, there is no `enforceActions` at all, and
+  even when enabled midi asks rather than blocks. Full rules reference and gap audit in
+  [`docs/action-economy-2024.md`](docs/action-economy-2024.md). Load-bearing details:
+  - **The veto is `dnd5e.preUseActivity`, not a patch.** It fires before the usage dialog and before any
+    chat card, and returning false cancels cleanly. midi's activity `use()` calls `super.use()`, so the
+    same hook fires under midi as without it. Do not reach for libWrapper here.
+  - **Do NOT add `consume: { property }` to `activityActivationTypes.action` to borrow the system's
+    legendary-action enforcement.** It is tempting and it is wrong: it mutates shared config for every
+    other module in the world and would double-count against anything else doing the same.
+  - **The budget lives on the actor as a flag, not in a Map.** The hook fires on whichever client used
+    the item, so a player's browser must be able to read and write its own budget; GM-side memory is
+    invisible to exactly the person it needs to stop. Writing through `actor.setFlag` also gets unlinked
+    tokens right for free, because it lands in that token's ActorDelta.
+  - **Nothing is ever reset.** A tally carries the stamp of the turn it belongs to, and a stale stamp
+    reads as zero. Derived, not stored, so every client computes the same answer with no write and no
+    race. The stamp is the round in which the creature's own turn most recently began — which is what
+    "refreshes at the start of your turn" means, and what a naive per-round reset gets wrong for a
+    reaction spent earlier in the round than the creature's own turn.
+  - **Actions and attacks are separate currencies.** One Action buys several attacks, so counting attack
+    rolls as actions stops a fighter's second swing — the single most common thing in the game. Actions
+    used is `nonAttackActions + ceil(attacks / attacksPerAction)`. `attacksPerAction` is *read*, not
+    guessed: dnd5e class features carry stable `system.identifier` values (`extra-attack`,
+    `two-extra-attacks`, `three-extra-attacks`). Monsters have no such field, so Multiattack prose is
+    parsed for a number word and defaults to **2** when unparseable — biased generous on purpose, since
+    blocking a legal attack is a bug report while allowing one too many is merely a bad turn.
+  - **Automated creatures are hard-blocked; players are configurable; the GM is never blocked, only
+    asked.** The player default is "ask, then log the answer publicly" rather than a hard block, because
+    the rules break their own general case constantly — Haste grants a whole extra action — and a system
+    with no way to say yes makes those features unplayable (user, 2026-08-05). Asking privately and
+    answering publicly is what keeps the override usable without making it abusable.
+  - **Effects grant slots via flags, not via code changes here:** `flags.noodlr.extraAction`,
+    `extraBonus`, `extraReaction` (AE mode Add) and `flags.noodlr.attacksPerAction` (Override).
+  - `execute.ts` asks the ledger *before* attempting, because a hook veto cancels without throwing and
+    the attempt loop would otherwise report a swing that never happened.
+  - **Extra damage is not an action, and the test has to be a name table (v0.4.46, 2026-08-07).** Reported
+    from play: a rogue hit, was offered its Sneak Attack, and was told it had already used its action.
+    `systems/dnd5e-riders.ts` is the quarantined table; `enforce.ts` consults it *first*, before even the
+    Incapacitated refusal, because a rider is never used on its own — if the attack it rides on was legal
+    then so is it. `actions.ts` drops rider items from the planner's options entirely, since a planner that
+    can pick one will occasionally pick it and that turn does nothing.
+    - **The obvious structural rule is wrong, and it was measured rather than argued.**
+      `scripts/census-damage-activities.mjs` over dnd5e 5.3.3's `packs/_source` (3,246 activities in 3,199
+      items) finds **62 `damage`-type activities that legitimately claim a real slot** — 57 action, 4 bonus,
+      1 reaction: Holy Nimbus, every flask of oil, Divine Eminence, Heat Metal, Storm's Thunder. So
+      "a damage activity never costs a slot" would make all of those free. Do not reintroduce it.
+    - **Stock content was never the bug.** The same census shows dnd5e models riders correctly: 92 damage
+      activities carry an empty activation and 13 carry `special`, both of which `slotFor` already declines
+      to police. What needs the table is everything downstream — ddb-importer, premade libraries,
+      hand-edited sheets — one of which had given Sneak Attack a real activation.
+    - **Divine Smite is deliberately absent.** Free in 2014 and a bonus-action SPELL in 2024, sharing the
+      identifier `divine-smite`. Listing it would hand 2024 paladins a free bonus action and buys nothing in
+      2014, where the legacy feature already carries `special`.
+    - Recognition order is flag (`flags.noodlr.damageRider`), then `system.identifier`, then the item name —
+      and the name is only consulted when there is NO identifier, so a world that deliberately
+      re-identified a feature is not overruled by what it happens to be called.
+  - Diagnostics: `api.surveyEconomy()`, whose `claims` list names every activity that would be charged a
+    slot. The Sneak Attack report was undiagnosable from the tally alone: the count was right and the thing
+    being counted was wrong.
+
+- **A chat card that names no speaker is signed with the author's assigned character (v0.4.46, 2026-08-07).**
+  Reported as an attribution bug of ours and it was core filling in a blank: a player owning four characters
+  saw Noodlr's cards signed with a different one, which was not even on the scene. Two getters in
+  `client/documents/chat-message.mjs` do it —
+  `get speakerActor() { return getSpeakerActor(this.speaker) ?? this.author?.character ?? null }` and
+  `get alias() { return speakerAlias ?? this.speakerActor?.name ?? authorName }`. So the fallback is
+  `user.character` from User Configuration, regardless of what is selected or even present on the scene.
+  `ChatMessage.getSpeaker()` with no arguments has the same hole one step earlier, in its CASE 5.
+  - **An empty alias string is no better than no speaker**, because `this.speaker.alias || null` discards it
+    and falls through identically. Several of our cards were building `{ alias: String(x?.name ?? "") }`.
+  - The same fallback feeds `getRollData()` and the portrait, so an unsigned card containing an inline roll
+    would be evaluated against the wrong sheet.
+  - Rule: **every card goes through `util/speaker.ts`.** `speakerFor(subject)` for a card about one
+    creature, `narrator()` for the module's own voice (announcements about the fight, GM diagnostics).
+    Never `ChatMessage.create({content})` with no speaker, and never a bare alias that could be empty.
+  - `playedTokens(user)` is the single answer to "which characters is this person playing", **plural on
+    purpose** — a player may legitimately drive two at once, and the old single-answer resolution is what
+    made a four-character player look like whichever one sorted first. Order: selection (only readable for
+    `isSelf`; another client's control state is not replicated), then the assigned character's token, then
+    anything else owned here. Ownership is tested with `testUserPermission`, not `ownership[id] === 3`, for
+    the same reason `rollerForActor` does: Foundry resolves through the default row and its ownership dialog
+    *deletes* the per-user entry for anyone left on Default, so "All Players: Owner" matches nothing raw.
+    Diagnostics: `api.surveyPlayed()`.
+
+- **Nobody enforces Speed either (v0.4.39, 2026-08-05).** Same shape of finding as the action economy, and
+  verified the same way. Core Foundry v13+ *does* have a real movement model — `TokenDocument#movementHistory`
+  records every waypoint crossed during a turn, `Combat#_clearMovementHistoryOnStartTurn` resets it, and each
+  waypoint carries a terrain-adjusted `cost` — but core has no concept of a creature's Speed and never
+  compares the two. dnd5e supplies the number and spends it entirely on ruler colour (`TokenRuler5e` in
+  `module/canvas/ruler.mjs`: green under Speed, amber under double, red beyond). `movementAutomation` sounds
+  like the setting for this and is not — it governs movement *cost* (difficult terrain, climb/swim without
+  the matching speed, crawl, token blocking), never a budget. midi-qol has exactly one `moveToken` listener
+  and it expires DAE `isMoved` effects. So the ruler turns red and the token keeps going. Load-bearing:
+  - **Truncate on the drag, veto everywhere else.** `Token#_getDragConstrainOptions` can carry `maxCost`
+    (added in core **14.357** — it does not exist in v13, where unknown keys are silently destructured
+    away), and core then discards waypoints past the budget inside `constrainMovementPath`, so the token
+    stops at the line exactly as it stops at a wall. `preMoveToken` is the backstop for arrow keys: it can
+    reject a move outright but **cannot shorten one** — waypoints are deep-frozen and only `autoRotate`
+    and `showRuler` are writable.
+  - **Budget the whole turn, not the remainder.** Core's docs do not say whether `maxCost` is measured
+    against the proposed path alone or the path plus the history already recorded this turn, and the answer
+    decides whether a second drag in one turn starts from zero. Passing the whole-turn allowance is correct
+    under the "history counts" reading and merely lets the backstop do the work under the other; passing
+    the remainder would silently halve the budget under the first. Do not "simplify" this without testing.
+  - **Dash is charged, not asked.** A creature with something left to spend may drag past its Speed; the
+    moment it does, `moveToken` charges the Dash and posts it to chat. The dash count lives in the action
+    ledger's `Tally`, not beside the movement code, so it resets on the same lazy turn stamp as the slot
+    that paid for it.
+  - **Dash is NOT always an Action.** Corrected before release (user, 2026-08-06). A Rogue with Cunning
+    Action and a Monk with Step of the Wind Dash as a **bonus action, for free**, and Expeditious Retreat
+    grants the same to Sorcerers, Wizards and Warlocks while it runs. Charging the Action in those cases
+    silently deletes the class feature, on the most routine thing a rogue does all night. `systems/dnd5e-dash.ts`
+    reads it from `system.identifier` (`cunning-action`, `monks-focus`, `step-of-the-wind`, `fleet-step`,
+    `ki`) — the same stable-identifier mechanism as Extra Attack — falling back to item and effect names,
+    with `flags.noodlr.bonusDash` as the escape hatch for anything unlisted. Expeditious Retreat is
+    `effectOnly`, since owning the spell grants nothing: dnd5e names its concentration effect
+    `"Concentrating: <spell>"`, so the SPELL name is what gets matched, never the localised prefix.
+    **The bonus action is preferred whenever it is available**, because that is what those features are
+    for; the Action is the fallback once the bonus action is gone. If both are free the player is not
+    asked, which is a deliberate call — it is a legal choice between two resources rather than a rule
+    violation, the bonus action is right in nearly every case, and a dialog every time a rogue runs would
+    be worse than an occasional undo.
+  - **Two Dashes in one turn is legal and supported.** A rogue may spend its full movement, its bonus
+    action on Cunning Action, and its action on a second Dash, for three times its Speed (user,
+    2026-08-06). `chargeDash` therefore LOOPS, re-reading the budget after each charge so the allowance
+    grows as the debt settles — charging once per move event would leave the second Dash unpaid when both
+    are crossed in a single drag. The drag itself is only ever offered ONE Dash of headroom at a time,
+    though: triple Speed stays reachable across successive drags, but a mis-drag cannot spend both slots
+    before the player notices. `takeDash` takes the slot from its caller so the ledger stays agnostic
+    about which resource a given system thinks Dash costs.
+  - **Subclass `CONFIG.Token.objectClass` at `setup`, not `init`** — dnd5e installs `Token5e` at `init`, and
+    extending whatever is there keeps its `ignoreTokens` handling. Registered from `init` on **every**
+    client, not from the GM-only `ready` block: the person being constrained is the player.
+  - **Dash exists TWICE and both halves must charge through one ledger entry (v0.4.48, 2026-08-07).**
+    Measured, not reasoned: the census of the user's own world found all four characters carrying a `Dash`
+    feature with `system.identifier === "dash"` claiming a real Action, plus `Cunning Action → Dash`
+    claiming a bonus — the 2024 PHB action items, which Argon puts straight on the action bar. So a Dash is
+    both an inference from movement AND a pressable activity, and `spend()` recorded only the slot while
+    `budgetFor()` reads `dashesTaken`. Pressing the button therefore bought no extra Speed, and the movement
+    it was bought for charged a SECOND slot: a rogue's Cunning Action took its bonus action and then its
+    whole Action. Every charge site in `enforce.ts` now goes through `charge()`, which routes a Dash to
+    `takeDash` instead. **The general lesson is the same one Sneak Attack taught:** whenever a layer infers
+    a resource spend from behaviour, check whether the world also has a button for it, because a world with
+    the PHB items installed has a button for nearly everything.
+  - `isDashActivity` checks the ACTIVITY name first and the item identifier second, and the order is
+    load-bearing. midi renames activities whose names were left at the default, so the standalone `Dash`
+    item's activity reads "Midi Use" (identifier route), while a multi-purpose feature keeps its activities
+    named — "Cunning Action" holds Dash, Disengage and Hide (name route). Neither route alone covers both.
+  - Exempt: the GM (staging is not cheating), Noodlr's own automation (it budgets before it steps), and
+    anyone moving outside their own turn. Diagnostics: `api.surveyMovement()`.
+  - **The Hide button charges a slot too, and refuses rather than asks (v0.4.48).** Same census, same cause:
+    a `Hide` feature claiming an Action existed beside our free button, so the cost depended on which one
+    the player pressed. `auto/hide.ts` now bills an Action, or a bonus action when `bonusHideSource` finds
+    Cunning Action, Nimble Escape or Shadow Stealth. It deliberately does NOT reproduce `enforce.ts`'s
+    over-budget dialog: that dialog exists for features which legitimately break the general rule, and the
+    ones that matter (Haste and relatives) already work by raising the allowance via
+    `flags.noodlr.extraAction`, so they never reach a refusal. `force` is the override, and it now skips the
+    cost as well as the cover prerequisites. Charged after the roll so a cancelled dialog is free, but
+    charged whether or not the check beat the DC — spending the action is the rule.
+
+- **Ammunition is not a consumption type (fixed v0.4.39).** `activityAvailable` looked for a consumption
+  target of `type: "ammunition"`, which does not exist: dnd5e 5.3.3 has exactly six consumption types
+  (`activityUses`, `itemUses`, `material`, `hitDice`, `spellSlots`, `attribute` — `config.mjs`
+  `DND5E.activityConsumptionTypes`). Ammunition is a property of the **weapon**, resolved against the
+  actor's stock at roll time through `item.system.ammunitionOptions`, a getter that already filters the
+  actor's consumables to the right subtype and marks empty stacks `disabled`. The dead check meant an
+  archer with an empty quiver looked fully armed, so the planner picked the bow, the use failed, and the
+  creature spent its turn doing nothing rather than drawing the sword on its own sheet. Ask the getter;
+  do not reimplement the filter.
+
+- **Standing in fire is not weather (v0.4.39).** The planner had no notion that one square could be worse
+  than another, so a hostile burned to death inside an Incendiary Cloud without ever trying to leave.
+  `auto/hazards.ts` tests the creature's centre against every placed template and region using the same
+  containment primitives as the sight-screen test, and rings outward for the nearest clear, walkable,
+  unoccupied point. **Which areas hurt is not a geometric question** — a template knows its radius and
+  nothing about what is inside it — so that judgement is a name table in `systems/dnd5e-hazards.ts`,
+  quarantined exactly like the concealment table. Persistent areas only: an instantaneous Fireball leaves
+  its template on the canvas long after the fire is gone, and a creature fleeing yesterday's explosion
+  looks broken. Gated on the new tier-2 `understandsHazards`, so mindless things still burn where they
+  stand.
+
+- **Nobody implements forced movement at all (v0.4.40, 2026-08-06).** The third finding of this shape, and
+  the starkest. Verified against dnd5e 5.3.3, core v13.351, midi-qol v14, Gambit's Premades and Chris's
+  Premades before a line was written.
+  - **dnd5e automates none of it.** No occurrence of `shove|knockback|displace|forced movement` anywhere in
+    the 421 files under `module/`, and every one of the ~60 hits for `push` is `Array.prototype.push`. **No
+    activity type has a schema field that could express "move the target N feet"** — the concept is absent,
+    so no amount of content authoring could represent one. The only code in the system that moves a token
+    is a Region Behavior that rotates a scene area for carousel rooms, and the system registers no movement
+    hook listeners.
+  - **Weapon Mastery is presentational.** `CONFIG.DND5E.weaponMasteries` is eight `{label, reference}`
+    pairs; each key as a whole word appears nowhere outside the config files. The diagnostic case is
+    Topple, which could trivially have been an AE applying `prone` — that machinery demonstrably works
+    elsewhere in the same content — and the quarterstaff YAML contains zero occurrences of "prone".
+    Correction to a common list: **Push weapons are Pike, Warhammer, Heavy Crossbow and Greatclub**; the
+    Greatsword is Graze.
+  - **In the content, every distance is prose,** and the pattern is consistent: when a rule pushes *and*
+    imposes a condition, the condition gets a real Active Effect and the push is left in the English.
+    Open Hand Technique is the specimen — three sibling activities, Addle and Topple with real effects,
+    Push with `effects: []` and no distance anywhere, and an authoring note that lists the two and omits
+    the third. Unarmed Strike models the Shove *save* correctly (`ability: [str, dex]`,
+    `dc.calculation: str` → 8 + Str + proficiency) and the knock-prone branch; the 5 feet does not exist.
+    The closest thing to a modelled distance in the whole set is Bigby's `[[5 + 5 * @flags.dnd5e.summon.mod]]`,
+    inside `description.chatFlavor` — a display string.
+  - **Nor does anything else.** midi ships `MidiQOL.moveToken` / `moveTokenAwayFromPoint` and calls them
+    from nothing — macro API only, no game mechanic. Gambit's covers ~10 items (Shield Master 2024 the only
+    mainstream one) with a real helper that iterates `canvas.grid.measurePath` for diagonal correctness and
+    marches a ray in tenth-of-a-square steps on wall contact. Chris's covers two, both delegating to the
+    separate `cat` module. Custom D&D 5e ships a Move *activity* — good, but an authoring tool: hand-built
+    per item, human picks the destination, no rules knowledge. **Nobody handles a hazardous landing**
+    (Gambit's prints a chat line asking the GM to fix it), scene edges, or elevation.
+  - **Core standardised the concept even though nothing uses it.** v12's `forced` flag was replaced 1:1 by
+    `action: "displace"` — core's own deprecation shim returns `action === "displace"` for the old
+    property. So displacement is the platform's official "involuntary".
+  - **The architecture that follows: ask with `walk`, move with a zero-cost action.** `displace` cannot be
+    softened — `#initializeMovementActions` (`client/game.mjs:840-852`) *validates* that it teleports,
+    is unmeasured, has `walls: null`, then **overwrites** its animation and cost functions — so a shove
+    executed as `displace` would go through walls and snap instantly. Instead `constrainMovementPath` is
+    asked where a *walked* path would stop (pure, writes nothing) and the move is committed to that
+    already-legal point as `noodlrForce`. Same split CAT arrived at.
+  - **Registering a movement action: `init` only, and only `label` + `icon` are required.**
+    `#initializeMovementActions` defaults every other field (including `deriveTerrainDifficulty = null`
+    and `getCostFunction`) and then **deep-freezes the registry inside `setupGame()`, before the `setup`
+    hook** — so registering at `setup` is a silent no-op, not an error. It throws on a missing label or
+    icon. `registerForceAction()` therefore runs from `init` on every client and everything downstream
+    feature-detects the key, falling back to `displace`. The custom key travels on the wire and core's
+    animation path looks it up without a fallback, which is safe only because Foundry activates modules
+    world-wide rather than per client.
+  - **Coordinate systems are the live bug risk.** `constrainMovementPath` takes and returns **top-left**
+    waypoints; every measurement in `auto/` is from the **centre**. `shove.ts` converts at that boundary
+    (`toCorner`/`toCentre`) — conflating them puts a medium creature half a square out and a Huge one two
+    squares out, and it is invisible in a code review. An empty returned path means "cannot leave the
+    square", which must not be confused with the unreadable-API case that retries with our own ray.
+  - **Two checks are deliberately repeated after core answers:** core's boundary test uses the PADDED
+    canvas rather than the visible map, and creature blocking belongs to the *system* — dnd5e implements it
+    properly in its `constrainMovementPath` override (correct multi-space footprints and elevation) but
+    **disables itself unless `game.settings.get("dnd5e", "movementAutomation") === "full"`**, so on many
+    tables it never runs.
+  - **Detection has to come off chat messages, not roll hooks.** `dnd5e.rollAttack` / `rollSavingThrow` are
+    ordinary local hooks that fire only on the rolling client, so a player's attack is invisible to the GM
+    through them. The GM-side readings, verified in source: attack = `flags.dnd5e.roll.type === "attack"`
+    with `flags.dnd5e.targets` (`{name, img, uuid, ac}`) and `rolls[0]` a `D20Roll` whose `options.target`,
+    `isCritical` and `isFumble` all survive deserialisation; hit/miss is **stored nowhere** and must be
+    recomputed as dnd5e's renderer does. Save = `roll.type === "save"` with `roll.ability`, DC at
+    `rolls[0].options.target`, and — crucially — `flags.dnd5e.originatingMessage`, the usage card's id,
+    which is the ONLY link back to the activity that demanded the save. Under midi read
+    `flags["midi-qol"].hitTargetUuids` / `.failedSaveUuids` off `updateChatMessage` instead: those are
+    **token** uuids (better than dnd5e's actor uuids), written unconditionally by `displayAttackRoll` /
+    `displaySaves` and not subject to midi's `SaveToChatCard` setting. Select the path by **presence of the
+    flags, not presence of the module** — midi can have its automation switched off.
+  - **Known-heuristic list, logged rather than asserted:** a null recorded AC conflates total cover with an
+    unreadable sheet and is skipped (dnd5e's own formula scores it as a *hit*, via `total < null` coercing
+    to `total < 0` — we deliberately diverge); anything rolled from a sheet has no `originatingMessage` and
+    is unattributable; `flags.dnd5e.targets` keys by actor uuid, so two linked tokens of one actor
+    **collapse into a single entry** before we see it; `BasicRoll#isFailure` returns `false` when there is
+    no DC, so absence must be tested first; concentration saves are byte-identical to ordinary saves.
+  - **Shove is automatable only because the conditions disambiguate it after the fact.** 2024 folds grapple
+    and shove into one save activity, so a failed save cannot say which the attacker chose — but `grappled`
+    means grapple, `prone` means the knockdown branch, and neither means the 5-foot push. Hence
+    `unlessStatus` and a 700 ms settle before reading.
+  - **Applied automatically with an undo, not by prompting** (user, 2026-08-06). Most of these rules are
+    permissive ("you *can* push"), so a confirmation on every hit would cost more table time than the
+    occasional reversal; every card carries "Put it back" and `api.undoForcedMovement()` reverses the fight.
+    **One rule per event only** — mastery, then on-hit, then damage-type — because stacking two is a rules
+    interpretation rather than an automation. Push beats pull when a warlock owns both invocations.
+  - The application ledger is keyed on the **activation** (message id), not the turn: a card midi revises
+    several times cannot push twice for one hit, while a spell cast twice in a turn still pushes twice, and
+    a GM testing out of combat is not permanently blocked. Once-per-turn riders are simply not enforced
+    outside combat, since there are no turns.
+  - Exempt from opportunity attacks and from the Speed budget by construction: `isForcedMovement()` in
+    `shove.ts` is the single predicate both `reactions.ts` and the movement cap consult, and it recognises
+    `displace` as well as our own action so a shove from *any* module using core's idiom is covered.
+  - Stands down on `activity.flags.cat.macros` (Chris's) or `item.flags["gambits-premades"].gpsUuid`
+    (Gambit's) when those modules are active. Diagnostics: `api.surveyForced()`; manual use:
+    `api.push(feet)` / `api.pull(feet)`.
+  - **Not implemented, deliberately:** rules that only knock prone (Destructive Wave, Tidal Wave, the Topple
+    mastery) are conditions rather than movement; Vortex Warp needs a human-chosen destination; Antilife
+    Shell pushes continuously as its caster walks; the grappler's own halved Speed belongs to the movement
+    budget. Core has no concept of falling, so what happens when Reverse Gravity ends is the table's call.
+
+- **Concentration: the system does everything except finish the sentence (v0.4.44, 2026-08-07).** The
+ fourth finding of this shape and the narrowest, because unlike actions, Speed and forced movement the
+ mechanic is *almost* implemented. Verified in dnd5e 5.3.3 source. It tracks concentration properly
+ (`actor.concentration`, effect created at `activity/mixin.mjs:470`, casting a second one ends the first
+ at `mixin.mjs:251`); it detects damage and computes the correct DC (`attributes.mjs:548-552` →
+ `getConcentrationDC` at `actor.mjs:471`, `clamp(floor(dmg/2), 10, modern ? 30 : Infinity)` — cap and
+ edition both right); and `rollConcentration` (`actor.mjs:1709`) builds the save correctly, reading the
+ ability, the save bonus and `roll.mode`, which is how War Caster already reaches the roll. **Then it
+ stops.** `challengeConcentration` posts a whispered button; `rollConcentration` fires two hooks and
+ returns. `endConcentration` has exactly five callers — item deleted, effect deleted, two context menus,
+ and starting a new concentration — and **not one of them is a saving throw**. The card renders the
+ failure in red and the spell stays up. So the two missing pieces are the two ends: nobody presses the
+ button, and nobody reads the verdict. A third clause, *"Your Concentration ends if you have the
+ Incapacitated condition or you die"* (2024 PHB; 2014 says the same), is enforced nowhere at all.
+ Load-bearing details in `combat/auto/concentration.ts`:
+ - **The roll is routed, not centralised.** `rollConcentration` returns null unless `this.isOwner`, and a
+ character's Constitution save is a roll the player expects to make — the same argument as `rollNPC`
+ versus `rollAll` for initiative. `dnd5e.damageActor` fires on **every** client (the `Hooks.callAll` at
+ `attributes.mjs:564` sits outside the `userId === game.userId` guard, and `options.dnd5e.hp` is set in
+ `_preUpdate` so it travels with the update), which is what makes routing possible: each client asks
+ `isRollerFor(actor)` and exactly one says yes.
+ - **`rollerForActor()` in `util/gm.ts` is three passes, most specific first, and the order matters.**
+ Assigned character (`user.character`), then an explicit Owner row, then `testUserPermission`. The last
+ is the test midi's `playerForActor` lacks — Foundry resolves ownership as
+ `ownership[id] ?? ownership.default ?? NONE` and its dialog *deletes* the row for anyone left on
+ Default — but it must stay last, because in a world whose default permission is Owner it would
+ otherwise hand every character's save to whichever player sorts first. Sorted by id within each pass
+ so all clients agree.
+ - **Suppress the stock prompt with the system's own switch**, `options.dnd5e.concentrationCheck = false`
+ in `preUpdateActor`, and only when the election names somebody — a button is better than nothing.
+ Leaving the card up would let a player produce a second save from a stale prompt. If the dialog is
+ cancelled the prompt is re-posted rather than the save vanishing silently.
+ - **Register `dnd5e.rollConcentration` only.** `rollConcentration` calls it *and* `...V2` with the same
+ rolls (`actor.mjs:1758-1759`), so listening to both judges every save twice. Same trap as
+ `rollSkill`/`rollSkillV2`.
+ - **Ask hit points, not just the status, for "already broken".** `damageActor` fires from inside
+ `Actor#update`, which resolves before `applyDamage` returns — so the Unconscious our dying layer
+ applies has NOT landed yet, but `hp.value` has. Reading only the status puts a save dialog in front of
+ a character who is already on the floor.
+ - **No undo, deliberately, unlike the dying layer.** `endConcentration` deletes an Active Effect and core
+ cascades that to everything registered dependent on it — the Wall of Fire's template, the effects Bless
+ put on four other actors. The one effect is restorable; the cascade is not, and a half-restored spell is
+ worse than an honestly ended one. Legibility is the mitigation instead: public roll, a card naming the
+ spell and the reason, and an off switch.
+ - **Stand aside from midi wholesale, on ordering grounds rather than politeness.** midi's
+ `doConcentrationCheck` defaults to `"chat"` and its own `dnd5e.rollConcentration` listener
+ (`Hooks.ts:1964`) ends concentration on a failure when `removeConcentration` is on — so midi owns the
+ verdict, and does not press the button either. But midi *also* writes `options.dnd5e.concentrationCheck`
+ from its own `preUpdateActor` (`Hooks.ts:237`), so suppression becomes a hook-registration-order race.
+ Setting midi's concentration handling to "None" hands the whole job to Noodlr. Diagnostics:
+ `api.surveyConcentration()`.
+
+- **Automated Conditions 5e is a superset of the condition rules, so we defer to it (2026-08-07).** Read
+ from its source, which is cloned at `C:\Project\_research\ac5e`; two audits sit in `_research\_audit\`
+ (`ac5e-coexistence.md`, `ac5e-techniques.md`). Its `automateStatuses` setting (default **ON**) drives a
+ table hooked to the same `preRollAttack` and `preRollSavingThrow` we use, covering everything in
+ `dnd5e-conditions.ts` plus attacker Prone and Restrained disadvantage, Invisible, Grappled,
+ visibility-aware Blinded and legacy Exhaustion. `ac5eOwnsConditions()` therefore switches our whole
+ condition layer off when it is present and enabled — the same shape as the midi stand-asides, and the
+ same thing AC5e itself does when midi owns range.
+ - **The overlap is not benign just because advantage does not stack.** The two agree on the rule and
+ disagree on the mechanism, which is what makes dual enablement a silent race: we cancel an auto-failed
+ save with `return false`, AC5e rolls it against a forced DC of 999 with `criticalSuccess` pushed to 21
+ (there is no `-99` anywhere in its source, despite the README); we force a critical on `rollAttack`
+ after confirming the hit, AC5e sets `criticalSuccess = 1` on the damage roll up front. Whichever hook
+ registers first wins, differently each time.
+ - **The exception that must not be "tidied" into the same gate:** AC5e's refusal to let an Incapacitated
+ creature use an activity is behind `autoArmorSpellUse`, which ships `"off"`. At stock settings it
+ blocks nothing, so `enforce.ts` keeps ours and consults `ac5eOwnsIncapacitatedUse()` separately.
+ - **Do not reach for their override API.** `ac5e.statusEffectsOverrides.register()` is real, documented
+ and fires from a one-shot `ac5e.statusEffectsReady` hook carrying `{tables, overrides}` — an `apply`
+ returning `""` clears a rule and `undefined` leaves it. It would let us suppress their rules one status
+ at a time, and using it would make us the module that reaches into another's internals to win a fight
+ neither of us needs. Recorded because it is genuinely well built, not because we should call it.
+ - **Their README is not a specification.** It documents a `dnd5e.preRollConcentration` hook that does not
+ exist in the source, and describes range and cover without mentioning that both stand down when midi is
+ present. Verify against `scripts/**/*.mjs` before believing anything about this module.
+ - Concentration is safe: `endConcentration`, `challengeConcentration` and `rollConcentration` appear
+ nowhere in AC5e. It only shapes the save (War Caster advantage, encumbrance and legacy exhaustion
+ disadvantage) once something else calls for one, which is exactly the division of labour we want.
+ - Found while wiring this: the save hooks were cancelling an auto-failed save **before** consulting
+ `enabled()` — the gate lived only in the async announcement — so a paralysed creature's Strength save
+ died silently with condition automation switched off. Fixed in the same change. A synchronous
+ `return false` needs its own gate; a check in the async half guards the message, not the cancellation.
+
+## Configuration, not code: what to tell a GM
+
+Three reported problems were world configuration rather than module bugs. Recorded because they will be
+reported again.
+
+- **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
+  narrower than "wrong ownership level". Core resolves ownership through the default row —
+  `getUserLevel` is `ownership[user.id] ?? ownership.default ?? NONE` (`common/abstract/document.mjs:383-392`)
+  — so **"All Players: Owner" genuinely does grant every player Owner rights, and is not a broken setting.**
+  midi simply cannot read it: `playerForActor` does raw `ownership[userId] === 3` lookups and never consults
+  `default`, and Foundry's ownership dialog *deletes* the per-user entry for anyone left on "Default"
+  (`client/applications/apps/document-ownership.mjs:150-155`) rather than writing `-1`, so there is nothing
+  to match and it falls through to `preferredActiveGM()`. **Two things satisfy it, either alone:** an
+  explicit Owner row for that player, or the character being assigned to the user in User Configuration
+  (`user.character`), which midi checks first. A world with "All Players: Owner" and no character assignments
+  hits neither, which is exactly what the GM had. Assistant GMs never match at all, because every lookup
+  searches `game.users.players`, which excludes GMs by definition. Note also that midi's second check finds
+  the *first* active player holding an explicit Owner row, so each character should have exactly one.
+  Separately, midi's `doConcentrationCheck` defaults to `"chat"`, which **auto-rolls** the save rather than
+  offering it; `"chatOnly"` hands it back to the player.
+- **Eldritch Blast beams stuck on a corpse.** dnd5e 5.3.3 does not model beams at all — the SRD item is one
+  attack activity with one 1d10 part and `target.affects.count: 1`; multiple beams exist only in the prose,
+  and the expectation is one press per beam. The lock-on is midi's `untargetDeadTokens`, which reads
+  `hp.value <= 0` 500 ms after the workflow ends, so with manual damage application the corpse still has
+  positive HP and is never released. Both `AutoRemoveTargets` and `TargetConfirmation` are **client**-scoped,
+  so the GM's settings never reach the player's browser. Per-beam retargeting has been an open dnd5e feature
+  request since 2021 ([#1067](https://github.com/foundryvtt/dnd5e/issues/1067), closed unimplemented).
+
+## Open items carried over from noodlr
+
+- **OPEN BUG — melee-only hostiles still move oddly (reported 2026-08-05, v0.4.36 test).** The user saw
+  "unusual movement behaviour" from melee-only creatures during an otherwise clean encounter and had no
+  time to characterise it: not whether they stall, overshoot, path badly or refuse to close. Start with
+  `api.explainTurn()` on a misbehaving creature and `api.testMove()` on its token — between them those
+  report the planner's scoring and every stage of what core did with the move. Prime suspects:
+  `reachableElevation` and the 3D `separation` check in `planner.attackOptions`, and the `maxCost`
+  constraint, which refuses a path costing more than the creature's Speed rather than moving it as far as
+  it can. **The v13 theory is dead** (census, 2026-08-07): the host is 14.365, so `maxCost` exists there.
+  The same census settles the other half — all four movement-veto modules are active in that world:
+  `NotYourTurn@4.0.0`, `tokenwarp@14.365.2`, `Rideable@5.0.17` and `monks-active-tiles@14.01`. Disable
+  NotYourTurn first: it hooks `preMoveToken` without checking `movement.method`, so an API move is
+  treated as a player drag.
+- **UNVERIFIED CONFLICT — `wm5e` (Weapon Mastery 5e) versus our Push mastery.** Active in the user's world
+  at 14.533.6, a version scheme matching AC5e's, so probably the same author. `system/dnd5e-forced-movement.ts`
+  implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`) and
+  `rules/forced.ts::alreadyAutomated()` stands aside only for Chris's Premades and Gambit's — it has never
+  heard of wm5e. If wm5e moves the target, a Pike or Warhammer hit pushes twice. **Not confirmed:** wm5e is
+  not in `C:\Project\_research` and none of its code has been read. Clone it before either adding a
+  stand-aside or dismissing the risk.
+- **`attacksPerAction` probably misses Thirsting Blade** — inference, not observed, since the census's only
+  warlock took Pact of the Chain. `economy/ledger.ts` reads `extra-attack`/`two-extra-attacks`/
+  `three-extra-attacks`, right for fighters, rangers, paladins, barbarians and monks, but a Pact of the
+  Blade warlock's second attack comes from the `thirsting-blade` invocation and would read as 1. One
+  identifier to add.
+- **Five audits from the 2026-08-06 batch have not been acted on** and sit in `C:\Project\_research\_audit\`:
+  conditions/exhaustion, cover/visibility/surprise, damage/death/hazards, movement rules beyond Speed, and
+  spellcasting/resources. Read them before planning the next feature — they are the standing gap list.
+- **Tooling and release discipline** are inherited unchanged from noodlr: prettier printWidth 100,
+  `npm run check` + `lint` + `build` before commit, LF via `.gitattributes`, small commits at working
+  checkpoints, and — the one that has bitten twice — **verify a release's ASSETS, not just its tag.**
+  `gh release view <tag> --json assets` must list both `module.json` and `module.zip`, and
+  `releases/latest/download/module.json` must return the new version. An assetless release makes the
+  newest release the broken one and blocks updating for everyone.
