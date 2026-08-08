@@ -36,6 +36,7 @@
 import { log, MODULE_ID } from "../../constants";
 import { isPrimaryGM } from "../../util/gm";
 import { narrator, speakerFor } from "../../util/speaker";
+import { announceRuling } from "../../integration/contract";
 import { readHp } from "../tracker";
 import {
   getCombatAutomation,
@@ -563,6 +564,12 @@ async function reinforce(combat: any, spotter: any, why: string): Promise<void> 
       speaker: narrator(),
       flags: { [MODULE_ID]: { autoEngage: true } },
     });
+    await announceRuling({
+      kind: "encounter",
+      summary: `${names} ${joining.length > 1 ? "join" : "joins"} the fight.`,
+      detail: { reinforcements: joining.map((t) => String(t?.name ?? "")) },
+      combat,
+    });
     Hooks.callAll("noodlrReinforced", combat, joining);
   } catch (err) {
     log("could not bring reinforcements into the fight:", err);
@@ -690,12 +697,21 @@ async function applySurprise(joining: any[]): Promise<void> {
   const names = caught.map((t) => foundry.utils.escapeHTML(String(t.name ?? "?"))).join(", ");
   log(`perception: ${caught.length} caught unawares — ${names}`);
   const ChatMessage = (globalThis as any).ChatMessage;
+  const line = `${names} ${caught.length > 1 ? "are" : "is"} ${game.i18n.localize(
+    "NOODLRHOOKS.Combat.AutoEngage.Surprised",
+  )}`;
   await ChatMessage.create({
     content: `<p><strong>${names}</strong> ${caught.length > 1 ? "are" : "is"} ${game.i18n.localize(
       "NOODLRHOOKS.Combat.AutoEngage.Surprised",
     )}</p>`,
     speaker: narrator(),
     flags: { [MODULE_ID]: { autoEngage: true } },
+  });
+  await announceRuling({
+    kind: "surprise",
+    summary: line,
+    detail: { surprised: caught.map((t) => String(t?.name ?? "")) },
+    combat: game.combat,
   });
 }
 
@@ -780,6 +796,15 @@ async function engage(spotter: any, target: any, why?: string): Promise<void> {
       // The spotter when there is one; a fight opened by damage has no spotter to speak for it.
       speaker: why ? narrator() : speakerFor(spotter, spotterName),
       flags: { [MODULE_ID]: { autoEngage: true } },
+    });
+    await announceRuling({
+      kind: "encounter",
+      summary: why
+        ? `${why}. Roll for initiative!`
+        : `${spotterName} spots ${targetName}. Roll for initiative!`,
+      detail: { spotter: spotterName, spotted: targetName, cause: why ?? "perception" },
+      token: spotter,
+      combat,
     });
 
     // Ask before beginning, not after. Starting a fight in which only the monsters have rolled puts a

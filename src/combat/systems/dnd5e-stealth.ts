@@ -30,6 +30,7 @@
 // what we get, which is precisely why all three routes are tried and why the flag exists.
 
 import { isDnd5e } from "./dnd5e-rewards";
+import { hasFlag as hasNamespacedFlag } from "../../util/flags";
 
 /**
  * The status that means "this creature took the Hide action".
@@ -82,13 +83,9 @@ const SKULKER: FeatSource = {
   pattern: /\bskulker\b/i,
 };
 
-function hasFlag(actor: any, key: string): boolean {
-  try {
-    return Boolean(actor?.getFlag?.("noodlr", key));
-  } catch {
-    return false;
-  }
-}
+// Both namespaces: these hatches were documented under `flags.noodlr.*` before the split, and a GM's
+// existing Active Effect must keep working. See util/flags.ts.
+const hasFlag = hasNamespacedFlag;
 
 function owns(actor: any, feat: FeatSource): boolean {
   try {

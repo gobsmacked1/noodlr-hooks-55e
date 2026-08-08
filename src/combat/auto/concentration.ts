@@ -23,6 +23,7 @@
 // and the reason, and the whole feature has an off switch.
 
 import { log, MODULE_ID } from "../../constants";
+import { announceRuling } from "../../integration/contract";
 import { isConcentrationAutomationEnabled } from "../config";
 import { isRollerFor, rollerForActor } from "../../util/gm";
 import { speakerFor } from "../../util/speaker";
@@ -75,6 +76,9 @@ async function announce(actor: any, text: string): Promise<void> {
   } catch (err) {
     log("concentration: could not announce:", err);
   }
+  // No `undo` offered on purpose: ending concentration cascades to every effect registered as
+  // dependent on it, and a half-restored spell is worse than an honestly ended one.
+  await announceRuling({ kind: "concentration", summary: text, actor });
 }
 
 /**

@@ -6,6 +6,7 @@
 // that is detected rather than counted, and a monster whose Multiattack did not parse is the most likely
 // reason a legal swing was refused.
 
+import { readFlag } from "../../util/flags";
 import { getEconomyMode } from "../config";
 import { notable, slotClaims } from "./claims";
 import { budget, explainAttacksPerAction, stampFor } from "./ledger";
@@ -37,7 +38,7 @@ export function surveyEconomy(): Record<string, unknown> {
       attacksPerAction: per.value,
       attacksPerActionFrom: per.source,
       // The raw flag, so a tally that disagrees with the derived numbers is visible rather than inferred.
-      recorded: actor?.getFlag?.("noodlr", "spent") ?? null,
+      recorded: readFlag(actor, "spent") ?? null,
       claims: slotClaims(actor).filter(notable),
     };
   });
@@ -49,10 +50,11 @@ export function surveyEconomy(): Record<string, unknown> {
     note:
       "Legendary, mythic and crew actions are dnd5e's own and are deliberately not counted here. " +
       "attacksPerAction is read from the extra-attack class features, or parsed from Multiattack prose " +
-      "for monsters (attacksPerActionFrom says which); set flags.noodlr.attacksPerAction on an actor to " +
-      "override it. `claims` lists the features that would be charged a slot, plus anything already " +
-      "exempted as a damage rider: an entry there with treatedAsRider null that is really extra damage on " +
-      "another action wants flags.noodlr.damageRider on its item, or a line in systems/dnd5e-riders.ts.",
+      "for monsters (attacksPerActionFrom says which); set flags.noodlr-hooks-55e.attacksPerAction on an " +
+      "actor to override it (flags.noodlr.* is still read, for effects written before the split). " +
+      "`claims` lists the features that would be charged a slot, plus anything already exempted as a " +
+      "damage rider: an entry there with treatedAsRider null that is really extra damage on another " +
+      "action wants flags.noodlr-hooks-55e.damageRider on its item, or a line in systems/dnd5e-riders.ts.",
     combatants: rows,
   };
 }

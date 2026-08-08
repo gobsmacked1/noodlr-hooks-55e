@@ -25,6 +25,7 @@
 // specified.
 
 import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "../system-profiles";
+import { turnRandom } from "../auto/random";
 
 /** Everything a taunt needs to know about the creature receiving it. */
 export interface TargetProfile {
@@ -43,6 +44,16 @@ export interface BanterProfile {
   creatureType: string;
   /** Who is being taunted. */
   target: TargetProfile;
+  /**
+   * Two draws from this turn's banter stream, 0…1: whether to speak, and which line.
+   *
+   * Handed over rather than left to the listener so banter stays reproducible across the module
+   * boundary — the listener has no access to the fight's seed, and a `Math.random()` on its side
+   * would make every taunt unreplayable and untestable. The stream is `"banter"`, separate from the
+   * tactical one on purpose: a decision made here must never shift a number the planner sees.
+   */
+  roll: number;
+  pick: number;
 }
 
 /** Percentage points contributed by each score point. */
@@ -132,19 +143,17 @@ export function readTarget(actor: any, name: string): TargetProfile {
  * A zero `chance` is returned rather than a null profile when the speaker simply has no language, so
  * a caller can tell "nothing to say" apart from "nothing to say it to".
  */
-export function banterProfile(actor: any, target: any): BanterProfile | null {
+export function banterProfile(actor: any, target: any, combatantId: string): BanterProfile | null {
   if (!actor || !target?.actor) return null;
   const P = systemPaths();
-  if (!hasLanguage(actor, P)) {
-    return {
-      chance: 0,
-      creatureType: pickString(actor, P.creatureType).toLowerCase(),
-      target: readTarget(target.actor, String(target.name ?? "")),
-    };
-  }
+  const rand = turnRandom(combatantId, "banter");
   return {
-    chance: Math.max(1, chatterScore(actor)) * CHATTER_STEP,
+    // The floor of one point sits outside the formula and after the language gate, so the arithmetic
+    // stays as specified while anything that can talk still gets a one-in-twenty chance to jeer.
+    chance: hasLanguage(actor, P) ? Math.max(1, chatterScore(actor)) * CHATTER_STEP : 0,
     creatureType: pickString(actor, P.creatureType).toLowerCase(),
     target: readTarget(target.actor, String(target.name ?? "")),
+    roll: rand(),
+    pick: rand(),
   };
 }

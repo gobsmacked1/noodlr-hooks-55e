@@ -50,7 +50,8 @@
 // anyone by luck alone, which is a worse rule than either edition's. Ties go to the spotter, because
 // the 2024 rules make the Stealth total the DC for a Perception check and a check meets its DC on equal.
 
-import { log, MODULE_ID } from "../../constants";
+import { LEGACY_MODULE_ID, log, MODULE_ID } from "../../constants";
+import { hasFlag, readFlag } from "../../util/flags";
 import { isPrimaryGM } from "../../util/gm";
 import {
   concealmentsOn,
@@ -288,7 +289,7 @@ async function declare(actor: any): Promise<void> {
     // `auto/hide.ts` writes the total itself, because it knows the roll it just made and does not depend
     // on which client happened to see the chat message. A fresh number already in place is better than
     // anything we could work out here, so it is left alone rather than overwritten with a passive guess.
-    const existing = token.document?.getFlag?.(MODULE_ID, "stealth") as Banked | undefined;
+    const existing = readFlag(token.document, "stealth") as Banked | undefined;
     if (existing && Date.now() - Number(existing.ts ?? 0) <= PAIRING_MS) continue;
 
     const loose = looseRolls.get(String(token.id));
@@ -320,10 +321,15 @@ async function write(token: any, dc: number, why: string): Promise<void> {
 /** Drop every trace of a banked hide. Takes a Token placeable or a TokenDocument, indifferently. */
 async function erase(tokenOrDoc: any): Promise<void> {
   const doc = tokenOrDoc?.document ?? tokenOrDoc;
-  try {
-    if (doc?.getFlag?.(MODULE_ID, "stealth")) await doc.unsetFlag(MODULE_ID, "stealth");
-  } catch {
-    /* a flag that will not clear is not worth failing on */
+  // Both namespaces: a world that hid someone while the old module owned this still has a row under
+  // `noodlr`, and a banked hide nobody can clear is this feature's worst failure — it would suppress
+  // every encounter forever and look exactly like the module being broken.
+  for (const ns of [MODULE_ID, LEGACY_MODULE_ID]) {
+    try {
+      if (doc?.getFlag?.(ns, "stealth")) await doc.unsetFlag(ns, "stealth");
+    } catch {
+      /* a flag that will not clear is not worth failing on */
+    }
   }
   const id = String(doc?.id ?? "");
   looseRolls.delete(id);
@@ -340,7 +346,7 @@ async function erase(tokenOrDoc: any): Promise<void> {
 export async function reveal(token: any, why: string): Promise<void> {
   const doc = token?.document ?? token;
   if (!doc) return;
-  const hidden = declaredHiding(doc) || Boolean(doc?.getFlag?.(MODULE_ID, "stealth"));
+  const hidden = declaredHiding(doc) || hasFlag(doc, "stealth");
   if (!hidden) return;
 
   // Status first, flag second. The other order leaves a window in which the status is still up and the
@@ -417,7 +423,7 @@ async function clearScene(): Promise<void> {
   looseRolls.clear();
   awaitingOutcome.clear();
   for (const token of (canvas as any)?.tokens?.placeables ?? []) {
-    if (!token?.document?.getFlag?.(MODULE_ID, "stealth")) continue;
+    if (!hasFlag(token?.document, "stealth")) continue;
     await erase(token);
   }
 }
@@ -465,7 +471,7 @@ export function hidingState(token: any): Hiding | null {
   // without having to know we exist. Do not "optimise" this by reading the flag first.
   if (!hasStatus(doc, HIDING_STATUS)) return null;
 
-  const own = doc?.getFlag?.(MODULE_ID, "stealth") as Banked | undefined;
+  const own = readFlag(doc, "stealth") as Banked | undefined;
   if (Number.isFinite(Number(own?.dc))) return { dc: Number(own?.dc), from: "a Stealth roll" };
 
   // Declared but with no number of its own — the status arrived from somewhere that never rolled. Passive

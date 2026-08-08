@@ -164,7 +164,9 @@ export async function runTurnFor(combatant: any): Promise<void> {
       intent: planned,
       reasoning,
       target: plan.chosen.target ?? null,
-      banter: heckledActor ? banterProfile(combatant?.actor, heckledActor) : null,
+      banter: heckledActor
+        ? banterProfile(combatant?.actor, heckledActor, String(combatant?.id ?? ""))
+        : null,
     });
     log(`${intent} [${reasoning}]`);
 

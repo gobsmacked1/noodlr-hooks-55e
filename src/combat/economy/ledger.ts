@@ -33,6 +33,7 @@
 // naive per-round reset gets wrong.
 
 import { MODULE_ID } from "../../constants";
+import { numberFlag, readFlag } from "../../util/flags";
 
 export type Slot = "action" | "bonus" | "reaction";
 
@@ -98,7 +99,9 @@ export function stampFor(combat: any, combatant: any): string {
 function readTally(actor: any, stamp: string): Tally {
   let tally = zero(stamp);
   try {
-    const stored = actor?.getFlag?.(MODULE_ID, FLAG);
+    // Both namespaces, so a world upgraded mid-fight does not hand everyone a fresh turn's worth of
+    // actions. A stale stamp reads as zero anyway, so the fallback can only help.
+    const stored = readFlag(actor, FLAG) as any;
     if (stored && String(stored.stamp) === stamp) {
       tally = {
         stamp,
@@ -135,12 +138,7 @@ function readTally(actor: any, stamp: string): Tally {
  */
 export function allowance(actor: any, slot: Slot): number {
   const key = slot === "action" ? "extraAction" : slot === "bonus" ? "extraBonus" : "extraReaction";
-  let extra = 0;
-  try {
-    extra = Number(actor?.getFlag?.(MODULE_ID, key)) || 0;
-  } catch {
-    /* absent is the normal case */
-  }
+  const extra = numberFlag(actor, key) ?? 0;
   return Math.max(1, 1 + Math.max(0, extra));
 }
 
@@ -176,13 +174,9 @@ export function attacksPerAction(actor: any): number {
  * where the real detection lives; `attacksPerAction` is the thin caller so the two can never disagree.
  */
 export function explainAttacksPerAction(actor: any): { value: number; source: string } {
-  try {
-    const override = Number(actor?.getFlag?.(MODULE_ID, "attacksPerAction"));
-    if (Number.isFinite(override) && override > 0)
-      return { value: override, source: "flags.noodlr.attacksPerAction" };
-  } catch {
-    /* fall through to detection */
-  }
+  const override = numberFlag(actor, "attacksPerAction");
+  if (override !== null && override > 0)
+    return { value: override, source: `flags.*.attacksPerAction (${override})` };
 
   const items: any[] = Array.from(actor?.items ?? []);
   const ids = new Set<string>();

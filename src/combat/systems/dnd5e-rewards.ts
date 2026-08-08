@@ -12,7 +12,7 @@
 // it all back. A mercy ruling that lands wrong in the middle of a session must be undoable in one
 // click, not reconstructed from memory.
 
-import { MODULE_ID, log } from "../../constants";
+import { LEGACY_MODULE_ID, MODULE_ID, log } from "../../constants";
 
 const FLAG = "mercyForfeit";
 
@@ -153,12 +153,21 @@ export async function forfeitPartyGear(): Promise<{ actors: number; items: numbe
   return { actors: actorsTouched, items: itemsTaken };
 }
 
-/** Put back everything the last mercy ruling took. Safe to call when nothing was taken. */
+/**
+ * Put back everything the last mercy ruling took. Safe to call when nothing was taken.
+ *
+ * Reads both namespaces. A party stripped while the old module owned this rule has its only copy of
+ * the confiscated gear in `flags.noodlr.mercyForfeit`, and a forfeiture that cannot be reversed is a
+ * destroyed character sheet rather than a ruling — see util/flags.ts.
+ */
 export async function restoreForfeited(): Promise<number> {
   let restored = 0;
   for (const actor of game.actors ?? []) {
-    const record: any = (actor as any).getFlag?.(MODULE_ID, FLAG);
-    if (!record) continue;
+    const namespace = [MODULE_ID, LEGACY_MODULE_ID].find((ns) =>
+      Boolean((actor as any).getFlag?.(ns, FLAG)),
+    );
+    if (!namespace) continue;
+    const record: any = (actor as any).getFlag?.(namespace, FLAG);
     try {
       const currency: Record<string, number> = {};
       for (const [key, value] of Object.entries(record.currency ?? {})) {
@@ -168,7 +177,7 @@ export async function restoreForfeited(): Promise<number> {
       if (Array.isArray(record.items) && record.items.length > 0) {
         await (actor as any).createEmbeddedDocuments("Item", record.items);
       }
-      await (actor as any).unsetFlag(MODULE_ID, FLAG);
+      await (actor as any).unsetFlag(namespace, FLAG);
       restored++;
     } catch (err) {
       log(`could not restore gear to ${actor?.name}:`, err);

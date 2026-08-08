@@ -8,6 +8,7 @@
 
 import { log, MODULE_ID } from "../../constants";
 import { speakerFor } from "../../util/speaker";
+import { announceRuling } from "../../integration/contract";
 import { isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../config";
 import {
   deathFailuresFromDamage,
@@ -157,6 +158,15 @@ async function announce(actor: any, text: string, undoable: boolean): Promise<vo
   } catch (err) {
     log("dying: could not announce:", err);
   }
+  // Every dying-layer message is a ruling worth a narrator knowing about. `undo` is offered only
+  // where the card offers it, so a listener can never promise the table a reversal we cannot make.
+  await announceRuling({
+    kind: "dying",
+    summary: text,
+    detail: { undoable },
+    actor,
+    undo: undoable ? async () => undoDying() : undefined,
+  });
 }
 
 function pushUndo(entry: UndoEntry): void {

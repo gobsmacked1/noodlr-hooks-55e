@@ -29,9 +29,15 @@
 //     population that gets the activation wrong in the first place.
 
 import { isDnd5e } from "./dnd5e-rewards";
+import { hasFlag } from "../../util/flags";
 
-/** Set this on an item (or via an Active Effect) to declare it a damage rider. */
-const FLAG_PATH = ["flags", "noodlr", "damageRider"] as const;
+/**
+ * Set this on an item (or via an Active Effect) to declare it a damage rider.
+ *
+ * Read under this module's namespace and under `noodlr`, which is where it was documented before the
+ * split — see util/flags.ts.
+ */
+const FLAG_KEY = "damageRider";
 
 interface Rider {
   label: string;
@@ -108,12 +114,7 @@ const RIDERS: Rider[] = [
 ];
 
 function flagged(item: any): boolean {
-  let node: any = item;
-  for (const key of FLAG_PATH) {
-    node = node?.[key];
-    if (node === undefined || node === null) return false;
-  }
-  return Boolean(node);
+  return hasFlag(item, FLAG_KEY);
 }
 
 /**

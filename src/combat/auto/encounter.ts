@@ -17,6 +17,7 @@ import { pickNumber, pickString, systemPaths } from "../system-profiles";
 import { isAutoEndEnabled } from "../config";
 import { isPrimaryGM } from "../../util/gm";
 import { narrator, speakerFor } from "../../util/speaker";
+import { announceRuling, requestBehavior, type BehaviorVerb } from "../../integration/contract";
 import { releaseCombatant } from "./registry";
 import {
   awardExperience,
@@ -147,6 +148,16 @@ const CONSEQUENCE: Record<Outcome, string> = {
 };
 
 /**
+ * The three ways out of a fight that this module decides on its own, in the vocabulary a narrator
+ * understands. The other seven verbs in the contract have no trigger yet.
+ */
+const VERB: Record<Outcome, BehaviorVerb> = {
+  fled: "FLEE",
+  surrendered: "SURRENDER",
+  mercy: "MERCY",
+};
+
+/**
  * Record how a creature left the fight, flip its disposition when the addendum calls for it, and tell
  * the GM what the outcome is worth.
  */
@@ -170,6 +181,15 @@ export async function resolveCombatant(combatant: any, outcome: Outcome): Promis
     }
   }
 
+  // Offer the moment to whoever can give it words, before the GM's bookkeeping card. The rules
+  // consequence above has already happened either way — a narrator is a courtesy, not a dependency.
+  await requestBehavior({
+    verb: VERB[outcome],
+    actor: combatant?.actor,
+    token: combatant?.token,
+    context: { outcome, combatantName: String(combatant?.name ?? "") },
+  });
+
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({
     content:
@@ -177,6 +197,15 @@ export async function resolveCombatant(combatant: any, outcome: Outcome): Promis
       `${game.i18n.localize(CONSEQUENCE[outcome])}</p>`,
     speaker: speakerFor(combatant?.token ?? combatant?.actor, String(combatant?.name ?? "")),
     whisper: (globalThis as any).ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
+  });
+
+  await announceRuling({
+    kind: "encounter",
+    summary: `${String(combatant?.name ?? "A creature")} — ${game.i18n.localize(CONSEQUENCE[outcome])}`,
+    detail: { outcome },
+    actor: combatant?.actor,
+    token: combatant?.token,
+    combat,
   });
 
   await announceEncounterEndIfOver(combat);

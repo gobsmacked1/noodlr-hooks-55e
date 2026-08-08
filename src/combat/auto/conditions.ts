@@ -10,6 +10,7 @@
 
 import { log, MODULE_ID } from "../../constants";
 import { speakerFor } from "../../util/speaker";
+import { announceRuling } from "../../integration/contract";
 import { isConditionAutomationEnabled } from "../config";
 import {
   ac5eOwnsConditions,
@@ -176,6 +177,11 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
 
   const name = String(actor?.name ?? "This creature");
   const abLabel = ability.toUpperCase() || "?";
+  const summary = game.i18n.format("NOODLRHOOKS.Combat.Conditions.AutoFail", {
+    name,
+    ability: abLabel,
+    status: reason,
+  });
   ui.notifications?.info(
     game.i18n.format("NOODLRHOOKS.Combat.Conditions.AutoFailNotify", {
       name,
@@ -186,11 +192,7 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
   try {
     const ChatMessage = (globalThis as any).ChatMessage;
     await ChatMessage.create({
-      content: game.i18n.format("NOODLRHOOKS.Combat.Conditions.AutoFail", {
-        name,
-        ability: abLabel,
-        status: reason,
-      }),
+      content: summary,
       speaker: speakerFor(actor, name),
       flags: {
         [MODULE_ID]: { conditionAutoFail: { ability, status: reason } },
@@ -199,6 +201,12 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
   } catch (err) {
     log("conditions: failed to post auto-fail message:", err);
   }
+  await announceRuling({
+    kind: "condition",
+    summary,
+    detail: { rule: "auto-fail-save", ability, status: reason },
+    actor,
+  });
   // Cancel the real roll — a dialog would only invite a total that contradicts the rule.
   void dialog;
   void message;

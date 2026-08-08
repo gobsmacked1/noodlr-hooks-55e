@@ -21,6 +21,7 @@
 //   * an item name, as a last resort, for homebrew and imported sheets that carry no identifier.
 
 import { isDnd5e } from "./dnd5e-rewards";
+import { hasFlag, readFlag } from "../../util/flags";
 
 export interface DashSource {
   label: string;
@@ -82,12 +83,8 @@ function identifiers(actor: any): Set<string> {
 export function bonusDashSource(actor: any): string | null {
   if (!actor) return null;
 
-  try {
-    const flagged = actor.getFlag?.("noodlr", "bonusDash");
-    if (flagged) return typeof flagged === "string" ? flagged : "a feature";
-  } catch {
-    /* absent is the normal case */
-  }
+  const hatch = readFlag(actor, "bonusDash");
+  if (hatch) return typeof hatch === "string" ? hatch : "a feature";
 
   const owned = identifiers(actor);
   const effectNames = names(actor.appliedEffects ?? actor.effects);
@@ -106,13 +103,8 @@ export function bonusDashSource(actor: any): string | null {
 /** An activity or item that IS the Dash action, rather than one that changes what Dash costs. */
 const DASH = /^\s*dash\s*$/i;
 
-function flagged(doc: any, key: string): boolean {
-  try {
-    return Boolean(doc?.flags?.noodlr?.[key]);
-  } catch {
-    return false;
-  }
-}
+// Both namespaces — see util/flags.ts. The pre-split documentation named `flags.noodlr.*`.
+const flagged = hasFlag;
 
 /**
  * Is pressing this the Dash action?

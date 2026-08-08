@@ -40,6 +40,7 @@
 
 import { log } from "../../constants";
 import { speakerFor } from "../../util/speaker";
+import { announceRuling } from "../../integration/contract";
 import { getMoveSpeed } from "../config";
 import { actionFor, readLocomotion } from "./locomotion";
 import { cornerFor } from "./movement";
@@ -555,35 +556,35 @@ async function finish(
 }
 
 async function announce(doc: any, request: ShoveRequest, result: ShoveResult): Promise<void> {
+  const escape = foundry.utils.escapeHTML;
+  const units = String((canvas as any)?.scene?.grid?.units ?? "");
+  const key =
+    request.direction === "toward"
+      ? "NOODLRHOOKS.Combat.Forced.Pulled"
+      : request.direction === "up"
+        ? "NOODLRHOOKS.Combat.Forced.Lifted"
+        : "NOODLRHOOKS.Combat.Forced.Pushed";
+
+  let line = game.i18n.format(key, {
+    name: escape(String(doc?.name ?? "?")),
+    cause: escape(request.label),
+    distance: String(result.moved),
+    units,
+  });
+  if (result.constrained && result.moved < result.requested) {
+    line += ` ${game.i18n.format("NOODLRHOOKS.Combat.Forced.Short", {
+      requested: String(result.requested),
+      units,
+    })}`;
+  }
+  if (result.hazards.length > 0) {
+    line += ` ${game.i18n.format("NOODLRHOOKS.Combat.Forced.Hazard", {
+      hazard: escape(result.hazards.join(", ")),
+    })}`;
+  }
+
   try {
     const ChatMessage = (globalThis as any).ChatMessage;
-    const escape = foundry.utils.escapeHTML;
-    const units = String((canvas as any)?.scene?.grid?.units ?? "");
-    const key =
-      request.direction === "toward"
-        ? "NOODLRHOOKS.Combat.Forced.Pulled"
-        : request.direction === "up"
-          ? "NOODLRHOOKS.Combat.Forced.Lifted"
-          : "NOODLRHOOKS.Combat.Forced.Pushed";
-
-    let line = game.i18n.format(key, {
-      name: escape(String(doc?.name ?? "?")),
-      cause: escape(request.label),
-      distance: String(result.moved),
-      units,
-    });
-    if (result.constrained && result.moved < result.requested) {
-      line += ` ${game.i18n.format("NOODLRHOOKS.Combat.Forced.Short", {
-        requested: String(result.requested),
-        units,
-      })}`;
-    }
-    if (result.hazards.length > 0) {
-      line += ` ${game.i18n.format("NOODLRHOOKS.Combat.Forced.Hazard", {
-        hazard: escape(result.hazards.join(", ")),
-      })}`;
-    }
-
     await ChatMessage.create({
       content:
         `<p>${line}</p>` +
@@ -597,6 +598,22 @@ async function announce(doc: any, request: ShoveRequest, result: ShoveResult): P
   } catch (err) {
     log("could not announce a forced move:", err);
   }
+
+  await announceRuling({
+    kind: "forced",
+    summary: line,
+    detail: {
+      direction: request.direction,
+      cause: request.label,
+      moved: result.moved,
+      requested: result.requested,
+      constrained: result.constrained,
+      hazards: result.hazards,
+    },
+    token: doc,
+    actor: doc?.actor,
+    undo: async () => undoForcedMovement(),
+  });
 }
 
 /**
