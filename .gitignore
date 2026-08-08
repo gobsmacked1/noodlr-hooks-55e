@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Local env / secrets (never commit)
+.env
+.env.*
+!.env.example
+
+# Foundry packaging artifacts
+*.zip
+
+# Scratch notes handed to `gh release create --notes-file`; the real record is changelog.md
+release-notes-*.md

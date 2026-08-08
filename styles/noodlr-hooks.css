@@ -1,0 +1,24 @@
+/* Noodlr Hooks 5.5e — the module's entire visual surface.
+ *
+ * There is almost nothing here on purpose. This module has no windows and no panels; everything it
+ * produces is a chat card built from the system's own markup, so it should look like the rest of the
+ * log rather than like a guest. The only elements that need styling are the undo controls, because a
+ * reversal button that reads as ordinary body text will not be found when it is wanted. */
+
+.noodlr-undo-shove,
+.noodlr-undo-dying,
+.noodlr-restore-forfeit {
+  display: inline-block;
+  width: auto;
+  margin: 0.35em 0 0;
+  padding: 0.15em 0.7em;
+  font-size: var(--font-size-12, 0.8rem);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/* A ruling that reverses something destructive is worth finding at a glance; one that merely moves a
+   token back is not. Only the forfeiture restore is coloured. */
+.noodlr-restore-forfeit {
+  border-color: rgba(120, 46, 34, 0.6);
+}

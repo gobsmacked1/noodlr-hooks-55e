@@ -1,0 +1,276 @@
+// Noodlr Hooks 5.5e — entry point.
+//
+// A standalone rules-automation module for D&D 5e (2024). It depends on nothing, and everything it
+// does works with only Foundry and the dnd5e system installed. Where a mechanics module IS present it
+// stands aside rather than competing: midi-qol owns attack workflows and concentration when it is
+// configured to, Automated Conditions 5e owns condition math, Gambit's owns the opportunity attacks it
+// implements. Each of those checks lives beside the code it guards.
+//
+// Where hooks are registered matters more than it looks, and two of these placements are load-bearing:
+//
+//   * `registerMovementCap()` and `registerForceAction()` must run at `init`. The first installs a
+//     Token subclass at `setup`, which has already passed by the time `ready` fires; the second writes
+//     to a registry core deep-freezes inside `setupGame()`, before the `setup` hook, where a late write
+//     is a silent no-op rather than an error.
+//   * Anything driven by a roll must be registered on EVERY client, not inside the GM block. Those
+//     hooks fire on whichever client rolled, which for a player character is the player's browser. A
+//     rogue could attack from hiding and stay hidden for exactly this reason, because the reveal
+//     listener had been registered for GMs only.
+
+import { MODULE_ID, log } from "./constants";
+import { migrateLegacySettings, registerCombatSettings, getCombatAutomation } from "./combat/config";
+import { announceRuling, proposeRuling, requestBehavior, PROTOCOL } from "./integration/contract";
+import { registerDossierCleanup } from "./combat/dossier";
+import { toggleSelectedCombatantAutomation } from "./combat/auto/control";
+import { registerAutomationCleanup } from "./combat/auto/registry";
+import { registerAutomationTurnHook } from "./combat/auto/hooks";
+import { registerPerceptionWatch, surveyPerception } from "./combat/auto/perception";
+import { registerStealthWatch } from "./combat/auto/stealth";
+import { hideSelected, surveyHide } from "./combat/auto/hide";
+import { registerInvisibilityHooks } from "./combat/auto/invisibility";
+import { registerReactionHooks } from "./combat/auto/reactions";
+import { registerForcedMovement, surveyForced } from "./combat/auto/forced";
+import { registerForceAction, shove, undoForcedMovement } from "./combat/auto/shove";
+import { registerConditionHooks, surveyConditions } from "./combat/auto/conditions";
+import { registerDyingHooks, surveyDying, undoDying } from "./combat/auto/dying";
+import { registerConcentrationHooks, surveyConcentration } from "./combat/auto/concentration";
+import { registerEconomyHooks } from "./combat/economy/enforce";
+import { registerMovementCap, surveyMovement } from "./combat/economy/movement";
+import { surveyEconomy } from "./combat/economy/survey";
+import { registerEncounterTracking } from "./combat/auto/encounter";
+import { explainTurn } from "./combat/auto/explain";
+import { flattenElevation, restoreElevation, testMove } from "./combat/auto/diagnose";
+import { surveyActions } from "./combat/survey";
+import { restoreForfeited } from "./combat/systems/dnd5e-rewards";
+import { runCurrentNpcTurn } from "./combat/npc-turn";
+
+/**
+ * What this module tells a companion module about itself.
+ *
+ * `noodlr` scans for `noodlr-hooks-*` and reads this to decide which game system it is narrating and
+ * what it may expect to hear about. Keep `protocol` in step with `integration/contract.ts`.
+ */
+export interface HooksDescriptor {
+  protocol: number;
+  systemId: string;
+  /** The ruleset name a language model should be told it is playing, spelled out including edition. */
+  rulesetName: string;
+  capabilities: string[];
+}
+
+export interface NoodlrHooksApi {
+  noodlrHooks: HooksDescriptor;
+  runNpcTurn(): Promise<void>;
+  restoreForfeitedGear(): Promise<number>;
+  explainTurn(): Promise<void>;
+  surveyActions(opts?: { saveToFile?: boolean; max?: number; asText?: boolean }): Promise<unknown>;
+  testMove(): Promise<Record<string, unknown> | undefined>;
+  surveyPerception(): Promise<Record<string, unknown>>;
+  surveyEconomy(): Record<string, unknown>;
+  surveyMovement(): unknown;
+  surveyForced(): unknown;
+  surveyConditions(): unknown;
+  surveyDying(): unknown;
+  surveyConcentration(): unknown;
+  surveyHide(): unknown;
+  hide(opts?: { force?: boolean }): Promise<void>;
+  push(feet?: number): Promise<unknown>;
+  pull(feet?: number): Promise<unknown>;
+  undoForcedMovement(): Promise<number>;
+  undoDying(): Promise<number>;
+  flattenElevation(): Promise<number>;
+  restoreElevation(): Promise<number>;
+}
+
+const descriptor: HooksDescriptor = {
+  protocol: PROTOCOL,
+  systemId: "dnd5e",
+  // Spelled out rather than read from `game.system.title`, because that reports "D&D Fifth Edition"
+  // for both the 2014 and the 2024 rules and the edition is the whole point of naming it.
+  rulesetName: "Dungeons & Dragons Fifth Edition (2024)",
+  capabilities: [
+    "action-economy",
+    "movement-speed",
+    "forced-movement",
+    "conditions",
+    "dying",
+    "concentration",
+    "stealth",
+    "surprise",
+    "reactions",
+    "perception",
+    "npc-tactics",
+    "encounter-resolution",
+  ],
+};
+
+/**
+ * Push or pull whatever is targeted, away from or toward the selected token.
+ *
+ * A console entry point rather than a button: this is the manual override for a rule the automatic
+ * layer does not recognise, and reaching for it means the GM has already decided what should happen.
+ */
+async function shoveTargets(feet: number, direction: "away" | "toward"): Promise<unknown> {
+  const by: any = (canvas as any)?.tokens?.controlled?.[0];
+  const targets = Array.from((game.user?.targets ?? []) as Set<any>);
+  if (!by || targets.length === 0) {
+    return { error: "select the creature doing the pushing and target the ones being moved" };
+  }
+  const results: Record<string, unknown> = {};
+  for (const target of targets) {
+    results[String(target?.document?.name ?? target?.name ?? "?")] = await shove({
+      token: target,
+      by,
+      direction,
+      distance: feet,
+      label: game.i18n.localize("NOODLRHOOKS.Combat.Forced.ByHand"),
+    });
+  }
+  return results;
+}
+
+const api: NoodlrHooksApi = {
+  noodlrHooks: descriptor,
+  runNpcTurn: () => runCurrentNpcTurn(),
+  /** Give back everything a mercy ruling took off the party. */
+  restoreForfeitedGear: () => restoreForfeited(),
+  /** Dump what the planner can read off the selected combatant, and how it scored its options. */
+  explainTurn: () => explainTurn(),
+  /** Census every sheet in the world: activity shapes, activation types, ranges, flags, economy claims. */
+  surveyActions: (opts) => surveyActions(opts),
+  /** Really move the selected token one square, reporting what core said at each stage. */
+  testMove: () => testMove(),
+  /** Which creatures can see which, with distances, detection modes and each verdict. */
+  surveyPerception: () => surveyPerception(),
+  /** What every combatant has left this turn, and how many attacks one action buys them. */
+  surveyEconomy: () => surveyEconomy(),
+  /** How far each combatant has moved this turn against its Speed. */
+  surveyMovement: () => surveyMovement(),
+  /** Which push/pull rules are recognised on the selected creature, and whether the layer is live. */
+  surveyForced: () => surveyForced(),
+  /** What condition combat math would apply for the controlled token against its current target. */
+  surveyConditions: () => surveyConditions(),
+  /** Who is dying, who is dead, and what the last drop to zero did. */
+  surveyDying: () => surveyDying(),
+  /** Who is concentrating on what, and who would roll the save. */
+  surveyConcentration: () => surveyConcentration(),
+  /** Whether each selected token may hide where it stands, and what it would cost. */
+  surveyHide: () => surveyHide(),
+  /** Take the Hide action with every selected token. `force` skips prerequisites and the cost. */
+  hide: (opts) => hideSelected(opts),
+  /** Manual forced movement, for a rule the automatic layer does not recognise. */
+  push: (feet = 10) => shoveTargets(feet, "away"),
+  pull: (feet = 10) => shoveTargets(feet, "toward"),
+  /** Put back every creature moved by a push or pull in the current fight. */
+  undoForcedMovement: () => undoForcedMovement(),
+  /** Reverse the most recent drop-to-zero rulings. */
+  undoDying: () => undoDying(),
+  flattenElevation: () => flattenElevation(),
+  restoreElevation: () => restoreElevation(),
+};
+
+Hooks.once("init", () => {
+  log(`initializing (Foundry ${game.version ?? "?"})`);
+  registerCombatSettings();
+
+  // Speed as an actual limit, which nothing else in the stack treats as one. Here rather than in
+  // `ready` for two reasons: it installs a Token subclass at `setup`, which has already passed by the
+  // time `ready` runs, and it has to be on the PLAYERS' clients, since a player dragging their own
+  // token is the only thing it constrains.
+  registerMovementCap();
+
+  // A zero-cost, wall-respecting movement action for pushes and pulls. Must be here: core deep-freezes
+  // the action registry inside `setupGame()`, before the `setup` hook, and writing to a frozen object
+  // is a silent no-op rather than an error. Everything downstream feature-detects the key regardless.
+  registerForceAction();
+
+  const mod = game.modules.get(MODULE_ID);
+  if (mod) mod.api = api;
+});
+
+Hooks.once("ready", () => {
+  log("ready");
+
+  // Action economy and condition combat math. These hooks fire on the ROLLING client — often a player
+  // — so they must not live inside the GM-only block below.
+  registerEconomyHooks();
+  registerConditionHooks();
+  // Drop-to-0 Unconscious/Dead and damage-at-0 death failures. Writes on the updating client.
+  registerDyingHooks();
+  // Concentration saves. Deliberately not GM-only: the whole point is that a character's save is
+  // rolled on the player's own client, which is also the only client allowed to roll it.
+  registerConcentrationHooks();
+  // Hiding: the declaration and the roll are read by the primary GM (gated inside), but the REVEAL
+  // comes off `dnd5e.rollAttack`, which fires only on the client that rolled.
+  registerStealthWatch();
+  // Same reasoning: the Invisibility spell ends on the caster's own client.
+  registerInvisibilityHooks();
+
+  if (game.user?.isGM) {
+    // Carry a world's tuned values across from the module this one was split out of, exactly once.
+    void migrateLegacySettings();
+    // Combat dossiers live only for the skirmish: forget a creature's turn history when it dies or
+    // the fight ends. Automation opt-ins are per-encounter too.
+    registerDossierCleanup();
+    registerAutomationCleanup();
+    registerAutomationTurnHook();
+    // Hostile creatures noticing the party and starting the fight without a GM's clicks.
+    registerPerceptionWatch();
+    // Off-turn reactions: opportunity attacks and hitting back when hurt.
+    registerReactionHooks();
+    // Pushes, pulls and shoves actually moving the creature they land on.
+    registerForcedMovement();
+    // Watches whether the party is still swinging, which is what mercy hangs on.
+    registerEncounterTracking();
+  }
+});
+
+// One scene-control group, GM-only, holding the single tool that has to be a button rather than an
+// automatic behaviour: opting an individual creature into automation mid-fight.
+//
+// Foundry v13+ passes `controls` as a Record keyed by name. A custom group MUST define `activeTool`
+// naming a tool that exists — and it must NOT be one of the real buttons, because whichever tool is
+// active is skipped when clicked. The inert `home` entry exists solely to absorb that role, and is
+// hidden so it does not appear as a dead icon in the flyout.
+Hooks.on("getSceneControlButtons", (controls: Record<string, any>) => {
+  if (!controls || typeof controls !== "object") return;
+  if (!game.user?.isGM) return;
+  // Only offered in "partial" automation: in "full" every creature is played anyway, and in "off" the
+  // GM has said they want the fight in their own hands.
+  if (getCombatAutomation() !== "partial") return;
+  try {
+    controls[MODULE_ID] = {
+      name: MODULE_ID,
+      title: "NOODLRHOOKS.Controls.GroupTitle",
+      icon: "fa-solid fa-dice-d20",
+      order: 90,
+      activeTool: "home",
+      tools: {
+        home: {
+          name: "home",
+          title: "NOODLRHOOKS.Controls.GroupTitle",
+          icon: "fa-solid fa-dice-d20",
+          order: 0,
+          visible: false,
+          onChange: () => {},
+        },
+        npcTurn: {
+          name: "npcTurn",
+          title: "NOODLRHOOKS.Combat.ToggleAutomation",
+          icon: "fa-solid fa-hand-fist",
+          order: 1,
+          button: true,
+          visible: true,
+          onChange: () => void toggleSelectedCombatantAutomation(),
+        },
+      },
+    };
+  } catch (err) {
+    log("could not add scene controls:", err);
+  }
+});
+
+// Re-exported so a companion module can import the contract's types without depending on this
+// package, and so the shape stays greppable from one place.
+export { announceRuling, proposeRuling, requestBehavior };
+export type { Ruling, RulingKind, BehaviorRequest, BehaviorVerb, TurnEvent } from "./integration/contract";

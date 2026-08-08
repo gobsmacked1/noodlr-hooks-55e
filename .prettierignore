@@ -1,0 +1,9 @@
+dist/
+node_modules/
+package-lock.json
+
+# Authoritative / verbatim docs — never auto-reformat.
+*.md
+
+# Handlebars templates — Prettier's hbs handling reflows markup awkwardly.
+templates/
