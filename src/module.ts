@@ -6,6 +6,16 @@
 // configured to, Automated Conditions 5e owns condition math, Gambit's owns the opportunity attacks it
 // implements. Each of those checks lives beside the code it guards.
 //
+// Four folders, and the split is the plan for a second game system rather than tidiness:
+//
+//   * `system/` — everything that knows a D&D name: spell tables, feat identifiers, sheet paths. A
+//     `noodlr-hooks-pf2e` replaces this folder and nothing else.
+//   * `rules/`  — enforcement. Conditions, dying, concentration, stealth, the action economy, Speed,
+//     forced movement, reactions. Reads `system/` for the particulars; never hardcodes one.
+//   * `tactics/`— deciding what a creature does with its turn. The planner, the tiers, the dossier.
+//   * `core/`   — geometry and measurement with no rules in it at all: the board, movement, cover
+//     searches, seeded randomness. Portable as-is.
+//
 // Where hooks are registered matters more than it looks, and two of these placements are load-bearing:
 //
 //   * `registerMovementCap()` and `registerForceAction()` must run at `init`. The first installs a
@@ -18,31 +28,31 @@
 //     listener had been registered for GMs only.
 
 import { MODULE_ID, log } from "./constants";
-import { migrateLegacySettings, registerCombatSettings, getCombatAutomation } from "./combat/config";
+import { migrateLegacySettings, registerCombatSettings, getCombatAutomation } from "./settings";
 import { announceRuling, proposeRuling, requestBehavior, PROTOCOL } from "./integration/contract";
-import { registerDossierCleanup } from "./combat/dossier";
-import { toggleSelectedCombatantAutomation } from "./combat/auto/control";
-import { registerAutomationCleanup } from "./combat/auto/registry";
-import { registerAutomationTurnHook } from "./combat/auto/hooks";
-import { registerPerceptionWatch, surveyPerception } from "./combat/auto/perception";
-import { registerStealthWatch } from "./combat/auto/stealth";
-import { hideSelected, surveyHide } from "./combat/auto/hide";
-import { registerInvisibilityHooks } from "./combat/auto/invisibility";
-import { registerReactionHooks } from "./combat/auto/reactions";
-import { registerForcedMovement, surveyForced } from "./combat/auto/forced";
-import { registerForceAction, shove, undoForcedMovement } from "./combat/auto/shove";
-import { registerConditionHooks, surveyConditions } from "./combat/auto/conditions";
-import { registerDyingHooks, surveyDying, undoDying } from "./combat/auto/dying";
-import { registerConcentrationHooks, surveyConcentration } from "./combat/auto/concentration";
-import { registerEconomyHooks } from "./combat/economy/enforce";
-import { registerMovementCap, surveyMovement } from "./combat/economy/movement";
-import { surveyEconomy } from "./combat/economy/survey";
-import { registerEncounterTracking } from "./combat/auto/encounter";
-import { explainTurn } from "./combat/auto/explain";
-import { flattenElevation, restoreElevation, testMove } from "./combat/auto/diagnose";
-import { surveyActions } from "./combat/survey";
-import { restoreForfeited } from "./combat/systems/dnd5e-rewards";
-import { runCurrentNpcTurn } from "./combat/npc-turn";
+import { registerDossierCleanup } from "./tactics/dossier";
+import { toggleSelectedCombatantAutomation } from "./tactics/control";
+import { registerAutomationCleanup } from "./tactics/registry";
+import { registerAutomationTurnHook } from "./tactics/hooks";
+import { registerPerceptionWatch, surveyPerception } from "./rules/perception";
+import { registerStealthWatch } from "./rules/stealth";
+import { hideSelected, surveyHide } from "./rules/hide";
+import { registerInvisibilityHooks } from "./rules/invisibility";
+import { registerReactionHooks } from "./rules/reactions";
+import { registerForcedMovement, surveyForced } from "./rules/forced";
+import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
+import { registerConditionHooks, surveyConditions } from "./rules/conditions";
+import { registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
+import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
+import { registerEconomyHooks } from "./rules/economy/enforce";
+import { registerMovementCap, surveyMovement } from "./rules/economy/speed";
+import { surveyEconomy } from "./rules/economy/survey";
+import { registerEncounterTracking } from "./tactics/encounter";
+import { explainTurn } from "./tactics/explain";
+import { flattenElevation, restoreElevation, testMove } from "./core/diagnose";
+import { surveyActions } from "./tactics/survey";
+import { restoreForfeited } from "./system/dnd5e-rewards";
+import { runCurrentNpcTurn } from "./tactics/npc-turn";
 
 /**
  * What this module tells a companion module about itself.
