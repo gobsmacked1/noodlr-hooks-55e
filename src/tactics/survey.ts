@@ -126,14 +126,15 @@ interface Survey {
    * What could be charged an action slot, across the whole world.
    *
    * `unexemptedFeatures` is the interesting list: a feature that claims an Action or a bonus action and is
-   * not recognised as a damage rider. Most entries are legitimate — dnd5e's own content has a good few,
-   * Holy Nimbus and thrown oil among them — but this is exactly where a mis-authored ability hides, which
-   * is what turned a rogue's Sneak Attack into a spent Action.
+   * neither a damage rider nor one of the PHB action buttons that merely announce one. Most entries are
+   * legitimate — dnd5e's own content has a good few, Holy Nimbus and thrown oil among them — but this is
+   * exactly where a mis-authored ability hides, which is what turned a rogue's Sneak Attack into a spent
+   * Action and made a fighter's Attack button cost a second one.
    */
   claims: {
     total: number;
     byItemType: Record<string, number>;
-    ridersExempted: number;
+    exempted: number;
     unexemptedFeatureCount: number;
     unexemptedFeatures: SlotClaim[];
   };
@@ -233,7 +234,7 @@ export async function surveyActions(
     claims: {
       total: 0,
       byItemType: {},
-      ridersExempted: 0,
+      exempted: 0,
       unexemptedFeatureCount: 0,
       unexemptedFeatures: [],
     },
@@ -262,8 +263,8 @@ export async function surveyActions(
     survey.claims.total += claims.length;
     for (const claim of claims) {
       claimItemTypes.add(claim.itemType);
-      if (claim.treatedAsRider) {
-        survey.claims.ridersExempted++;
+      if (claim.exemptedAs) {
+        survey.claims.exempted++;
       } else if (notable(claim)) {
         survey.claims.unexemptedFeatureCount++;
         // A hundred rows is a dump, not a finding; the count above carries the scale.

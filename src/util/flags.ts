@@ -7,6 +7,10 @@
 // renaming the namespace out from under it would break worlds silently: an Active Effect targeting a
 // flag nobody reads produces no error, just a feature that quietly stops working.
 //
+// Hatches added since the split — `actionDeclaration` so far — were never documented under the old
+// namespace and need no fallback, but they read through the same helpers so nobody has to remember which
+// generation a flag belongs to.
+//
 // So reads check this module's namespace first and fall back to `noodlr`, and writes only ever go to
 // this module's own. The fallback is permanent rather than a migration window — there is no way to
 // rewrite an Active Effect someone will author next year against the older documentation, and the

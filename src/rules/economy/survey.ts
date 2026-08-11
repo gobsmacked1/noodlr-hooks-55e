@@ -52,9 +52,11 @@ export function surveyEconomy(): Record<string, unknown> {
       "attacksPerAction is read from the extra-attack class features, or parsed from Multiattack prose " +
       "for monsters (attacksPerActionFrom says which); set flags.noodlr-hooks-55e.attacksPerAction on an " +
       "actor to override it (flags.noodlr.* is still read, for effects written before the split). " +
-      "`claims` lists the features that would be charged a slot, plus anything already exempted as a " +
-      "damage rider: an entry there with treatedAsRider null that is really extra damage on another " +
-      "action wants flags.noodlr-hooks-55e.damageRider on its item, or a line in system/dnd5e-riders.ts.",
+      "`claims` lists the features that would be charged a slot, plus anything already exempted, with " +
+      "exemptedAs naming the rule that spared it. An entry with exemptedAs null that is really extra " +
+      "damage on another action wants flags.noodlr-hooks-55e.damageRider on its item, or a line in " +
+      "system/dnd5e-riders.ts; one that is really a button announcing an action somebody else pays for " +
+      "wants flags.noodlr-hooks-55e.actionDeclaration, or a line in system/dnd5e-declarations.ts.",
     combatants: rows,
   };
 }

@@ -7,6 +7,7 @@
 // Deliberately no dependency on settings or config. This answers a question about a sheet, and it must be
 // askable from a census that runs with every automation switched off.
 
+import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
 import { slotFor, type Slot } from "./ledger";
 
@@ -19,8 +20,14 @@ export interface SlotClaim {
   activity: string;
   activityType: string;
   claims: Slot;
-  /** The rule that exempts it, or null if it will really be charged. */
-  treatedAsRider: string | null;
+  /**
+   * The rule that exempts it, or null if it will really be charged.
+   *
+   * Was `treatedAsRider` until declarations became a second reason to exempt something. A field that
+   * said "rider" about the Attack button would be a diagnostic telling a lie, which is worse than a
+   * field name somebody has to re-learn.
+   */
+  exemptedAs: string | null;
 }
 
 /** Every activity on this actor that the ledger would charge a slot for. */
@@ -38,7 +45,7 @@ export function slotClaims(actor: any): SlotClaim[] {
         activity: String(activity?.name ?? "") || String(activity?.type ?? ""),
         activityType: String(activity?.type ?? "?"),
         claims: slot,
-        treatedAsRider: damageRiderOf(item, activity),
+        exemptedAs: damageRiderOf(item, activity) ?? actionDeclarationOf(item, activity),
       });
     }
   }
@@ -51,11 +58,11 @@ const ORDINARY = new Set(["weapon", "spell", "consumable", "equipment", "tool", 
 /**
  * Is this claim worth a human's attention?
  *
- * Two populations. Anything already recognised as a rider, so a fix can be confirmed rather than assumed;
- * and any *feature* that claims a slot, which is where a mis-authored ability hides. Filtering on the
- * activity being damage-typed would have been narrower and would have missed the Sneak Attack that started
- * this, because there is no guarantee the importer typed it as damage.
+ * Two populations. Anything already exempted, so a fix can be confirmed rather than assumed; and any
+ * *feature* that claims a slot, which is where a mis-authored ability hides. Filtering on the activity
+ * being damage-typed would have been narrower and would have missed the Sneak Attack that started this,
+ * because there is no guarantee the importer typed it as damage.
  */
 export function notable(claim: SlotClaim): boolean {
-  return claim.treatedAsRider !== null || !ORDINARY.has(claim.itemType);
+  return claim.exemptedAs !== null || !ORDINARY.has(claim.itemType);
 }

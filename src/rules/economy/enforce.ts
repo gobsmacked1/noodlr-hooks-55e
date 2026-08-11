@@ -32,6 +32,7 @@ import { getEconomyMode, isConditionAutomationEnabled } from "../../settings";
 import { shouldAutomate } from "../../tactics/registry";
 import { ac5eOwnsIncapacitatedUse, isIncapacitated } from "../../system/dnd5e-conditions";
 import { isDashActivity } from "../../system/dnd5e-dash";
+import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
 import { isDnd5e } from "../../system/dnd5e-rewards";
 import { check, slotFor, spend, takeDash, type Slot } from "./ledger";
@@ -157,6 +158,20 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
 
   const slot = slotFor(activity?.activation?.type);
   if (!slot) return true;
+
+  // Two of the 2024 PHB action items only announce what is coming: pressing Attack is followed by the
+  // weapon, pressing Magic by the spell, and each of those claims an Action of its own. Charging both is
+  // how one swing cost two Actions. Charged by the follow-through, not here — see
+  // `system/dnd5e-declarations.ts` for which buttons are announcements and which are the whole action.
+  //
+  // Checked AFTER the Incapacitated refusal, unlike a damage rider: a rider only ever follows an attack
+  // that was already allowed, while a declaration precedes one, so a stunned creature should be told no
+  // at the button as well as at the swing.
+  const declared = actionDeclarationOf(activity?.item, activity);
+  if (declared) {
+    log(`action economy: ${declared} declares an action; whatever follows pays for it`);
+    return true;
+  }
 
   // Outside a fight there is no turn to be over budget in, and nothing here should touch downtime.
   const combat: any = game.combat;
