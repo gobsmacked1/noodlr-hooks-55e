@@ -55,8 +55,25 @@ export const COMBAT_SETTINGS = {
   autoEnd: "combat.autoEnd",
 } as const;
 
+/**
+ * The general rules — the ones that read the same for every creature in every campaign.
+ *
+ * Separated from `COMBAT_SETTINGS` for two reasons. They are not combat: a party jumps a chasm and
+ * talks a guard captain round without anybody rolling initiative. And they are new rather than
+ * inherited, so unlike everything above they have no counterpart in `noodlr` to migrate across, and
+ * grouping them under the `combat.` prefix would have implied one.
+ */
+export const GENERAL_SETTINGS = {
+  /** Whether a leap is held to the distance a creature can actually clear. */
+  jump: "general.jump",
+  /** Whether talking a creature round rolls a real check against a real DC, bent by its attitude. */
+  influence: "general.influence",
+} as const;
+
 /** Settings that are this module's own rather than inherited. */
 export const SETTINGS = {
+  /** Whether a creature's own prose is compiled into executable rules by the companion module. */
+  compileCapabilities: "capabilities.compile",
   /** Verbose console diagnostics. Client-scoped: it is for whoever has a console open. */
   debugLogging: "debugLogging",
   /** Marks the one-time copy of a world's tuned values out of the `noodlr` namespace. */

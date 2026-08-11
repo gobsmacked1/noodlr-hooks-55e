@@ -276,7 +276,11 @@ export function surveyConcentration(): unknown {
     roller: rollerId ? ((game.users as any)?.get?.(rollerId)?.name ?? rollerId) : null,
     rollerIsMe: actor ? isRollerFor(actor) : null,
     dcFor: actor
-      ? { d10: concentrationDC(actor, 10), d22: concentrationDC(actor, 22), d80: concentrationDC(actor, 80) }
+      ? {
+          d10: concentrationDC(actor, 10),
+          d22: concentrationDC(actor, 22),
+          d80: concentrationDC(actor, 80),
+        }
       : null,
   };
 }

@@ -45,6 +45,13 @@ export interface SystemPaths {
   /** Ability scores, keyed by the system's own short keys (int/wis here). */
   intelligence: string[];
   wisdom: string[];
+  /**
+   * Strength, which the jump rules need as a SCORE and not as a modifier — a long jump is a number
+   * of feet equal to the score itself. Kept separate from `strengthMod` for that reason: the two
+   * are interchangeable nearly everywhere else in this file and are emphatically not here.
+   */
+  strength: string[];
+  strengthMod: string[];
   hpValue: string[];
   hpMax: string[];
   armor: string[];
@@ -101,6 +108,10 @@ export interface SystemPaths {
 const GENERIC: SystemPaths = {
   intelligence: ["system.abilities.int.value", "system.abilities.int.mod", "system.abilities.int"],
   wisdom: ["system.abilities.wis.value", "system.abilities.wis.mod", "system.abilities.wis"],
+  // No `.mod` fallback here, unlike its neighbours: a modifier read as a score turns a Strength 16
+  // fighter's sixteen-foot long jump into three feet, and does it without any error to notice.
+  strength: ["system.abilities.str.value"],
+  strengthMod: ["system.abilities.str.mod"],
   hpValue: ["system.attributes.hp.value", "system.hp.value", "system.health.value"],
   hpMax: ["system.attributes.hp.max", "system.hp.max", "system.health.max"],
   armor: ["system.attributes.ac.value", "system.armorClass.value", "system.ac.value"],
@@ -150,6 +161,10 @@ const PROFILES: Record<string, Partial<SystemPaths>> = {
   pf2e: {
     intelligence: ["system.abilities.int.mod"],
     wisdom: ["system.abilities.wis.mod"],
+    // pf2e stores only modifiers, so there is no score to offer. Left empty rather than pointed at
+    // the modifier: a caller that needs a score must get nothing and say so.
+    strength: [],
+    strengthMod: ["system.abilities.str.mod"],
     hpValue: ["system.attributes.hp.value"],
     hpMax: ["system.attributes.hp.max"],
     armor: ["system.attributes.ac.value"],

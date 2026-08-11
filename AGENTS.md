@@ -47,26 +47,41 @@ Four folders. The split is the plan for a second game system rather than tidines
   the per-encounter registry, banter profiling, the turn hooks.
 - `src/core/` — geometry and measurement with no rules in it: the board, token movement, cover and
   hiding searches, sight screens, hazard containment, seeded randomness. Portable as-is.
+- `src/capability/` — the runtime compiler's deterministic half: the cache, the scene collector, the
+  executor, the predicates and the world-mutation primitives. Knows no D&D names either; what it runs
+  was read off the sheet rather than written here.
 
-Plus `src/integration/contract.ts` (what we tell noodlr), `src/settings.ts` (all sixteen settings and
-the reasoning behind each default), and `src/util/`.
+Plus `src/integration/` (`contract.ts`, what we tell noodlr, and `capability.ts`, the descriptor
+schema), `src/apps/capability-sheet.ts` (the GM's veto over what a model read), `src/settings.ts`
+(every setting and the reasoning behind each default), and `src/util/`.
 
 ## The integration contract
 
-Four hooks, named `noodlrHooks.*` rather than after this module, so a future `noodlr-hooks-pf2e` fires
-the same four and a listener is written once. Full shapes in `src/integration/contract.ts`.
+Five hooks, named `noodlrHooks.*` rather than after this module, so a future `noodlr-hooks-pf2e` fires
+the same five and a listener is written once. Full shapes in `src/integration/contract.ts`.
 
 - `noodlrHooks.preRuling` — stopping (`Hooks.call`). Returning false cancels the ruling. Synchronous by
   necessity, because callers are inside Foundry `pre*` hooks; a model cannot answer here, which is why
   noodlr deliberately does not listen to it.
 - `noodlrHooks.ruling` — `{kind, module, systemId, summary, detail, actor, token, combat, undo?}` after
-  the fact. Six kinds fire today: `condition`, `dying`, `concentration`, `forced`, `surprise`,
-  `encounter`. `undo` is present only where a reversal really exists.
+  the fact. Seven kinds fire today: `condition`, `dying`, `concentration`, `forced`, `surprise`,
+  `encounter`, `influence`. `undo` is present only where a reversal really exists.
 - `noodlrHooks.behavior` — `{verb, ...}` for a social move. `FLEE`, `SURRENDER` and `MERCY` fire from
-  `tactics/encounter.ts`; `BRIBE`, `PARLEY`, `INTIMIDATE`, `PERSUADE`, `DECEIVE`, `AMBUSH` and
-  `DISTRACT` are declared with no trigger yet, so adding one is a call site rather than a contract change.
+  `tactics/encounter.ts`; `PERSUADE`, `DECEIVE`, `INTIMIDATE`, `BRIBE` and `PARLEY` now fire from
+  `rules/influence.ts`, which is the first trigger any of the five has ever had. `AMBUSH` and
+  `DISTRACT` are still declared with no trigger, so adding one is a call site rather than a contract
+  change.
+  - **`incoming: true` means the verb is being done TO `actor`, and it arrived with Influence.** Every
+    earlier verb was self-directed — a creature that FLEEs is the one fleeing — so a listener could
+    safely read `actor` as the doer. A creature that is PERSUADEd is the one *responding*, and it is
+    still the one whose voice is wanted: noodlr voices NPCs, so handing over the party's negotiator by
+    swapping `actor` and `target` would name a player character as the speaker. The flag reverses the
+    sentence instead. Fire it on any request where the named creature is the recipient, and expect a
+    listener that ignores it to narrate the right creature saying the wrong thing.
 - `noodlrHooks.turn` — a planned turn, before it is announced, carrying the intent, the GM-only
   reasoning, and a `BanterProfile` read off the sheet. A listener may rewrite the intent.
+- `noodlrHooks.compile` — protocol 2. A BATCH of features whose prose needs turning into descriptors,
+  so a listener can run the whole scene concurrently. See the capability-compiler section below.
 
 **`waitFor` is the reason these work at all.** Foundry hooks are synchronous; a listener that wants to
 post a card or generate a line pushes its promise into `waitFor` and this module awaits it before
@@ -93,6 +108,147 @@ Settings migrate once: `migrateLegacySettings()` copies `noodlr.combat.*` into t
 first load, reading through `game.settings.storage` because the old keys are no longer registered and
 `get` throws on an unregistered key.
 
+## THE SECOND PIVOT (2026-08-09) — the runtime capability compiler
+
+Hand-coding rules ended here, and the number that ended it is `noodlr-rules-corpus`'s own:
+**6,018 distinct new engines covering 35,969 rules**. That is not expensive, it is arithmetically dead.
+Worse, the top of that queue is not rules at all — "the eye has Darkvision 30 feet", "the plant makes
+three Vine attacks" are per-creature FACTS, already answered at runtime by `sheetSenses` and
+`attacksPerAction`, and they only look like gaps because the corpus reads books instead of sheets.
+
+So the sheet becomes the source. A frontier model reads each creature's own prose **once**, at scene
+load, and compiles it into a machine-readable descriptor; deterministic code executes that descriptor
+every turn. Three things fall out for free: the 8,343 conflicts the corpus found stop mattering,
+because the actor on the scene IS the precedence answer; licensing dissolves, because the module ships
+no book text and reads what the operator already owns; and future books need no mining.
+
+**The one non-negotiable: the model COMPILES, it never ADJUDICATES.** This does not reopen the v0.4.22
+decision to cut the per-turn model call. The call moved to scene load, not into the turn. Nothing in
+`src/capability/` is async during a turn and nothing there can reach the network.
+
+### What is where
+
+- `src/integration/capability.ts` — the schema, and the only source of truth for it. 17 trigger
+  events, 36 effect kinds, 20 predicate kinds, the three-way `engine | narration | gm` adjudication
+  axis. `validateCapability()` is the gate.
+- `src/integration/contract.ts` — `requestCompile()`, protocol **2**. Same `callAll` + `waitFor` +
+  `handled` shape as `requestBehavior`, with one deliberate difference: it hands over a **batch**, so
+  the listener can run a whole scene concurrently instead of one feature at a time.
+- `src/capability/cache.ts` — file-backed shards under `assets/noodlr-hooks-55e/capabilities/`,
+  in-memory `Map` warmed at ready, keyed by normalized prose hash.
+- `src/capability/collect.ts` — walks the scene's actors, extracts features, dedups by prose hash,
+  consults the cache, batches the misses into one request.
+- `src/capability/{executor,predicates,primitives,uses,quantity,bindings,damage-log,describe}.ts` —
+  the deterministic half.
+- `src/apps/capability-sheet.ts` — the GM's veto.
+
+### The findings that shaped it, all measured rather than argued
+
+- **Comprehension was never the problem; the output contract was.** The corpus probe
+  (`scripts/probe-vocabulary.mjs`) found the model reads these rules correctly — Loathsome Limbs came
+  back with `on_turn_end` plus both guards that matter — while **0 of 73,546 mined conditions were
+  structured** and `other` alone carried **1,367 distinct parameter keys**. The mining vocabulary was
+  closed at the KIND level and wide open at the PARAMETER level. This schema closes both: every effect
+  kind states exactly which parameters it takes, and conditions are predicates rather than sentences.
+- **`summon_creature` was genuinely missing**, confirmed before adding it: summon-like atoms' largest
+  bucket was `UNCLASSIFIED / other` at 289. The other 35 kinds are the corpus's, unchanged.
+- **The cache key is the prose, not the creature.** 4,661 SRD features reduce to **1,387 distinct
+  wordings**, and one trait's text is shared by **270 creatures** — traits are templated with
+  `[[lookup @name lowercase]]` rather than naming their owner, so the same Pack Tactics is
+  byte-identical everywhere. A scene of twenty goblins costs one reading. `normalizeProse` folds
+  whitespace and strips tags and **must never touch words or numbers**: "15 or more Slashing damage"
+  and "5 or more" are different rules.
+- **Sharded and flushed, not one file written through.** Sixteen shards by first hex digit; `put`
+  marks dirty and the collector awaits one `flush` per batch. One file rewritten per store makes a
+  forty-feature scene load forty O(n) uploads.
+- **Not a world setting.** Foundry ships every world setting to every client and this payload
+  interests exactly one of them.
+
+### Invariants, and the reasoning that is easy to undo
+
+- **Every escape hatch fails CLOSED.** An effect kind of `other`, or a `custom` predicate, means the
+  model understood a rule it could not express — and a guard that cannot be evaluated must PREVENT the
+  rule from firing, never be skipped. A trait that silently heals when it should not is undetectable
+  at the table; one that never fires shows up on the capability sheet as needing a human. Same
+  reasoning as `verdictFromSignals` declining on unknown coverage in the corpus.
+- **`locked` is load-bearing.** Once a GM has fixed a bad compile, a model upgrade or a cache miss
+  must never silently overwrite it. `rejected` is remembered for the same reason: re-asking about a
+  wording that has already been thrown away spends credit to reach the same answer.
+- **The descriptor cache is shareable, and that is a designed property.** Descriptors are mechanics;
+  mechanics are not copyrightable. `exportable()` strips `prose`, which is the same boundary
+  `assertNoQuotes` enforces at the other end of the corpus pipeline. A GM can publish a compiled
+  cache and others can drop it in.
+- **Nothing here is required.** With no listener, `requestCompile` returns unhandled, no descriptors
+  exist, and the planner behaves exactly as it did before any of this. The switch
+  (`capabilities.compile`) defaults **off**, because it spends the operator's own credit.
+- **The six primitives were worth building regardless**, and were built first for that reason: direct
+  damage and healing, a generalised `damageTaken` event carrying `{amount, types[], source}`,
+  create/delete token, insert a combatant at a chosen initiative slot, generic condition apply
+  including stacked exhaustion, and a use-counter mutator outside `activity.use`.
+- **The damage log lives on every client.** The amount is only computable from `updateActor`, which
+  fires everywhere, while the damage TYPES arrive on the applying client. A GM-only ledger would be
+  blind to damage a player applied.
+
+Diagnostics: `api.surveyPrimitives()`, `api.surveyCapabilities()`, `api.surveyScene()` (what this
+scene WOULD ask about and what the cache already answers), `api.compileScene()`, `api.openCapabilities()`.
+
+## The general rules (2026-08-09) — the finite queue, worked
+
+The other half of what the corpus is for. `coverage.json` finished with **ten** rules keys that dnd5e
+documents in `CONFIG.DND5E.rules` and reads nowhere, and unlike a creature's own abilities these read
+the same for every creature in every campaign — so there is nothing for a compiler to compile and they
+stay hard-coded. Three builds and five deliberate refusals came out of working the list.
+**`api.surveyGeneralRules()` prints the whole table**, which is `src/rules/general.ts`, and it exists
+because a rule left alone after somebody checked is indistinguishable six months later from one nobody
+got to.
+
+Built: **Jump** (`rules/jump.ts`), **Influence and the attitudes** (`rules/influence.ts`), and
+**Administer First Aid** (in `rules/dying.ts`). Refused with reasons: breaking objects (dnd5e already
+applies `hp.dt`, and the rest is scenery Foundry does not model plus a GM's ruling), difficulty class
+(six numbers a GM picks from — `DC_LADDER` exists so our own DCs are named rather than typed as bare
+integers), utilize and study (the action economy already charges what the sheet says, and a Study
+action produces information, which is the GM's to give), hazards (already built in `core/hazards.ts`).
+
+New settings live under `general.*`, deliberately not `combat.*`: a party jumps a chasm and talks a
+guard captain round without anybody rolling initiative, and these have no counterpart in `noodlr` to
+migrate, so the inherited prefix would have implied one.
+
+- **Jumping was a near miss, not a gap, and the interaction was the actual bug.** Core has a real
+  `jump` movement action and dnd5e prices it correctly (`deriveTerrainDifficulty = () => 1` and an
+  identity cost function, `documents/token.mjs:139-140`). Nothing bounds the DISTANCE. Worse,
+  `economy/speed.ts` budgeted the turn against `movement[action]`, and dnd5e populates
+  `movement.jump` as `str.value / 2` (`data/actor/templates/attributes.mjs:456`) purely to colour the
+  drag ruler — so selecting the jump action collapsed a Strength 16 fighter's whole turn to eight
+  feet, with everything already walked counted against it. `speedFor()` now returns walk speed for a
+  jump and `jumpVeto()` caps each leap separately.
+- **The long jump is the SCORE and the high jump is the MODIFIER.** Getting them the wrong way round
+  produces numbers that look plausible, which is why it is spelled out in `dnd5e-checks.ts` and
+  asserted in the tests. Never read `movement.jump` as either: it is the standing long jump and only
+  that, and has no answer at all for the high jump.
+- **A leap is a RUN of consecutive `jump` waypoints, not one per waypoint.** Dragging four squares in
+  one motion is one twenty-foot jump. And the veto measures the leaps inside a path, never the path's
+  total: a drag that walks fifteen feet then leaps ten is a legal ten-foot jump.
+- **Influence draws the line at the judgement.** The rule opens with "The DM then determines whether
+  the monster feels willing, unwilling, or hesitant", and that is not automatable — its inputs are a
+  conversation and a relationship. So it is ASKED, every time, via `DialogV2`, and nothing guesses it.
+  Everything downstream is arithmetic the table forgets rather than argues about: DC 15 or the
+  creature's Intelligence SCORE (a floor, not a scale), Advantage when Friendly and Disadvantage when
+  Hostile, the right skill rolled on the right sheet.
+- **An unwilling refusal sets NO lockout.** The rule hangs the 24 hours on "a failed check", and no
+  check was made. This is the part most often played wrong.
+- **Attitude is not disposition.** Disposition drives border colour, target rings and who counts as an
+  enemy; attitude is a social stance that can differ in both directions. Disposition is the default,
+  an explicit token flag overrules it, and the flag is written to the TOKEN — writing it to the actor
+  would make every future copy of that guard start out already won over.
+- **The lockout stamps which clock it used.** `game.time.worldTime` is the honest reading, but plenty
+  of worlds never advance it, and there a world-time lockout would never expire — a creature refused
+  in session two still refusing in session forty, which reads exactly like a bug. So the clock is
+  chosen when the lock is SET and recorded on it, and a lock from the other clock is let through
+  rather than compared across clocks.
+- **Administer First Aid is the Hide action's twin.** 2024 files it under Utilize and dnd5e ships no
+  item for it, so a deliberate stabilise had no button anywhere while three successful death saves
+  already reached Stable. DC 10 Wisdom (Medicine), costs the healer's Action, charged whether or not
+  it succeeded, and announced either way — a silent failure looks like the button not working.
 
 ## The design: deterministic NPC combatants
 
@@ -425,9 +581,65 @@ a five-minute check instead of a five-hour audit. Full report and the citations 
   img}`; only `CONFIG.specialStatusEffects` (`dead`, `invisible`, `blind`, `burrow`, `hover`, `fly`) is
   consumed by core, for defeat, vision and elevation.
 
-Five further audits from the same 2026-08-06 batch sit beside that report and have **not** yet been acted
-on: conditions/exhaustion, cover/visibility/surprise, damage/death/hazards, movement rules beyond Speed,
-and spellcasting/resources. Read them before planning the next feature — they are the standing gap list.
+Five further audits from the same 2026-08-06 batch sit beside that report. They were the standing gap
+list; most of it has since been built or reassigned — see the next section before reading any of them.
+
+## The standing gap list, re-read after the split and the pivot (2026-08-10)
+
+The five audits were written on 2026-08-06, which is **before** the 2026-08-08 module split and before the
+2026-08-09 capability compiler. They were still described here as the queue to work from, and they are not:
+the list was stale in both directions at once, and following it would have sent someone to rebuild features
+that shipped. Each verdict below was checked against the current source rather than inferred from the age
+of the report.
+
+**Built since — do not rebuild.** Attack-time condition math, auto-fail Str/Dex and the auto-crit within
+5 feet (`system/dnd5e-conditions.ts`); Incapacitated blocking activity use (`rules/economy/enforce.ts`);
+concentration ending on a failed save (v0.4.44); drop-to-0, death-save failures from damage, and **instant
+death** (`rules/dying.ts:287` — the audit lists that one as prose-only); hiding contested against passive
+Perception, plus the reveal (`rules/stealth.ts`, `rules/hide.ts`); surprise; per-creature perception and
+encounter initiation (`rules/perception.ts`); the Speed budget and Dash (v0.4.39); forced movement
+(v0.4.40); opportunity attacks (`rules/reactions.ts`); jumping, Influence and Administer First Aid
+(2026-08-09). That is four of the five leads in the conditions audit and four of the five in the movement
+audit.
+
+**Reassigned to the compiler — there is no engine to build.** The spellcasting audit's own lead sentence is
+the pivot's thesis stated three days early: *"Activity schemas cannot express most spell rules … those must
+be macros or GM adjudication."* Everything downstream of it — persistent and ongoing damage, saves-to-end,
+component gating, "destroy on a 1", counterspell timing — is per-item prose that a compiled descriptor
+carries. So is the damage audit's area-damage finding: Moonbeam's enter-and-end-turn save exists only in
+description text, and `on_enter_area` / `on_turn_start` with a `damage` effect are already in the
+vocabulary. What those need is **executor support for placing and watching an area**, which is a primitive,
+not a rules engine. Do not open these as rules work.
+
+**What actually survives is short, and it is general rules** — universal, identical for every creature, the
+same category as jumping and Influence. Ordered by value over cost. The first three are cheap *now* and
+were not in August, because the hard half shipped for unrelated reasons:
+
+1. **Cover as an AC bonus.** dnd5e already applies `coverHalf` / `coverThreeQuarters` — +2 and +5 to AC
+   **and** to Dexterity saves (`actor.mjs:115-120`, `attributes.mjs:228-234`) — the instant the status is
+   present. Nothing sets it from geometry, and we already count blocked corner rays in `rules/hide.ts` for
+   the Hide prerequisite. This is wiring a measurement we own to a consumer the system owns. Verified
+   unbuilt: `coverHalf`, `coverThreeQuarters` and `coverBonus` appear nowhere in `src/`.
+2. **Unseen attacker and unseen target.** Advantage when the attacker cannot be seen, disadvantage when the
+   target cannot be. `rules/perception.ts` already answers "can this creature see that one" per-creature
+   against a hand-built vision source, and the injection point is the same `preRollAttack` the condition
+   matrix uses.
+3. **A ranged attack with a hostile within 5 feet is at disadvantage.** A board query and a matrix row.
+4. **Dodge.** dnd5e ships a `dodging` status with **zero** consumers. One condition-matrix entry (attacks
+   against at disadvantage, Dexterity saves at advantage) plus a button of the same shape as Hide's, since
+   nothing in the system presses it either. Verified unbuilt.
+5. **Standing up from Prone costs half Speed**, and a prone creature should pay crawl rates to walk — core
+   charges the extra distance only if the Crawl action is selected, and never charges the stand-up. The
+   Speed ledger already exists; this is a charge levied on a status removal.
+6. Lower value, and several are honest refusals: squeezing, flying without a fly speed (core does not
+   prevent it), mounted combat, falling damage (core has no concept of falling at all), the
+   suffocation/starvation/extreme-environment clocks, and difficult terrain auto-placed from spell
+   templates.
+
+**Check `ac5eOwnsConditions()` before building 1 through 4.** Automated Conditions 5e covers Invisible and
+visibility-aware Blinded already, and ships cover and range logic of its own that stands down only when
+midi is present. The stand-aside that exists for the condition matrix may cover part of this queue outright,
+and dual enablement is the silent-race failure documented below — measure before writing.
 
 ## Hard-won invariants
 
@@ -1290,9 +1502,11 @@ reported again.
   `three-extra-attacks`, right for fighters, rangers, paladins, barbarians and monks, but a Pact of the
   Blade warlock's second attack comes from the `thirsting-blade` invocation and would read as 1. One
   identifier to add.
-- **Five audits from the 2026-08-06 batch have not been acted on** and sit in `C:\Project\_research\_audit\`:
-  conditions/exhaustion, cover/visibility/surprise, damage/death/hazards, movement rules beyond Speed, and
-  spellcasting/resources. Read them before planning the next feature — they are the standing gap list.
+- **The 2026-08-06 audit batch was re-read on 2026-08-10 and is no longer the queue** — most of it shipped
+  and the rest belongs to the compiler. The surviving general-rules queue is six items and lives in "The
+  standing gap list, re-read after the split and the pivot" above. The audits themselves stay in
+  `C:\Project\_research\_audit\` as the citation trail; read that section first so you know which parts of
+  them are still true.
 - **Tooling and release discipline** are inherited unchanged from noodlr: prettier printWidth 100,
   `npm run check` + `lint` + `build` before commit, LF via `.gitattributes`, small commits at working
   checkpoints, and — the one that has bitten twice — **verify a release's ASSETS, not just its tag.**

@@ -19,7 +19,11 @@ export function readHp(actor: any): Hp | null {
   const sys = actor?.system;
   const candidates = [sys?.attributes?.hp, sys?.hp, sys?.health, sys?.attributes?.health];
   for (const hp of candidates) {
-    if (hp && typeof hp === "object" && (typeof hp.value === "number" || typeof hp.max === "number")) {
+    if (
+      hp &&
+      typeof hp === "object" &&
+      (typeof hp.value === "number" || typeof hp.max === "number")
+    ) {
       return {
         value: Number(hp.value ?? 0),
         max: Number(hp.max ?? hp.value ?? 0),

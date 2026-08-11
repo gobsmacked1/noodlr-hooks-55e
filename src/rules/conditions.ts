@@ -124,11 +124,7 @@ function fearSourceVisible(attacker: any): boolean | null {
       if (!origin) return null; // apply disadv; caller may log
       // Best-effort: origin is often an Actor/Item uuid. Presence on the scene is enough.
       const doc = (foundry as any)?.utils?.fromUuidSync?.(origin);
-      const token =
-        doc?.object ??
-        doc?.token?.object ??
-        doc?.getActiveTokens?.()?.[0] ??
-        null;
+      const token = doc?.object ?? doc?.token?.object ?? doc?.getActiveTokens?.()?.[0] ?? null;
       if (!token) return false;
       return true;
     }
@@ -328,8 +324,7 @@ export function surveyConditions(): unknown {
         fearSourceVisible: fearSourceVisible(actor),
       })
     : { advantage: [], disadvantage: [] };
-  const dist =
-    actor && target?.token && token ? tokenDistance(token, target.token) : null;
+  const dist = actor && target?.token && token ? tokenDistance(token, target.token) : null;
   return {
     enabled: enabled(),
     settingOn: isConditionAutomationEnabled(),

@@ -1,9 +1,10 @@
 /* Noodlr Hooks 5.5e — the module's entire visual surface.
  *
- * There is almost nothing here on purpose. This module has no windows and no panels; everything it
- * produces is a chat card built from the system's own markup, so it should look like the rest of the
- * log rather than like a guest. The only elements that need styling are the undo controls, because a
- * reversal button that reads as ordinary body text will not be found when it is wanted. */
+ * There is almost nothing here on purpose. Everything this module produces at play is a chat card
+ * built from the system's own markup, so it should look like the rest of the log rather than like a
+ * guest. Two things need styling: the undo controls, because a reversal button that reads as ordinary
+ * body text will not be found when it is wanted, and the capability sheet, which is the module's one
+ * real window. */
 
 .noodlr-undo-shove,
 .noodlr-undo-dying,
@@ -21,4 +22,162 @@
    token back is not. Only the forfeiture restore is coloured. */
 .noodlr-restore-forfeit {
   border-color: rgba(120, 46, 34, 0.6);
+}
+
+/* ---- The capability sheet ------------------------------------------------------------------- */
+
+.noodlr-capability-sheet .window-content {
+  overflow: auto;
+}
+
+/* Foundry's own rule turns selection off across application chrome, and a GM reviewing a compiled
+   rule will want to copy one. Scoped to the content so the title bar still drags. */
+.noodlr-capability-sheet .window-content,
+.noodlr-capability-sheet .window-content * {
+  user-select: text;
+}
+
+.noodlr-capability-sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.noodlr-capability-sheet__head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.noodlr-capability-sheet__head img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border: none;
+  border-radius: 4px;
+}
+
+.noodlr-capability-sheet__head h2 {
+  margin: 0;
+  border: none;
+}
+
+.noodlr-capability-sheet__warn {
+  margin: 0;
+  padding: 0.4em 0.6em;
+  border-left: 3px solid rgba(180, 130, 40, 0.8);
+  background: rgba(180, 130, 40, 0.12);
+  font-size: var(--font-size-13, 0.85rem);
+}
+
+.noodlr-capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: auto;
+}
+
+.noodlr-capability {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
+  border-radius: 4px;
+}
+
+/* A thrown-away reading stays visible — the evidence is the point — but must never be mistaken for
+   one that is running. */
+.noodlr-capability.status-rejected {
+  opacity: 0.55;
+}
+
+.noodlr-capability.status-locked {
+  border-left: 3px solid rgba(60, 120, 60, 0.8);
+}
+
+.noodlr-capability__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.noodlr-capability__title h3 {
+  margin: 0;
+  border: none;
+  flex: 1 1 auto;
+}
+
+.noodlr-capability__origin {
+  font-size: var(--font-size-11, 0.7rem);
+  opacity: 0.6;
+}
+
+.noodlr-badge {
+  padding: 0 0.4em;
+  border: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
+  border-radius: 3px;
+  font-size: var(--font-size-11, 0.7rem);
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.noodlr-badge.inert {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.noodlr-capability__prose summary {
+  cursor: pointer;
+  font-size: var(--font-size-12, 0.8rem);
+  opacity: 0.75;
+}
+
+.noodlr-capability__prose p {
+  margin: 0.3em 0 0;
+  font-size: var(--font-size-13, 0.85rem);
+  opacity: 0.85;
+}
+
+.noodlr-capability__rules {
+  margin: 0.4em 0 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.noodlr-capability__rules li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.noodlr-capability__rules li.inert .rule-text {
+  opacity: 0.7;
+}
+
+.noodlr-capability__rules .rule-text {
+  flex: 1 1 60%;
+}
+
+.noodlr-capability__rules .rule-tags {
+  display: flex;
+  gap: 0.25em;
+}
+
+.noodlr-capability__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5em;
+}
+
+.noodlr-capability__actions button,
+.noodlr-capability-sheet__foot button {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0.1em 0.7em;
+  font-size: var(--font-size-12, 0.8rem);
+  line-height: 1.7;
+  white-space: nowrap;
 }

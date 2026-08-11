@@ -36,7 +36,7 @@ npm run build
 if ($LASTEXITCODE) { Fail "build failed" }
 
 # --- the payload -----------------------------------------------------------------------------------
-$paths = @("dist", "lang", "styles", "changelog.md", "LICENSE", "module.json", "README.md")
+$paths = @("dist", "lang", "styles", "templates", "changelog.md", "LICENSE", "module.json", "README.md")
 foreach ($p in $paths) {
   if (-not (Test-Path $p)) { Fail "missing from the working tree: $p" }
 }
@@ -48,7 +48,15 @@ Compress-Archive -Path $paths -DestinationPath module.zip -CompressionLevel Opti
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path module.zip))
 try {
-  $required = @("module.json", "dist/noodlr-hooks-55e.js", "lang/en.json", "styles/noodlr-hooks.css")
+  $required = @(
+    "module.json",
+    "dist/noodlr-hooks-55e.js",
+    "lang/en.json",
+    "styles/noodlr-hooks.css",
+    # Fetched by path at render time, so a missing template is a 404 in the console rather than a
+    # build error. Asserted here for the same reason noodlr asserts its own partials.
+    "templates/capability-sheet.hbs"
+  )
   foreach ($r in $required) {
     if (-not ($zip.Entries | Where-Object { $_.FullName -like "$r*" })) { Fail "zip is missing $r" }
   }

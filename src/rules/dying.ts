@@ -9,7 +9,9 @@
 import { log, MODULE_ID } from "../constants";
 import { speakerFor } from "../util/speaker";
 import { announceRuling } from "../integration/contract";
-import { isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../settings";
+import { getEconomyMode, isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../settings";
+import { check, spend } from "./economy/ledger";
+import { firstAidDc } from "../system/dnd5e-checks";
 import {
   deathFailuresFromDamage,
   hpSnapshot,
@@ -66,9 +68,7 @@ function messageIsCritical(options: any): boolean {
     const msg =
       options?.originatingMessage ??
       options?.origin ??
-      (typeof options?.originatingMessage === "string"
-        ? null
-        : options?.originatingMessage);
+      (typeof options?.originatingMessage === "string" ? null : options?.originatingMessage);
     const doc =
       msg && typeof msg === "object"
         ? msg
@@ -121,7 +121,10 @@ async function setStatus(actor: any, statusId: string, active: boolean): Promise
   }
 }
 
-async function setCombatantDefeated(actor: any, defeated: boolean): Promise<{ id: string; defeated: boolean }[]> {
+async function setCombatantDefeated(
+  actor: any,
+  defeated: boolean,
+): Promise<{ id: string; defeated: boolean }[]> {
   const prior: { id: string; defeated: boolean }[] = [];
   try {
     const combatants =
@@ -223,11 +226,7 @@ async function becomeUnconscious(actor: any, before: PendingDamage): Promise<voi
   );
 }
 
-async function addDeathFailures(
-  actor: any,
-  before: PendingDamage,
-  add: number,
-): Promise<void> {
+async function addDeathFailures(actor: any, before: PendingDamage, add: number): Promise<void> {
   const death = actor.system?.attributes?.death;
   if (!death) return;
   const next = Math.min(3, (before.failures || 0) + add);
@@ -325,11 +324,7 @@ async function resolveAppliedDamage(actor: any): Promise<void> {
       await becomeUnconscious(actor, before);
     }
   } else if (!hasStatus(actor, "dead")) {
-    await becomeDead(
-      actor,
-      game.i18n.localize("NOODLRHOOKS.Combat.Dying.Reason.ZeroHp"),
-      before,
-    );
+    await becomeDead(actor, game.i18n.localize("NOODLRHOOKS.Combat.Dying.Reason.ZeroHp"), before);
   }
 }
 
@@ -337,7 +332,11 @@ async function resolveAppliedDamage(actor: any): Promise<void> {
  * Direct HP edits (and anything else that skips applyDamage) still need a drop-to-0 response.
  * Damage-at-0 with no HP change cannot be seen here — that path only exists through applyDamage.
  */
-async function onHpChanged(actor: any, changes: { hp: number; temp: number; total: number }, userId: string): Promise<void> {
+async function onHpChanged(
+  actor: any,
+  changes: { hp: number; temp: number; total: number },
+  userId: string,
+): Promise<void> {
   if (!enabled()) return;
   if (userId !== game.userId) return;
   if (pending.has(actorKey(actor))) return; // applyDamage path owns this update
@@ -419,7 +418,10 @@ async function onHpChanged(actor: any, changes: { hp: number; temp: number; tota
 }
 
 /** Capture intent before stock writes; apply statuses after in postRollDeathSave. */
-function onDeathSave(_rolls: any[], details: { chatString?: string; subject?: any; updates?: any }): void {
+function onDeathSave(
+  _rolls: any[],
+  details: { chatString?: string; subject?: any; updates?: any },
+): void {
   if (!enabled()) return;
   const actor = details?.subject;
   if (!actor) return;
@@ -438,10 +440,7 @@ function onDeathSave(_rolls: any[], details: { chatString?: string; subject?: an
  * After a death save resolves and stock has written counters: 3 failures → Dead (stock only chats);
  * 3 successes → Stable (stock clears counters, leaves no status).
  */
-async function onPostDeathSave(
-  _rolls: any[],
-  data: { subject?: any },
-): Promise<void> {
+async function onPostDeathSave(_rolls: any[], data: { subject?: any }): Promise<void> {
   if (!enabled()) return;
   const actor = data?.subject;
   if (!actor) return;
@@ -537,6 +536,107 @@ export async function undoDying(): Promise<number> {
   }
 }
 
+/**
+ * Administer First Aid: a DC 10 Wisdom (Medicine) check to stabilise a dying creature.
+ *
+ * The other half of `stable`, and the half nothing in the stack offers. Three successful death saves
+ * already reach Stable through `onPostDeathSave` above, but the deliberate route — somebody kneeling
+ * down and doing something about it — has no button anywhere, because 2024 files it under the Utilize
+ * action and dnd5e ships no item for it. Same gap, and the same answer, as the Hide action.
+ *
+ * Costs whoever is helping their Action, charged after the roll so a cancelled dialog is free and
+ * charged whether or not the check succeeded, which is the rule. A creature that is already Stable,
+ * dead, or standing up is refused before any dice are asked for.
+ */
+export async function administerFirstAid(
+  healer: any,
+  patient: any,
+): Promise<{ stabilized: boolean; total: number | null; dc: number; reason: string }> {
+  const { dc, skill } = firstAidDc();
+  const helper = healer?.actor ?? healer;
+  const actor = patient?.actor ?? patient;
+  const fail = (reason: string) => ({ stabilized: false, total: null, dc, reason });
+
+  if (!helper || !actor) return fail("select who is helping and target who is dying");
+  if (!enabled()) return fail("the dying layer is off");
+
+  const snap = hpSnapshot(actor);
+  if (snap.value > 0) return fail(`${String(actor.name)} is not dying`);
+  if (hasStatus(actor, "dead")) return fail(`${String(actor.name)} is beyond first aid`);
+  if (hasStatus(actor, "stable")) return fail(`${String(actor.name)} is already stable`);
+
+  // Refused rather than asked when there is nothing left to spend, matching the Hide action: the
+  // over-budget dialog exists for features that legitimately break the general rule, and kneeling
+  // over a body is not one of them.
+  const combat: any = game.combat;
+  const combatant = healer?.document?.combatant;
+  const onTheirTurn =
+    combat?.started && combatant && String(combatant.id) === String(combat.combatant?.id ?? "");
+  if (onTheirTurn && getEconomyMode() !== "off") {
+    if (!check(helper, combat, combatant, "action", false).allowed) {
+      return fail("no action left this turn");
+    }
+  }
+
+  let total: number | null = null;
+  try {
+    const rolls: any[] = (await helper.rollSkill({ skill })) ?? [];
+    const value = Number(rolls?.[0]?.total);
+    total = Number.isFinite(value) ? value : null;
+  } catch (err) {
+    log("dying: could not roll the first-aid check:", err);
+    return fail("the Medicine check failed to roll");
+  }
+  if (total === null) return fail("the roll was cancelled");
+
+  if (onTheirTurn && getEconomyMode() !== "off") {
+    spend(helper, combat, combatant, "action", false);
+  }
+
+  // Announced either way. A failure that says nothing looks like the button not working, and the
+  // action was spent regardless — the table needs to see where it went.
+  if (total < dc) {
+    await announce(
+      actor,
+      game.i18n.format("NOODLRHOOKS.Combat.Dying.FirstAidFailed", {
+        healer: String(helper.name ?? "Someone"),
+        total: String(total),
+        dc: String(dc),
+      }),
+      false,
+    );
+    return { stabilized: false, total, dc, reason: `rolled ${total} against DC ${dc}` };
+  }
+
+  await setStatus(actor, "stable", true);
+  if (!hasStatus(actor, "unconscious")) await setStatus(actor, "unconscious", true);
+  await announce(
+    actor,
+    game.i18n.format("NOODLRHOOKS.Combat.Dying.FirstAid", {
+      healer: String(helper.name ?? "Someone"),
+      name: String(actor.name ?? "someone"),
+      total: String(total),
+      dc: String(dc),
+    }),
+    false,
+  );
+  return { stabilized: true, total, dc, reason: `rolled ${total} against DC ${dc}` };
+}
+
+/** GM/player entry point: the selected token gives first aid to whatever it has targeted. */
+export async function firstAidTargets(): Promise<unknown> {
+  const healer: any = (canvas as any)?.tokens?.controlled?.[0];
+  const targets = Array.from((game.user?.targets ?? []) as Set<any>);
+  if (!healer || targets.length === 0) {
+    return { error: "select who is helping and target who is dying" };
+  }
+  const results: Record<string, unknown> = {};
+  for (const patient of targets) {
+    results[String(patient?.name ?? "?")] = await administerFirstAid(healer, patient);
+  }
+  return results;
+}
+
 export function registerDyingHooks(): void {
   Hooks.on("dnd5e.preApplyDamage", (actor: any, amount: number, _updates: any, options: any) => {
     try {
@@ -596,9 +696,7 @@ export function registerDyingHooks(): void {
   });
 
   const renderHook =
-    Number((game as any).release?.generation) >= 13
-      ? "renderChatMessageHTML"
-      : "renderChatMessage";
+    Number((game as any).release?.generation) >= 13 ? "renderChatMessageHTML" : "renderChatMessage";
   Hooks.on(renderHook, wireUndoButton);
 }
 

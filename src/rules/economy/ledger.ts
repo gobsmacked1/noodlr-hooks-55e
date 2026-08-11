@@ -34,6 +34,7 @@
 
 import { MODULE_ID } from "../../constants";
 import { numberFlag, readFlag } from "../../util/flags";
+import { capabilityAttacksPerAction } from "../../capability/bindings";
 
 export type Slot = "action" | "bonus" | "reaction";
 
@@ -188,6 +189,13 @@ export function explainAttacksPerAction(actor: any): { value: number; source: st
     return { value: 4, source: "identifier: three-extra-attacks" };
   if (ids.has("two-extra-attacks")) return { value: 3, source: "identifier: two-extra-attacks" };
   if (ids.has("extra-attack")) return { value: 2, source: "identifier: extra-attack" };
+
+  // A compiled capability, when the scene has been through the capability compiler. Above the prose
+  // regex below and beneath the identifiers above, which is the honest ordering: authored structured
+  // data beats a model reading a sentence, and a model reading the whole sentence beats a regular
+  // expression hunting for the first number word in it. Null in a world that has compiled nothing.
+  const compiled = capabilityAttacksPerAction(actor);
+  if (compiled !== null) return { value: compiled, source: `compiled capability (${compiled})` };
 
   const multi = items.find((i: any) => /^multiattack\b/i.test(String(i?.name ?? "")));
   if (multi) {

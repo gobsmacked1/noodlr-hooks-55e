@@ -324,6 +324,8 @@ function wireRestoreButton(_message: unknown, html: unknown): void {
   button.addEventListener("click", async () => {
     button.disabled = true;
     const restored = await restoreForfeited();
-    ui.notifications?.info(game.i18n.format("NOODLRHOOKS.Combat.Resolution.Restored", { restored }));
+    ui.notifications?.info(
+      game.i18n.format("NOODLRHOOKS.Combat.Resolution.Restored", { restored }),
+    );
   });
 }

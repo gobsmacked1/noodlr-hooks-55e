@@ -149,7 +149,9 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   ) {
     const name = String(actor.name ?? "This creature");
     log(`conditions: ${name} is incapacitated; refused ${String(activity?.name ?? "an activity")}`);
-    ui.notifications?.warn(game.i18n.format("NOODLRHOOKS.Combat.Conditions.Incapacitated", { name }));
+    ui.notifications?.warn(
+      game.i18n.format("NOODLRHOOKS.Combat.Conditions.Incapacitated", { name }),
+    );
     return false;
   }
 

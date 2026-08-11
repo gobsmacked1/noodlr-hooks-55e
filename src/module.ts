@@ -42,7 +42,11 @@ import { registerReactionHooks } from "./rules/reactions";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
-import { registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
+import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
+import { announceJump, surveyJump } from "./rules/jump";
+import { clearInfluenceLocks, influenceTargets, surveyInfluence } from "./rules/influence";
+import type { Stance } from "./rules/influence";
+import { surveyGeneralRules } from "./rules/general";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
 import { registerEconomyHooks } from "./rules/economy/enforce";
 import { registerMovementCap, surveyMovement } from "./rules/economy/speed";
@@ -53,6 +57,11 @@ import { flattenElevation, restoreElevation, testMove } from "./core/diagnose";
 import { surveyActions } from "./tactics/survey";
 import { restoreForfeited } from "./system/dnd5e-rewards";
 import { runCurrentNpcTurn } from "./tactics/npc-turn";
+import { registerDamageLog } from "./capability/damage-log";
+import { surveyPrimitives } from "./capability/primitives";
+import { registerCapabilityExecutor, surveyCapabilities } from "./capability/executor";
+import { collectScene, registerCapabilityCollector, surveyScene } from "./capability/collect";
+import { openCapabilitySheet, registerCapabilitySheet } from "./apps/capability-sheet";
 
 /**
  * What this module tells a companion module about itself.
@@ -84,10 +93,22 @@ export interface NoodlrHooksApi {
   surveyConcentration(): unknown;
   surveyHide(): unknown;
   hide(opts?: { force?: boolean }): Promise<void>;
+  surveyJump(): unknown;
+  jump(): Promise<void>;
+  surveyInfluence(): unknown;
+  influence(opts?: { approach?: string; stance?: Stance; force?: boolean }): Promise<unknown>;
+  clearInfluenceLocks(): Promise<number>;
+  firstAid(): Promise<unknown>;
+  surveyGeneralRules(): unknown;
   push(feet?: number): Promise<unknown>;
   pull(feet?: number): Promise<unknown>;
   undoForcedMovement(): Promise<number>;
   undoDying(): Promise<number>;
+  surveyPrimitives(): unknown;
+  surveyCapabilities(): unknown;
+  surveyScene(): unknown;
+  compileScene(): Promise<unknown>;
+  openCapabilities(actor?: unknown): void;
   flattenElevation(): Promise<number>;
   restoreElevation(): Promise<number>;
 }
@@ -111,6 +132,9 @@ const descriptor: HooksDescriptor = {
     "perception",
     "npc-tactics",
     "encounter-resolution",
+    // Protocol 2. Advertises that this module will ASK to have prose compiled, not that it can do it
+    // — the listener is what supplies that, and with none installed nothing is ever requested.
+    "capability-compiler",
   ],
 };
 
@@ -168,6 +192,20 @@ const api: NoodlrHooksApi = {
   surveyHide: () => surveyHide(),
   /** Take the Hide action with every selected token. `force` skips prerequisites and the cost. */
   hide: (opts) => hideSelected(opts),
+  /** What the selected token can leap, with and without the run-up it currently has. */
+  surveyJump: () => surveyJump(),
+  /** Post that same reading to chat, because "can I get across that?" is the table's question. */
+  jump: () => announceJump(),
+  /** What an Influence attempt against each target would face: attitude, DC, and what is locked. */
+  surveyInfluence: () => surveyInfluence(),
+  /** Talk every targeted creature round with the selected one. The GM is asked for the stance. */
+  influence: (opts) => influenceTargets(opts),
+  /** Forget every 24-hour refusal in the world. The undo for a lockout that landed wrong. */
+  clearInfluenceLocks: () => clearInfluenceLocks(),
+  /** The selected token administers first aid to whatever it has targeted. */
+  firstAid: () => firstAidTargets(),
+  /** What this module does about each of the general rules, and why it does nothing about the rest. */
+  surveyGeneralRules: () => surveyGeneralRules(),
   /** Manual forced movement, for a rule the automatic layer does not recognise. */
   push: (feet = 10) => shoveTargets(feet, "away"),
   pull: (feet = 10) => shoveTargets(feet, "toward"),
@@ -175,6 +213,16 @@ const api: NoodlrHooksApi = {
   undoForcedMovement: () => undoForcedMovement(),
   /** Reverse the most recent drop-to-zero rulings. */
   undoDying: () => undoDying(),
+  /** What the capability primitives can see: system, scene, summons, whether a fight is running. */
+  surveyPrimitives: () => surveyPrimitives(),
+  /** Which creatures on the scene are running compiled capabilities, and what each rule does. */
+  surveyCapabilities: () => surveyCapabilities(),
+  /** What this scene WOULD ask about, and what it costs nothing because the cache already has it. */
+  surveyScene: () => surveyScene(),
+  /** Read the scene now, rather than waiting for the next load. */
+  compileScene: () => collectScene(),
+  /** The review window for one creature. Defaults to the selected token, or your own character. */
+  openCapabilities: (actor?: unknown) => openCapabilitySheet(actor),
   flattenElevation: () => flattenElevation(),
   restoreElevation: () => restoreElevation(),
 };
@@ -215,6 +263,17 @@ Hooks.once("ready", () => {
   registerStealthWatch();
   // Same reasoning: the Invisibility spell ends on the caster's own client.
   registerInvisibilityHooks();
+  // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is
+  // only computable from `updateActor` (which fires everywhere) while the damage TYPES arrive on the
+  // applying client. A GM-only ledger would be blind to damage a player applied.
+  registerDamageLog();
+  // Compiled capabilities. Registered on every client so a rule can be evaluated wherever its trigger
+  // fires; the executor itself defers the world mutation to the primary GM.
+  registerCapabilityExecutor();
+  // And the half that reads the sheets. Also every client: the cache is a plain file, and a player's
+  // client needs the bindings for the action ledger to see a compiled Multiattack. Only the primary
+  // GM ever requests a compile or writes the cache; that gate is inside.
+  registerCapabilityCollector();
 
   if (game.user?.isGM) {
     // Carry a world's tuned values across from the module this one was split out of, exactly once.
@@ -232,6 +291,9 @@ Hooks.once("ready", () => {
     registerForcedMovement();
     // Watches whether the party is still swinging, which is what mercy hangs on.
     registerEncounterTracking();
+    // A Capabilities button on every creature sheet. GM-only: it is the veto over what a model read,
+    // and it spends credit.
+    registerCapabilitySheet();
   }
 });
 
@@ -283,4 +345,10 @@ Hooks.on("getSceneControlButtons", (controls: Record<string, any>) => {
 // Re-exported so a companion module can import the contract's types without depending on this
 // package, and so the shape stays greppable from one place.
 export { announceRuling, proposeRuling, requestBehavior };
-export type { Ruling, RulingKind, BehaviorRequest, BehaviorVerb, TurnEvent } from "./integration/contract";
+export type {
+  Ruling,
+  RulingKind,
+  BehaviorRequest,
+  BehaviorVerb,
+  TurnEvent,
+} from "./integration/contract";

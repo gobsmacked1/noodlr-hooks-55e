@@ -4,7 +4,14 @@
 // this file: each one records what the stack does NOT do, which is why the setting exists at all and
 // why it defaults the way it does. Deleting a comment here loses the audit that justified the code.
 
-import { COMBAT_SETTINGS, LEGACY_MODULE_ID, MODULE_ID, SETTINGS, log } from "./constants";
+import {
+  COMBAT_SETTINGS,
+  GENERAL_SETTINGS,
+  LEGACY_MODULE_ID,
+  MODULE_ID,
+  SETTINGS,
+  log,
+} from "./constants";
 
 /**
  * How much of a hostile creature's turn this module runs:
@@ -26,6 +33,18 @@ function world(key: string, i18n: string, type: any, defaultValue: unknown, extr
     type,
     default: defaultValue,
     ...extra,
+  });
+}
+
+/** The same, for the general rules, which have their own i18n branch because they are not combat. */
+function general(key: string, i18n: string, type: any, defaultValue: unknown) {
+  game.settings.register(MODULE_ID, key, {
+    name: `NOODLRHOOKS.General.${i18n}.Name`,
+    hint: `NOODLRHOOKS.General.${i18n}.Hint`,
+    scope: "world",
+    config: true,
+    type,
+    default: defaultValue,
   });
 }
 
@@ -62,6 +81,18 @@ export function registerCombatSettings(): void {
   world(COMBAT_SETTINGS.importantNpcSaves, "Dying.Important", Boolean, true);
   world(COMBAT_SETTINGS.concentration, "Concentration", Boolean, true);
   world(COMBAT_SETTINGS.autoEnd, "AutoEnd", Boolean, true);
+
+  general(GENERAL_SETTINGS.jump, "Jump", Boolean, true);
+  general(GENERAL_SETTINGS.influence, "Influence", Boolean, true);
+
+  game.settings.register(MODULE_ID, SETTINGS.compileCapabilities, {
+    name: "NOODLRHOOKS.Capabilities.Name",
+    hint: "NOODLRHOOKS.Capabilities.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+  });
 
   game.settings.register(MODULE_ID, SETTINGS.debugLogging, {
     name: "NOODLRHOOKS.DebugLogging.Name",
@@ -317,6 +348,53 @@ export function getTurnPaceSeconds(): number {
   const raw = Number(game.settings.get(MODULE_ID, COMBAT_SETTINGS.turnPace));
   if (!Number.isFinite(raw)) return 6;
   return Math.min(60, Math.max(0, raw));
+}
+
+/**
+ * May a creature's own prose be sent to `noodlr` to be compiled into executable rules?
+ *
+ * **Off by default, and the only setting in this file that is.** Every other switch here changes how
+ * this module reads data the operator already has; this one spends their money — each miss on the
+ * capability cache is a frontier-model call against the key configured in the companion module. A
+ * feature that quietly bills somebody has to be asked for.
+ *
+ * Off is not a broken state. The cache still loads, anything already compiled still runs, and with
+ * nothing compiled at all the module behaves exactly as it did before the compiler existed: it reads
+ * structured sheet data and knows nothing about what the prose says.
+ */
+export function isCapabilityCompileEnabled(): boolean {
+  try {
+    return Boolean(game.settings.get(MODULE_ID, SETTINGS.compileCapabilities));
+  } catch {
+    // Called from paths that can run before registration; silence is the safe answer for a switch
+    // whose "on" position spends money.
+    return false;
+  }
+}
+
+/**
+ * Is a leap held to the distance the creature could actually clear?
+ *
+ * On by default. Core has a real jump movement action and dnd5e configures its cost correctly, so
+ * the only missing piece is the limit — and without it the jump action is strictly better than
+ * walking: it ignores difficult terrain by design and, until this shipped, was bounded by nothing.
+ * Turning this off restores that, which is the reason the switch exists rather than a reason to use it.
+ */
+export function isJumpEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.jump));
+}
+
+/**
+ * Does talking a creature round roll a real check, against a real DC, bent by its attitude?
+ *
+ * On by default. The judgement half of the Influence rule stays the GM's and is asked for every time;
+ * what this automates is the arithmetic underneath it, which is forgotten far more often than it is
+ * disputed — the DC being the higher of 15 and the creature's Intelligence, and Advantage or
+ * Disadvantage from a Friendly or Hostile attitude. Off for tables that would rather call for the
+ * check themselves.
+ */
+export function isInfluenceEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.influence));
 }
 
 export function getCombatAutomation(): CombatAutomationMode {

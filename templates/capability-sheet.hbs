@@ -1,0 +1,124 @@
+{{!--
+  One creature's written abilities and what was made of them.
+
+  Ordering is deliberate: the creature's own text first, then the reading of it. A reviewer is checking
+  a translation, and a translation is only checkable beside its original.
+--}}
+<div class="noodlr-capability-sheet__body">
+
+  <header class="noodlr-capability-sheet__head">
+    {{#if img}}<img src="{{img}}" alt="" />{{/if}}
+    <div>
+      <h2>{{name}}</h2>
+      <p class="notes">
+        {{localize "NOODLRHOOKS.Capabilities.Sheet.Counts" total=counts.total known=counts.known uncompiled=counts.uncompiled}}
+        {{#if counts.inert}}
+          &middot; {{localize "NOODLRHOOKS.Capabilities.Sheet.InertCount" count=counts.inert}}
+        {{/if}}
+      </p>
+    </div>
+  </header>
+
+  {{#if offHint}}
+    <p class="noodlr-capability-sheet__warn">{{localize "NOODLRHOOKS.Capabilities.Sheet.OffHint"}}</p>
+  {{/if}}
+  {{#if notPrimaryHint}}
+    <p class="noodlr-capability-sheet__warn">{{localize "NOODLRHOOKS.Capabilities.Sheet.NotPrimary"}}</p>
+  {{/if}}
+
+  <div class="noodlr-capabilities">
+    {{#each rows}}
+      <section class="noodlr-capability status-{{this.status}}" data-capability="{{this.id}}">
+
+        <div class="noodlr-capability__title">
+          <h3>{{this.label}}</h3>
+          <span class="noodlr-badge status">{{this.statusLabel}}</span>
+          {{#if this.edited}}
+            <span class="noodlr-badge edited">{{localize "NOODLRHOOKS.Capabilities.Status.editedMark"}}</span>
+          {{/if}}
+          {{#if this.model}}
+            <span class="noodlr-capability__origin">{{this.model}}{{#if this.when}} &middot; {{this.when}}{{/if}}</span>
+          {{/if}}
+        </div>
+
+        <details class="noodlr-capability__prose">
+          <summary>{{localize "NOODLRHOOKS.Capabilities.Sheet.Prose"}}</summary>
+          <p>{{this.prose}}</p>
+        </details>
+
+        {{#if this.known}}
+          {{#if this.flavourOnly}}
+            <p class="notes">{{localize "NOODLRHOOKS.Capabilities.Sheet.NoRules"}}</p>
+          {{else}}
+            <ol class="noodlr-capability__rules">
+              {{#each this.rules}}
+                <li class="{{#unless this.runs}}inert{{/unless}}">
+                  <span class="rule-text">{{this.text}}</span>
+                  <span class="rule-tags">
+                    <span class="noodlr-badge">{{this.adjudication}}</span>
+                    {{#if this.uses}}<span class="noodlr-badge">{{this.uses}}</span>{{/if}}
+                    {{#unless this.runs}}
+                      <span class="noodlr-badge inert" data-tooltip="{{localize 'NOODLRHOOKS.Capabilities.Sheet.InertHint'}}">
+                        {{localize "NOODLRHOOKS.Capabilities.Sheet.Inert"}}
+                      </span>
+                    {{/unless}}
+                  </span>
+                  {{#if this.note}}<p class="notes">{{this.note}}</p>{{/if}}
+                </li>
+              {{/each}}
+            </ol>
+          {{/if}}
+        {{else}}
+          <p class="notes">{{localize "NOODLRHOOKS.Capabilities.Sheet.Unread"}}</p>
+        {{/if}}
+
+        <div class="noodlr-capability__actions">
+          {{#if this.known}}
+            <button type="button" data-action="edit">
+              <i class="fa-solid fa-pen"></i> {{localize "NOODLRHOOKS.Capabilities.Sheet.Edit"}}
+            </button>
+            <button type="button" data-action="lock">
+              <i class="fa-solid {{#if this.locked}}fa-lock{{else}}fa-lock-open{{/if}}"></i>
+              {{#if this.locked}}
+                {{localize "NOODLRHOOKS.Capabilities.Sheet.Unlock"}}
+              {{else}}
+                {{localize "NOODLRHOOKS.Capabilities.Sheet.Lock"}}
+              {{/if}}
+            </button>
+            <button type="button" data-action="reject">
+              <i class="fa-solid fa-ban"></i>
+              {{#if this.rejected}}
+                {{localize "NOODLRHOOKS.Capabilities.Sheet.Restore"}}
+              {{else}}
+                {{localize "NOODLRHOOKS.Capabilities.Sheet.Reject"}}
+              {{/if}}
+            </button>
+          {{/if}}
+          {{!-- Greyed rather than hidden: a button that vanishes asks a question the window then has
+                no way to answer. A locked row refuses here, which is what the lock is for. --}}
+          <button type="button" data-action="recompile" {{#unless this.canRecompile}}disabled{{/unless}}>
+            <i class="fa-solid fa-rotate"></i>
+            {{#if this.known}}
+              {{localize "NOODLRHOOKS.Capabilities.Sheet.Recompile"}}
+            {{else}}
+              {{localize "NOODLRHOOKS.Capabilities.Sheet.Compile"}}
+            {{/if}}
+          </button>
+        </div>
+      </section>
+    {{/each}}
+
+    {{#unless any}}
+      <p class="notes">{{localize "NOODLRHOOKS.Capabilities.Sheet.Nothing"}}</p>
+    {{/unless}}
+  </div>
+
+  {{#if counts.uncompiled}}
+    <footer class="noodlr-capability-sheet__foot">
+      <button type="button" data-action="compileAll" {{#unless canCompile}}disabled{{/unless}}>
+        <i class="fa-solid fa-book-open-reader"></i>
+        {{localize "NOODLRHOOKS.Capabilities.Sheet.CompileAll" count=counts.uncompiled}}
+      </button>
+    </footer>
+  {{/if}}
+</div>

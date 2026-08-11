@@ -300,7 +300,11 @@ async function declare(actor: any): Promise<void> {
     }
     const passive = Number(token?.actor?.system?.skills?.ste?.passive);
     const base = Number((globalThis as any).CONFIG?.DND5E?.skillPassive?.base ?? 10);
-    await write(token, Number.isFinite(passive) ? passive : base, "took the Hide action without rolling");
+    await write(
+      token,
+      Number.isFinite(passive) ? passive : base,
+      "took the Hide action without rolling",
+    );
   }
 }
 
@@ -401,7 +405,11 @@ async function onAttackRolled(actor: any): Promise<void> {
  * be recomputed the way the chat card renders it — or read out of midi's flags when midi is the one
  * deciding. Only the client that recorded the pending attack acts, which is the client that rolled it.
  */
-export async function resolveSniperOutcome(actorId: string, tokenId: string, hit: boolean): Promise<void> {
+export async function resolveSniperOutcome(
+  actorId: string,
+  tokenId: string,
+  hit: boolean,
+): Promise<void> {
   const tokens: any[] = (canvas as any)?.tokens?.placeables ?? [];
   for (const token of tokens) {
     const id = String(token.id);

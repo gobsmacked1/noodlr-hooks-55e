@@ -4,12 +4,14 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/", "node_modules/"],
+    ignores: ["dist/", "node_modules/", ".test-build/"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["src/**/*.ts"],
+    // Tests stand fakes in for Foundry documents, so they need the same escape from `any` that the
+    // module itself has — there is no type to give a hand-built stub of an Actor5e.
+    files: ["src/**/*.ts", "test/**/*.ts"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",

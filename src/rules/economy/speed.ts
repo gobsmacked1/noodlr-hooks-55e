@@ -42,6 +42,7 @@ import { pickNumber, systemPaths } from "../../system/profiles";
 import { check, dashesTaken, takeDash } from "./ledger";
 import { isAutomating } from "./enforce";
 import { bonusDashSource } from "../../system/dnd5e-dash";
+import { JUMP_ACTION, jumpVeto } from "../jump";
 
 /**
  * What a creature may cross this turn, and what it has crossed already.
@@ -124,9 +125,22 @@ function budgetFor(doc: any): Budget | null {
 function speedFor(doc: any, actor: any): number | null {
   const modes = actor?.system?.attributes?.movement;
   const action = String(doc?.movementAction ?? "walk");
+
+  // Jumping is the one mode whose named speed is not a turn budget. "Each foot you jump costs a foot
+  // of movement" — the movement comes out of Speed, and the jump distance limits one leap rather than
+  // the turn. dnd5e nevertheless publishes `movement.jump` (half the Strength score, to colour the
+  // ruler), so reading it here collapsed a fighter's whole turn to eight feet the moment they selected
+  // the jump action, with everything already walked counted against it. `rules/jump.ts` enforces the
+  // per-leap distance separately.
+  if (action === JUMP_ACTION) return walkSpeed(modes, actor);
+
   const mode = Number(modes?.[action]);
   if (Number.isFinite(mode) && mode > 0) return mode;
 
+  return walkSpeed(modes, actor);
+}
+
+function walkSpeed(modes: any, actor: any): number | null {
   const walk = Number(modes?.walk);
   if (Number.isFinite(walk) && walk > 0) return walk;
 
@@ -187,6 +201,14 @@ export function registerMovementCap(): void {
       if (game.user?.isGM || isAutomating()) return true;
       const method = String(movement?.method ?? "");
       if (method !== "dragging" && method !== "keyboard") return true;
+
+      // How far ONE leap may go, which is a different question from how far the turn may go and has
+      // to be asked first: a creature with its whole Speed in hand may still not clear thirty feet.
+      const overreach = jumpVeto(doc, movement);
+      if (overreach) {
+        ui.notifications?.warn(overreach);
+        return false;
+      }
 
       const budget = budgetFor(doc);
       if (!budget) return true;

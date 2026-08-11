@@ -44,11 +44,7 @@ export function hpSnapshot(actor: any): {
  * Formula: damage that reaches real HP, minus current HP; instant death when that leftover ≥ max HP.
  * Temp HP is absorbed first (same order as `Actor5e.applyDamage`).
  */
-export function leftoverPastZero(
-  oldHp: number,
-  oldTemp: number,
-  amount: number,
-): number {
+export function leftoverPastZero(oldHp: number, oldTemp: number, amount: number): number {
   if (!(amount > 0)) return 0;
   const afterTemp = amount - Math.min(Math.max(oldTemp, 0), amount);
   return Math.max(0, afterTemp - Math.max(oldHp, 0));
