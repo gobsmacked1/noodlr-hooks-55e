@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.2.1
+
+Two fixes, both found by looking at what the 2024 Player's Handbook module actually puts on a
+character sheet.
+
+### Pressing Attack no longer costs you your action
+
+The Player's Handbook ships all thirteen actions as items, so your sheet and Argon's action bar can
+offer them as buttons. Two of them — **Attack** and **Magic** — only announce what you are about to
+do; the weapon or the spell that follows is the thing that actually costs an Action. Both were being
+charged, so a character without Extra Attack could press Attack, swing once, and be told the action
+was already spent.
+
+The buttons are now free and the follow-through pays, which is how the ledger always counted a
+fighter's swings anyway. Pressing Attack and then thinking better of it costs nothing.
+
+Dash and Hide are deliberately left alone: they are charged in one place already, and the Dash
+button has to record itself so the movement cap knows the extra Speed is paid for.
+
+### The capability sheet stops calling dead rules alive
+
+Compiled abilities are badged active or inert on the capability sheet. The badge looked at whether
+the effect could run but never at whether anything listens for the trigger, so a perfectly good
+"heals at the end of a long rest" was shown as active while nothing would ever fire it. Five of the
+seventeen trigger events are wired in this build, and the sheet now says so honestly.
+
+### Two new warnings in the settings windows
+
+**Monk's Token Bar** suppresses the game system's own chat card for group and contested rolls, so
+those rolls carry none of the data this module reads. A Stealth check requested through the token bar
+will not hide anybody. Roll from the sheet when the result has to be enforced.
+
+**Hurry Up** advances the turn when its timer expires without asking whether a turn is still being
+played out, which can skip or double-advance an automated creature's turn. Turning off its "Run for
+NPCs" scopes the timer to players and removes the conflict.
+
+Cover was also removed from the list of rules planned here: Simple Cover 5e already sets the cover
+status and adjusts Armor Class and Dexterity saves, so a second implementation would apply it twice
+rather than fill a gap.
+
 ## 0.2.0
 
 Three settings windows, three new rules, and a way for a creature's own abilities to be read off its
