@@ -1,8 +1,18 @@
 // Every setting this module owns, and the reasoning behind each default.
 //
-// All sixteen render in Foundry's native module settings list. The long comments are the point of
-// this file: each one records what the stack does NOT do, which is why the setting exists at all and
-// why it defaults the way it does. Deleting a comment here loses the audit that justified the code.
+// The long comments are the point of this file: each one records what the stack does NOT do, which is
+// why the setting exists at all and why it defaults the way it does. Deleting a comment here loses the
+// audit that justified the code.
+//
+// **They no longer render in Foundry's native list.** Every rule setting is `config: false` and is
+// rendered instead by the three windows in `apps/rules-config.ts`, reached from the three menus
+// registered below. That reverses the original decision, and the reason is not length — it is that a
+// native row cannot show the one thing a GM most needs to know. Several of these rules stand aside
+// silently when another module owns them, so the checkbox reads on while nothing happens; the
+// ownership badge in our own window is the fix, and it cannot exist in Foundry's list.
+//
+// `debugLogging` stays in the native list on purpose: it is client-scoped troubleshooting, it is not a
+// rule, and it should be findable without knowing which of three windows to open.
 
 import {
   COMBAT_SETTINGS,
@@ -12,6 +22,8 @@ import {
   SETTINGS,
   log,
 } from "./constants";
+import { PAGES } from "./apps/pages";
+import { menuShimFor } from "./apps/rules-config";
 
 /**
  * How much of a hostile creature's turn this module runs:
@@ -23,13 +35,19 @@ export type CombatAutomationMode = "full" | "partial" | "off";
 
 const L = (key: string): string => `NOODLRHOOKS.Combat.${key}`;
 
-/** Register a world-scoped setting that shows in Foundry's own list. */
+/**
+ * Register a world-scoped rule setting.
+ *
+ * `config: false` — rendered by our own windows, not Foundry's list. The name and hint keys are still
+ * registered because the windows localize them through exactly these keys; they are the setting's
+ * text wherever it appears.
+ */
 function world(key: string, i18n: string, type: any, defaultValue: unknown, extra: object = {}) {
   game.settings.register(MODULE_ID, key, {
     name: L(`${i18n}.Name`),
     hint: L(`${i18n}.Hint`),
     scope: "world",
-    config: true,
+    config: false,
     type,
     default: defaultValue,
     ...extra,
@@ -42,13 +60,42 @@ function general(key: string, i18n: string, type: any, defaultValue: unknown) {
     name: `NOODLRHOOKS.General.${i18n}.Name`,
     hint: `NOODLRHOOKS.General.${i18n}.Hint`,
     scope: "world",
-    config: true,
+    config: false,
     type,
     default: defaultValue,
   });
 }
 
+/**
+ * The three submenu buttons, in the order the pages are declared.
+ *
+ * `restricted: true` throughout: these are world settings and only a GM can write one, so offering a
+ * player a window whose every control fails is worse than not offering it.
+ */
+function registerMenus(): void {
+  // Wrapped, and deliberately not fatal. `registerMenu` throws unless the type it is handed is a real
+  // ApplicationV2 subclass, so building those classes is the one part of settings registration that
+  // depends on Foundry's application namespace being the shape we expect. The rules are the product
+  // and the windows are the convenience: losing the windows must never take the rules with them.
+  try {
+    for (const page of PAGES) {
+      game.settings.registerMenu(MODULE_ID, `page.${page.id}`, {
+        name: page.title,
+        label: page.title,
+        hint: page.blurb,
+        icon: page.icon,
+        type: menuShimFor(page.id),
+        restricted: true,
+      });
+    }
+  } catch (err) {
+    log("could not register the settings windows; the rules are unaffected:", err);
+  }
+}
+
 export function registerCombatSettings(): void {
+  registerMenus();
+
   world(COMBAT_SETTINGS.automation, "Automation", String, "full", {
     choices: {
       full: L("Automation.Full"),
@@ -89,7 +136,7 @@ export function registerCombatSettings(): void {
     name: "NOODLRHOOKS.Capabilities.Name",
     hint: "NOODLRHOOKS.Capabilities.Hint",
     scope: "world",
-    config: true,
+    config: false,
     type: Boolean,
     default: false,
   });

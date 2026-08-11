@@ -38,6 +38,7 @@
 
 import { log } from "../constants";
 import { isPrimaryGM } from "../util/gm";
+import { moduleActive } from "../util/modules";
 import { isForcedMovementEnabled } from "../settings";
 import { readHp } from "../core/tracker";
 import {
@@ -275,11 +276,10 @@ function chooseRule(rules: ForcedRule[]): ForcedRule | null {
  * here changes.
  */
 function alreadyAutomated(item: any, activity: any): string | null {
-  const modules: any = (game as any).modules;
-  if (activity?.flags?.cat?.macros && modules?.get?.("chris-premades")?.active) {
+  if (activity?.flags?.cat?.macros && moduleActive("chris-premades")) {
     return "Chris's Premades";
   }
-  if (item?.flags?.["gambits-premades"]?.gpsUuid && modules?.get?.("gambits-premades")?.active) {
+  if (item?.flags?.["gambits-premades"]?.gpsUuid && moduleActive("gambits-premades")) {
     return "Gambit's Premades";
   }
   return null;
@@ -648,6 +648,6 @@ export function surveyForced(): unknown {
     grappledBy: actor ? (grapplerUuidOf(actor) ?? "— nobody —") : "—",
     undoableDisplacements: pendingUndoCount(),
     appliedThisFight: applied.size,
-    midiPresent: Boolean((game as any).modules?.get?.("midi-qol")?.active),
+    midiPresent: moduleActive("midi-qol"),
   };
 }

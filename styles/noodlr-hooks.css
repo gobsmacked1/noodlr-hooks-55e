@@ -181,3 +181,207 @@
   line-height: 1.7;
   white-space: nowrap;
 }
+
+/* ---- The rules settings pages --------------------------------------------------------------- */
+
+.noodlr-rules-config .window-content {
+  overflow: auto;
+}
+
+/* Same reason as the capability sheet: a GM reading a hint about another module's setting will want
+   to copy the setting's name out of it. */
+.noodlr-rules-config .window-content,
+.noodlr-rules-config .window-content * {
+  user-select: text;
+}
+
+.noodlr-rules__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow: auto;
+}
+
+.noodlr-rules__blurb {
+  margin: 0;
+  font-size: var(--font-size-13, 0.85rem);
+  opacity: 0.8;
+}
+
+/* Notices sit above everything and are meant to be read once and then ignored, so they are quiet
+   until one is a warning. */
+.noodlr-notices {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.noodlr-notice {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.4em 0.6em;
+  border-left: 3px solid rgba(90, 110, 140, 0.7);
+  background: rgba(90, 110, 140, 0.1);
+  font-size: var(--font-size-13, 0.85rem);
+}
+
+.noodlr-notice.warn {
+  border-left-color: rgba(180, 130, 40, 0.85);
+  background: rgba(180, 130, 40, 0.13);
+}
+
+.noodlr-notice p {
+  margin: 0.15em 0 0;
+  opacity: 0.85;
+}
+
+.noodlr-presets summary {
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.noodlr-presets__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.noodlr-preset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2em;
+  width: auto;
+  height: auto;
+  padding: 0.5em 0.6em;
+  text-align: left;
+  line-height: 1.35;
+}
+
+.noodlr-preset.active {
+  border-color: rgba(60, 120, 60, 0.9);
+}
+
+.noodlr-preset__name {
+  font-weight: bold;
+}
+
+.noodlr-preset__blurb {
+  font-size: var(--font-size-11, 0.72rem);
+  opacity: 0.8;
+  white-space: normal;
+}
+
+.noodlr-rules__tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
+}
+
+.noodlr-rules__tabs button {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 0.2em 0.9em;
+  border-bottom: 2px solid transparent;
+  border-radius: 3px 3px 0 0;
+  background: none;
+}
+
+.noodlr-rules__tabs button.active {
+  border-bottom-color: var(--color-text-hyperlink, #7a4b9c);
+  font-weight: bold;
+}
+
+.noodlr-rules__section h3 {
+  margin: 0 0 0.2em;
+}
+
+/* Three columns: label and badge, control, then the hint spanning both. The control column is fixed
+   so checkboxes line up down the page regardless of how long a label runs. */
+.noodlr-rule {
+  display: grid;
+  grid-template-columns: 1fr 8rem;
+  align-items: center;
+  gap: 0.2rem 0.6rem;
+  padding: 0.4em 0;
+  border-bottom: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.12));
+}
+
+.noodlr-rule__head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4em;
+}
+
+.noodlr-rule__head label,
+.noodlr-rule__label {
+  font-weight: bold;
+}
+
+.noodlr-rule__control {
+  justify-self: end;
+}
+
+.noodlr-rule__control input[type="checkbox"] {
+  margin: 0;
+}
+
+.noodlr-rule__control input[type="number"],
+.noodlr-rule__control select {
+  width: 100%;
+}
+
+.noodlr-rule__always {
+  font-size: var(--font-size-11, 0.72rem);
+  opacity: 0.6;
+  text-transform: lowercase;
+}
+
+.noodlr-rule__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--font-size-12, 0.78rem);
+  opacity: 0.75;
+}
+
+/* The ownership badge. `owned` is the one that matters — it is the answer to "the switch is on and
+   nothing is happening" — so it is the only one that carries colour. */
+.noodlr-badge.owned {
+  border-color: rgba(180, 130, 40, 0.8);
+  background: rgba(180, 130, 40, 0.15);
+}
+
+.noodlr-badge.off,
+.noodlr-badge.shared,
+.noodlr-badge.system,
+.noodlr-badge.planned {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.noodlr-rules__notes {
+  margin-top: 0.4em;
+}
+
+.noodlr-rules__notes summary {
+  cursor: pointer;
+  font-size: var(--font-size-12, 0.78rem);
+  opacity: 0.7;
+}
+
+.noodlr-rules__notes .noodlr-rule.note {
+  grid-template-columns: 1fr;
+  border-bottom: none;
+  padding: 0.3em 0 0.3em 0.6em;
+  border-left: 2px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.15));
+  opacity: 0.85;
+}
+
+.noodlr-rule__today {
+  font-style: italic;
+}

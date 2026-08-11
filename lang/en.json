@@ -169,5 +169,28 @@
   "NOODLRHOOKS.General.Jump.Name": "Hold a leap to the distance it could clear",
   "NOODLRHOOKS.DebugLogging.Hint": "Write detailed diagnostics to this browser's console: what each creature could read off its sheet, why a move was refused, which rule fired. Affects only your own client. Leave off unless you are chasing a problem.",
   "NOODLRHOOKS.DebugLogging.Name": "Verbose console logging",
-  "NOODLRHOOKS.Narrator": "Noodlr Hooks"
+  "NOODLRHOOKS.Narrator": "Noodlr Hooks",
+
+  "NOODLRHOOKS.Pages.House.Title": "House Rules",
+  "NOODLRHOOKS.Pages.Mechanics.Title": "Mechanics",
+  "NOODLRHOOKS.Pages.Combat.Title": "Combat",
+
+  "NOODLRHOOKS.Rules.Title": "Rules",
+  "NOODLRHOOKS.Rules.OpenFailed": "This Foundry version could not open the settings window. The settings themselves are unaffected.",
+  "NOODLRHOOKS.Rules.AlwaysOn": "always on",
+  "NOODLRHOOKS.Rules.NotBuilt": "{count} more rules in this area — what covers them today",
+  "NOODLRHOOKS.Rules.Today": "Today:",
+  "NOODLRHOOKS.Rules.State.live": "on",
+  "NOODLRHOOKS.Rules.State.planned": "not built",
+  "NOODLRHOOKS.Rules.State.system": "the system does this",
+  "NOODLRHOOKS.Rules.State.external": "another module",
+  "NOODLRHOOKS.Rules.Badge.Owned": "{module} has this",
+  "NOODLRHOOKS.Rules.Badge.Shared": "shared",
+  "NOODLRHOOKS.Rules.Badge.System": "the system does this",
+  "NOODLRHOOKS.Rules.Badge.Unenforced": "nobody enforces this",
+  "NOODLRHOOKS.Rules.Badge.UnenforcedTip": "This switch is off and nothing else in your world covers the rule, so it is not enforced at your table. That may be exactly what you want.",
+  "NOODLRHOOKS.Rules.Preset.Summary": "Start from a profile",
+  "NOODLRHOOKS.Rules.Preset.Note": "A profile just writes these settings; nothing is locked afterwards and every switch stays yours to change. The ticked one, if any, is the profile your current settings happen to match.",
+  "NOODLRHOOKS.Rules.Preset.Confirm": "Apply this profile?",
+  "NOODLRHOOKS.Rules.Preset.Applied": "Applied \"{name}\" — {count} setting(s) changed."
 }

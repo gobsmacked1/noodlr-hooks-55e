@@ -5,6 +5,7 @@
 // and damage-at-0 failures live only as journal prose. This file is the rule table; the engine is
 // `rules/dying.ts`.
 
+import { midiConfig, midiOn } from "../util/modules";
 import { isDnd5e } from "./dnd5e-rewards";
 
 /** Characters, player-owned creatures, and (when opted in) NPCs flagged `traits.important`. */
@@ -72,20 +73,11 @@ export function deathFailuresFromDamage(critical: boolean): number {
  */
 export function midiOwnsDying(): boolean {
   if (!isDnd5e()) return false;
-  try {
-    if (!(game as any).modules?.get?.("midi-qol")?.active) return false;
-    const MidiQOL = (globalThis as any).MidiQOL;
-    const settings =
-      (typeof MidiQOL?.configSettings === "function" ? MidiQOL.configSettings() : null) ??
-      game.settings.get("midi-qol", "ConfigSettings");
-    if (!settings) return false;
-    const on = (v: unknown) => Boolean(v && v !== "none");
-    return (
-      on(settings.addDead) ||
-      on(settings.midiDeadCondition) ||
-      on(settings.midiUnconsciousCondition)
-    );
-  } catch {
-    return false;
-  }
+  const settings = midiConfig();
+  if (!settings) return false;
+  return (
+    midiOn(settings.addDead) ||
+    midiOn(settings.midiDeadCondition) ||
+    midiOn(settings.midiUnconsciousCondition)
+  );
 }

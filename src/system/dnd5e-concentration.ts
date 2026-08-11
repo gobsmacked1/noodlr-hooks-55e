@@ -28,6 +28,7 @@
 //
 // This file is the rule table. The hook engine that uses it lives in `rules/concentration.ts`.
 
+import { midiConfig, midiOn } from "../util/modules";
 import { isDnd5e } from "./dnd5e-rewards";
 import { hasStatus } from "./dnd5e-conditions";
 import { rulesVersion } from "./dnd5e-stealth";
@@ -154,18 +155,7 @@ export function breaksConcentration(actor: any): "dead" | "incapacitated" | "zer
  */
 export function midiOwnsConcentration(): boolean {
   if (!isDnd5e()) return false;
-  try {
-    if (!(game as any).modules?.get?.("midi-qol")?.active) return false;
-    const MidiQOL = (globalThis as any).MidiQOL;
-    const settings =
-      (typeof MidiQOL?.configSettings === "function" ? MidiQOL.configSettings() : null) ??
-      game.settings.get("midi-qol", "ConfigSettings");
-    if (!settings) return false;
-    const mode = settings.doConcentrationCheck;
-    return Boolean(mode && mode !== "none");
-  } catch {
-    return false;
-  }
+  return midiOn(midiConfig()?.doConcentrationCheck);
 }
 
 /** The system's own master switch. With it off, there is no concentration to maintain. */

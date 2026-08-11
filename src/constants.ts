@@ -81,12 +81,16 @@ export const SETTINGS = {
 } as const;
 
 /**
- * Every setting renders in Foundry's own module settings list.
+ * Rule settings render in this module's own windows, not Foundry's list.
  *
- * `noodlr` builds bespoke ApplicationV2 windows because it has some sixty settings and a single
- * scrolling form had stopped being navigable. There are sixteen here and all but three are
- * checkboxes, so the native list is both adequate and what a GM installing a community module
- * expects to find. No templates, no partials, no window.
+ * This used to say the opposite, and the reasoning was sound as far as it went: sixteen checkboxes fit
+ * a native list, and a GM installing a community module expects to find them there. What it missed is
+ * that a native row can only show a setting's value, and several of these rules stand aside when
+ * another module owns them — so the checkbox reads on while nothing happens, which is indistinguishable
+ * from the module being broken. `apps/rules-config.ts` exists to show ownership beside the switch.
+ *
+ * `debugLogging` is the exception and stays in the native list: client-scoped, not a rule, and it
+ * should be findable without knowing which of three windows to open.
  */
 
 /** Small helper for consistent, greppable console output. */

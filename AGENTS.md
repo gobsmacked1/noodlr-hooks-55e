@@ -641,6 +641,63 @@ visibility-aware Blinded already, and ships cover and range logic of its own tha
 midi is present. The stand-aside that exists for the condition matrix may cover part of this queue outright,
 and dual enablement is the silent-race failure documented below — measure before writing.
 
+## A silent stand-aside is a bug report waiting to happen (2026-08-11)
+
+Every stand-aside in this module was written as a correctness measure and each one is right. Together
+they created a failure nobody had named: **the setting still reads ON while nothing happens.**
+`ac5eOwnsConditions()` switches the entire condition layer off, `midiOwnsConcentration()` hands
+concentration to midi, Gambit's takes opportunity attacks — and Foundry's native settings list can only
+show a value, never who is acting on it. At the table that is indistinguishable from the module being
+broken, and it is the single most likely thing to be reported as a bug in this repo.
+
+- **`src/integration/ownership.ts` is the one place that answers "who is enforcing this right now",
+ and it must READ the enforcement predicates rather than restate their conditions.** A resolver with
+ its own copy of "is AC5e on" would drift, and it would drift into telling the GM the opposite of the
+ truth — worse than saying nothing. `ownershipOf(id)` returns `{owner: us|other|system|nobody, by,
+ note, enabled, covered}`; `enabled` and `owner` are deliberately separate, because "on and overruled"
+ is the whole point.
+- **`src/util/modules.ts` is the only place that reads another module's state.** Three copies of the
+ midi config lookup was what forced it. The lookup is not obvious: prefer `MidiQOL.configSettings()`
+ over the stored `ConfigSettings` setting, because midi mutates the live object and a GM who changed a
+ switch without reloading has a stale stored value; fall back to the setting because the global does
+ not exist until midi's ready hook. Nothing there throws — an unreadable module means "I could not
+ tell", which every caller reads as "nobody else owns this, keep enforcing". Failing the other way
+ would switch our own rules off because a settings object had an unexpected key. `midiOn()` exists
+ because almost every mechanical midi setting is a string enum whose off position is `"none"`, so
+ plain truthiness reports off as on.
+- **Advisories are separate from ownership, and they are the more useful half.** `advisories()` reports
+ cross-cutting conditions that belong to no rule area: midi's `checkRange` and `wallsBlockRange` are
+ live at stock settings (read through `checkMechanic`, which ignores midi's Optional Rules master
+ switch) and cancel an item use with only a log line. That is the first thing to check when something
+ of ours "does not fire". `conflicts()` is for suspicions rather than certainties — wm5e's possible
+ double Push — because standing aside needs proof and warning does not.
+- **Three windows, not one, and not the native list** (`src/apps/rules-config.ts` + `pages.ts` +
+ `presets.ts`). This reverses the note in `constants.ts` that said sixteen checkboxes fit Foundry's own
+ list; that reasoning was sound about length and missed ownership entirely. `debugLogging` stays native
+ on purpose: client-scoped, not a rule, and it should be findable without knowing which window to open.
+- **`pages.ts` is the roadmap and the settings surface in one file, deliberately.** Every row carries a
+ `state`: `live` (a real setting a real rule reads), `planned` (nobody has built it — no setting is
+ registered, and the row says who covers it today), or `system` (dnd5e already does it). The `system`
+ rows exist because their absence reads as a gap: a GM comparing us against midi's list needs to see
+ "damage immunities: the system already does this" rather than nothing. Planned rows render collapsed
+ under "not built yet" so the page stays a settings page. **Promoting a rule is: change `state`, add
+ `setting`, register it** — which means a rule cannot ship without somebody deciding where its switch
+ lives, and a switch cannot appear without a rule behind it.
+- **Two facts about `registerMenu`, both read from core source rather than assumed, and both fatal if
+ guessed.** `client/helpers/client-settings.mjs:189` **throws** unless `type.prototype` is a
+ `FormApplication` or an `ApplicationV2` — a duck-typed object with a `render()` method is rejected, so
+ the obvious lazy shim does not work. And `client/applications/settings/config.mjs:202` does
+ `new menu.type()` with **no arguments**, so the page cannot be passed as an option and must be baked
+ into a subclass per page. Each subclass needs its own `id`, or all three pages share one window.
+ Registration is wrapped in try/catch: the rules are the product and the windows are the convenience.
+- Templates are fetched by path at render time, so a missing one is a console 404 rather than a build
+ error. `scripts/package.ps1` asserts every `.hbs` by name; add to that list when adding a template.
+- Presets write settings and hold no state of their own; `currentPreset()` reports whichever profile the
+ world happens to match. **"Alongside Midi QoL" sets dying and concentration off explicitly even though
+ the runtime stand-asides already do it**, because making that split visible is the entire point of the
+ exercise.
+- Diagnostics: `api.surveyOwnership()`, `api.openRules("house"|"mechanics"|"combat")`.
+
 ## Hard-won invariants
 
 - **A capability read that comes back empty is a bug until proven otherwise.** Found in the first play
@@ -1026,10 +1083,18 @@ and dual enablement is the silent-race failure documented below — measure befo
  `stealth.ts` banked a hidden state on ANY `ste` roll appearing in chat, with no prerequisite and no expiry,
  and the flag persisted in the world save. **The bug was inherited:** Stealthy's README says outright
  *"Rolling a Stealth skill check will apply the Hidden effect"*, Perceptive does the same on
- `flags.dnd5e.roll.skillId === "ste"`, and neither clears on an attack. They survive it because midi's
- `removeHiddenInvis` (default ON, `Workflow.ts:2239`, `utils.ts:4389`) toggles the `hidden`/`hiding`
- statuses off after every attack roll — and it had never heard of `flags.noodlr.stealth`. Only Chris's
- Premades gates on the Hide action. Full comparison: `_research\_audit\stealth-modules-comparison.md`;
+ `flags.dnd5e.roll.skillId === "ste"`, and neither clears on an attack. They survive it *on some tables*
+ because midi's `removeHiddenInvis` toggles the `hidden`/`hiding` statuses off after every attack roll —
+ and it had never heard of `flags.noodlr.stealth`. Only Chris's Premades gates on the Hide action.
+ - **Correction (2026-08-10, re-read from source): `removeHiddenInvis` does NOT run on a stock midi
+ install**, so this note previously overstated the safety net. The field defaults `true`
+ (`settings.ts:290`) but is read through `checkRule()` (`Workflow.ts:2110-2111`, `:8431`), which gates on
+ `optionalRulesEnabled` — and that defaults **false** (`settings.ts:213`). A GM reading midi's config
+ panel sees `true` and concludes the opposite of the truth. Consequence for us: with midi at defaults
+ **nothing in the world clears a hidden state except our own reveal**, so the `dnd5e.rollAttack` listener
+ in `stealth.ts` is more load-bearing than the note implied, and the status-presence rule below is the
+ only structural guard. It also means the inherited bug is live on stock installs of Stealthy and
+ Perceptive rather than merely latent. Full comparison: `_research\_audit\stealth-modules-comparison.md`;
  rules audit: `_research\_audit\stealth-hide-raw.md`.
  - **`hidingState()` must not read our banked flag unless the `hiding` status is present.** That single
  ordering is what makes a stale flag structurally incapable of hiding anyone, and it means every way of
@@ -1450,8 +1515,8 @@ and dual enablement is the silent-race failure documented below — measure befo
 
 ## Configuration, not code: what to tell a GM
 
-Three reported problems were world configuration rather than module bugs. Recorded because they will be
-reported again.
+Problems reported as module bugs that were world configuration, or another module's defaults, instead.
+Recorded because they will be reported again.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —
@@ -1475,6 +1540,49 @@ reported again.
   positive HP and is never released. Both `AutoRemoveTargets` and `TargetConfirmation` are **client**-scoped,
   so the GM's settings never reach the player's browser. Per-beam retargeting has been an open dnd5e feature
   request since 2021 ([#1067](https://github.com/foundryvtt/dnd5e/issues/1067), closed unimplemented).
+- **An item use that does nothing at all, with midi installed, is probably midi's range check** (audited
+  2026-08-10; full inventory `_research\_audit\midi-automation-settings.md`). Midi ships with nearly every
+  mechanical automation **off** — `autoCheckHit`, `autoCheckSaves`, `autoApplyDamage`, `autoItemEffects`,
+  `autoTarget`, `consumeResource` and even `addChatDamageButtons` all default to `none`/`off` — so a stock
+  install formats chat cards and runs a workflow without determining hits, resolving saves, applying damage
+  or spending resources. **Two rules are the exception and they are live out of the box:**
+  `optionalRules.checkRange` defaults `"longFail"` and `wallsBlockRange` defaults `"center"`
+  (`settings.ts:274`, `:297`), and both are read through `checkMechanic()` (`Workflow.ts:1995`,
+  `MidiActivityMixin.ts:1741-1742`), which — unlike `checkRule()` — **ignores `optionalRulesEnabled`
+  entirely** (`settings.ts:303-306`). An out-of-range or wall-blocked use is therefore cancelled with only
+  a log line, which at the table is indistinguishable from our automation failing to fire. Check this before
+  debugging anything of ours that "just doesn't happen".
+  - Also worth knowing when reading that config panel: reaction *prompting* (`doReactions`,
+    `gmDoReactions`) defaults to `"all"` while `enforceReactions` and `enforceBonusActions` default to
+    `"none"` and exclude NPCs even at `"character"`. A table seeing reaction dialogs reasonably concludes
+    reactions are enforced. They are not, which is why our own ledger exists.
+  - Midi's `concentrationAutomation` is deprecated and **force-set false** (`settings.ts:1024-1033`), which
+    corroborates the stand-aside reasoning below but does **not** weaken it: that flag was midi's own
+    tracking implementation, now handed to dnd5e. The two settings our stand-aside actually turns on are
+    untouched and still live — `doConcentrationCheck: "chat"` (`settings.ts:172`) and `removeConcentration:
+    true` (`:225`), the latter read by midi's `dnd5e.rollConcentration` listener at `Hooks.ts:1924`/`:1947`.
+- **Imported items whose riders quietly do nothing, and why DDB Importer must never be uninstalled**
+  (audited 2026-08-10, source read; full report `_research\_audit\ddb-importer-dependencies.md`). DDB
+  Importer declares **zero** module dependencies — `relationships` names only the `dnd5e` system — so
+  Foundry never warns, and its Midi/DAE recommendations are docs-only. What it actually does is stamp other
+  modules' namespaces into the documents it generates: `flags.dae.transfer`/`stackable` and
+  `flags.midi-qol.forceCEOff` on **every** effect, DAE-only change keys (`macro.execute`,
+  `macro.itemMacro`, `macro.StatusEffect`, `macro.tokenMagic`, `flags.dae.specialDuration`), `ATL.light.*`,
+  and Midi-only keys — chiefly `flags.midi-qol.OverTime`, whose *value* is Midi's own comma-separated
+  mini-language (`turn=end,damageRoll=2d6,saveDC=13,saveAbility=con,saveRemove=true`) and the entire
+  encoding for recurring damage and repeat saves. An unmatched change key is stored and ignored by
+  `ActiveEffect#apply`, so the item still rolls attack and damage while the per-turn poison, the fear, the
+  torchlight and the macro simply never happen, **with nothing in the console saying why.** Expect this
+  reported as our bug. The whole layer is one boolean (`*-add-midi-effects`, default off for characters and
+  on for munching) whose "recommended" value is computed as `midiQolInstalled && daeInstalled`.
+  - **Do not tell a GM to uninstall DDB Importer after importing.** With `no-item-macros` at its default
+    the emitted change value is `function.DDBImporter.lib.DDBMacros.macroFunction.spell("x.js")`, so the
+    module supplies the function body at runtime and removing it breaks items already on sheets.
+  - **`addStatusEffectChange()` is the pattern we should be copying**, and it is principle #0 implemented
+    at the authoring end rather than the reading end: with DAE present it emits `macro.StatusEffect`, and
+    without it writes the **core-native** encoding instead — the `statuses[]` array, a
+    `&Reference[condition]` enricher, and `flags.dnd5e.<condition>Level` for exhaustion. That is also
+    independent confirmation that our own condition primitive is on the right encoding.
 
 ## Open items carried over from noodlr
 
@@ -1493,10 +1601,13 @@ reported again.
 - **UNVERIFIED CONFLICT — `wm5e` (Weapon Mastery 5e) versus our Push mastery.** Active in the user's world
   at 14.533.6, a version scheme matching AC5e's, so probably the same author. `system/dnd5e-forced-movement.ts`
   implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`) and
-  `rules/forced.ts::alreadyAutomated()` stands aside only for Chris's Premades and Gambit's — it has never
-  heard of wm5e. If wm5e moves the target, a Pike or Warhammer hit pushes twice. **Not confirmed:** wm5e is
-  not in `C:\Project\_research` and none of its code has been read. Clone it before either adding a
-  stand-aside or dismissing the risk.
+`rules/forced.ts::alreadyAutomated()` stands aside only for Chris's Premades and Gambit's — it has never
+heard of wm5e. If wm5e moves the target, a Pike or Warhammer hit pushes twice. **Not confirmed:** wm5e is
+not in `C:\Project\_research` and none of its code has been read. Clone it before either adding a
+stand-aside or dismissing the risk. As of 2026-08-11 this is at least **visible**: `conflicts()` in
+`integration/ownership.ts` warns about it in the settings windows whenever wm5e is active and our forced
+movement is on, and says outright that it is unverified. A warning is the honest response to a
+suspicion — a stand-aside would need proof, and guessing wrong there deletes a rule that works.
 - **`attacksPerAction` probably misses Thirsting Blade** — inference, not observed, since the census's only
   warlock took Pact of the Chain. `economy/ledger.ts` reads `extra-attack`/`two-extra-attacks`/
   `three-extra-attacks`, right for fighters, rangers, paladins, barbarians and monks, but a Pact of the

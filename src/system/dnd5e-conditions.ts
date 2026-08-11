@@ -8,6 +8,7 @@
 //
 // This file is the rule table. The hook engine that applies it lives in `rules/conditions.ts`.
 
+import { moduleActive, moduleSetting } from "../util/modules";
 import { isDnd5e } from "./dnd5e-rewards";
 
 /** Statuses that grant advantage on attack rolls against the creature that has them. */
@@ -164,12 +165,7 @@ export function critOnHitWithin5(target: any): string | null {
 const AC5E = "automated-conditions-5e";
 
 function ac5eSetting(key: string): unknown {
-  try {
-    if (!(game as any).modules?.get?.(AC5E)?.active) return undefined;
-    return game.settings.get(AC5E, key);
-  } catch {
-    return undefined;
-  }
+  return moduleActive(AC5E) ? moduleSetting(AC5E, key) : undefined;
 }
 
 /**

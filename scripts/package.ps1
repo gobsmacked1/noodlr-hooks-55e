@@ -55,7 +55,8 @@ try {
     "styles/noodlr-hooks.css",
     # Fetched by path at render time, so a missing template is a 404 in the console rather than a
     # build error. Asserted here for the same reason noodlr asserts its own partials.
-    "templates/capability-sheet.hbs"
+    "templates/capability-sheet.hbs",
+    "templates/rules-config.hbs"
   )
   foreach ($r in $required) {
     if (-not ($zip.Entries | Where-Object { $_.FullName -like "$r*" })) { Fail "zip is missing $r" }

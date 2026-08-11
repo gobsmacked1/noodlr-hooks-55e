@@ -29,6 +29,7 @@
 import { log } from "../constants";
 import { hasReaction, spend } from "./economy/ledger";
 import { isPrimaryGM } from "../util/gm";
+import { moduleActive, moduleSetting } from "../util/modules";
 import { narrator } from "../util/speaker";
 import { readActions, type CreatureAction } from "../tactics/actions";
 import { readHp } from "../core/tracker";
@@ -177,14 +178,9 @@ function canReact(actor: any): boolean {
  * rather than a dependency: if it is absent, nothing here changes.
  */
 function opportunityTaken(): boolean {
-  const gps: any = (game as any).modules?.get?.("gambits-premades");
-  if (!gps?.active) return false;
-  try {
-    return game.settings.get("gambits-premades", "Opportunity Attack") !== false;
-  } catch {
-    // Present but unreadable: defer, because double attacks are worse than none.
-    return true;
-  }
+  if (!moduleActive("gambits-premades")) return false;
+  // Unreadable (undefined) defers, because two attacks per departure is worse than none.
+  return moduleSetting("gambits-premades", "Opportunity Attack") !== false;
 }
 
 function distance(a: any, b: any): number {

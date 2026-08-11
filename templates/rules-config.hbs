@@ -1,0 +1,112 @@
+{{!--
+  One rules page: notices, presets, then the controls.
+
+  Notices come first on purpose. They describe conditions that make this module look broken — midi
+  cancelling an item use with only a log line is the specimen — and a GM who scrolls past the controls
+  to find them has already formed the wrong theory about what is wrong.
+--}}
+<div class="noodlr-rules__body">
+
+  {{#if notices}}
+    <ul class="noodlr-notices">
+      {{#each notices}}
+        <li class="noodlr-notice {{this.level}}">
+          <i class="fa-solid {{#if this.isWarn}}fa-triangle-exclamation{{else}}fa-circle-info{{/if}}"></i>
+          <div>
+            <strong>{{this.title}}</strong>
+            <p>{{this.detail}}</p>
+          </div>
+        </li>
+      {{/each}}
+    </ul>
+  {{/if}}
+
+  <p class="noodlr-rules__blurb">{{blurb}}</p>
+
+  <details class="noodlr-presets">
+    <summary>{{localize "NOODLRHOOKS.Rules.Preset.Summary"}}</summary>
+    <p class="notes">{{localize "NOODLRHOOKS.Rules.Preset.Note"}}</p>
+    <div class="noodlr-presets__grid">
+      {{#each presets}}
+        <button type="button" class="noodlr-preset {{#if this.active}}active{{/if}}"
+                data-action="preset" data-preset="{{this.id}}">
+          <span class="noodlr-preset__name">
+            {{this.label}}
+            {{#if this.active}}<i class="fa-solid fa-check"></i>{{/if}}
+          </span>
+          <span class="noodlr-preset__blurb">{{this.blurb}}</span>
+        </button>
+      {{/each}}
+    </div>
+  </details>
+
+  {{#if multiTab}}
+    <nav class="noodlr-rules__tabs">
+      {{#each tabs}}
+        <button type="button" class="{{#if this.active}}active{{/if}}" data-action="tab" data-tab="{{this.id}}">
+          {{this.label}}
+        </button>
+      {{/each}}
+    </nav>
+  {{/if}}
+
+  {{#each sections}}
+    <section class="noodlr-rules__section">
+      <h3>{{this.title}}</h3>
+      {{#if this.blurb}}<p class="notes">{{this.blurb}}</p>{{/if}}
+
+      {{#each this.rows}}
+        <div class="noodlr-rule" data-row="{{this.id}}">
+          <div class="noodlr-rule__head">
+            <label for="noodlr-{{this.id}}">{{this.label}}</label>
+            {{#if this.badge}}
+              <span class="noodlr-badge {{this.badge.tone}}" data-tooltip="{{this.badge.tip}}">{{this.badge.text}}</span>
+            {{/if}}
+          </div>
+
+          <div class="noodlr-rule__control">
+            {{#if this.isBool}}
+              <input type="checkbox" id="noodlr-{{this.id}}" data-setting="{{this.setting}}"
+                     {{#if this.checked}}checked{{/if}} />
+            {{else if this.isNumber}}
+              <input type="number" id="noodlr-{{this.id}}" data-setting="{{this.setting}}"
+                     value="{{this.number}}"
+                     {{#if this.range}}min="{{this.range.min}}" max="{{this.range.max}}" step="{{this.range.step}}"{{/if}} />
+            {{else if this.isSelect}}
+              <select id="noodlr-{{this.id}}" data-setting="{{this.setting}}">
+                {{#each this.options}}
+                  <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
+                {{/each}}
+              </select>
+            {{else}}
+              {{!-- Live, but with nothing to configure: always on by design. --}}
+              <span class="noodlr-rule__always">{{localize "NOODLRHOOKS.Rules.AlwaysOn"}}</span>
+            {{/if}}
+          </div>
+
+          <p class="notes noodlr-rule__hint">{{this.hint}}</p>
+        </div>
+      {{/each}}
+
+      {{#if this.notes}}
+        <details class="noodlr-rules__notes">
+          <summary>{{localize "NOODLRHOOKS.Rules.NotBuilt" count=this.notes.length}}</summary>
+          {{#each this.notes}}
+            <div class="noodlr-rule note state-{{this.state}}">
+              <div class="noodlr-rule__head">
+                <span class="noodlr-rule__label">{{this.label}}</span>
+                <span class="noodlr-badge {{this.state}}">{{this.stateLabel}}</span>
+              </div>
+              <p class="notes">{{this.hint}}</p>
+              {{#if this.today}}
+                <p class="notes noodlr-rule__today">
+                  <strong>{{localize "NOODLRHOOKS.Rules.Today"}}</strong> {{this.today}}
+                </p>
+              {{/if}}
+            </div>
+          {{/each}}
+        </details>
+      {{/if}}
+    </section>
+  {{/each}}
+</div>

@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.2.0
+
+Three settings windows, three new rules, and a way for a creature's own abilities to be read off its
+sheet instead of hand-coded here.
+
+### Settings you can actually read
+
+The module's rules used to sit as a flat list of checkboxes in Foundry's own settings, which could
+show you a value but never tell you whether anything was acting on it. That was a real problem: when
+Automated Conditions 5e is installed it takes over conditions entirely, and midi-qol takes over
+concentration and dying, so a switch could read ON while nothing happened.
+
+There are now three windows — **House Rules**, **Mechanics** and **Combat** — and every rule in them
+says who is enforcing it right now: this module, another module, the game system, or nobody. Four
+presets set the whole lot in one click: narration only, rules assistant, full enforcement, or
+alongside Midi QoL. Rules that are not built yet are listed too, folded away, saying who covers them
+in the meantime, so you can tell the difference between a gap and a bug.
+
+Two cross-cutting warnings appear when they apply. Midi-qol's range and wall checks are live at stock
+settings and cancel an item use with nothing but a log line, which looks exactly like this module
+failing to fire — the windows now say so. And if Weapon Mastery 5e is running alongside our forced
+movement, you are warned that a Pike or Warhammer hit may push twice.
+
+### Creature abilities are compiled from the sheet
+
+Hand-coding the rules was abandoned: the finished survey found six thousand distinct engines needed
+to cover thirty-six thousand rules, and most of the queue turned out to be facts about individual
+creatures rather than rules of the game. Instead, with **Noodlr** installed and the switch turned on,
+each creature's own ability text is read once when a scene loads and turned into something the module
+can execute; deterministic code then runs it every turn, with no AI in the fight itself. Twenty
+goblins sharing one trait cost one reading, and the result is cached, so a scene is usually free the
+second time.
+
+Nothing is required. With Noodlr absent, or the switch off, no abilities are compiled and the module
+behaves exactly as it did before. Anything the compiler is unsure of is dropped rather than guessed
+at, and a **Creature Abilities** window lets you read, correct, lock or reject anything it produced.
+
+### New rules
+
+- **Jumping.** Long jumps and high jumps are measured and capped, with the run-up accounted for. Also
+  fixes an interaction that quietly collapsed a whole turn's movement to a few feet when the jump
+  movement action was selected.
+- **Influence.** The 2024 social action, with Friendly, Indifferent and Hostile attitudes, the right
+  skill on the right sheet, the DC the rules actually specify, and the day-long lockout after a
+  refusal. Whether the creature is willing, unwilling or hesitant is always asked, never guessed.
+- **Administer First Aid.** A button for the stabilisation nothing in the system offered one for.
+
 ## 0.1.0
 
 First release. Everything here was previously part of [Noodlr](https://github.com/gobsmacked1/noodlr)

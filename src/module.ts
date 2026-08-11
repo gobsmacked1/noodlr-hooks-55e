@@ -47,6 +47,8 @@ import { announceJump, surveyJump } from "./rules/jump";
 import { clearInfluenceLocks, influenceTargets, surveyInfluence } from "./rules/influence";
 import type { Stance } from "./rules/influence";
 import { surveyGeneralRules } from "./rules/general";
+import { advisories, allOwnership, conflicts } from "./integration/ownership";
+import { openRulesConfig } from "./apps/rules-config";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
 import { registerEconomyHooks } from "./rules/economy/enforce";
 import { registerMovementCap, surveyMovement } from "./rules/economy/speed";
@@ -109,6 +111,8 @@ export interface NoodlrHooksApi {
   surveyScene(): unknown;
   compileScene(): Promise<unknown>;
   openCapabilities(actor?: unknown): void;
+  openRules(page?: string): void;
+  surveyOwnership(): unknown;
   flattenElevation(): Promise<number>;
   restoreElevation(): Promise<number>;
 }
@@ -223,6 +227,19 @@ const api: NoodlrHooksApi = {
   compileScene: () => collectScene(),
   /** The review window for one creature. Defaults to the selected token, or your own character. */
   openCapabilities: (actor?: unknown) => openCapabilitySheet(actor),
+  /** The settings windows: "house", "mechanics" or "combat". */
+  openRules: (page?: string) => openRulesConfig(page),
+  /**
+   * Who is enforcing each rule right now, plus every advisory and suspected conflict.
+   *
+   * The console form of what the settings windows show. Reach for it first when a switch is on and
+   * nothing appears to be happening — a stand-aside is silent by nature, and this is where it speaks.
+   */
+  surveyOwnership: () => ({
+    rules: allOwnership(),
+    advisories: advisories(),
+    conflicts: conflicts(),
+  }),
   flattenElevation: () => flattenElevation(),
   restoreElevation: () => restoreElevation(),
 };
