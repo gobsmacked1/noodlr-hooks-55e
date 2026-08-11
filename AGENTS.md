@@ -192,6 +192,134 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 Diagnostics: `api.surveyPrimitives()`, `api.surveyCapabilities()`, `api.surveyScene()` (what this
 scene WOULD ask about and what the cache already answers), `api.compileScene()`, `api.openCapabilities()`.
 
+### Five of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
+
+`registerCapabilityExecutor()` attaches a hook to `on_damage_taken`, `on_zero_hp`, `on_turn_start`,
+`on_turn_end` and `on_activity_use`. The other twelve never fire. That is fine and was always the
+design — the compiler is offered all seventeen because "the cloak recharges on a long rest" is a true
+reading whether or not this build listens for one, and a vocabulary that hid the unheard events would
+teach the model to mis-file rules rather than skip them.
+
+**What was wrong is that `isExecutable()` never looked at the trigger.** It gated on adjudication, the
+effect kind and the predicates, so a rule with a perfectly executable `heal` hanging off
+`on_long_rest` was badged **active** on the capability sheet while nothing on earth would ever run it.
+The comment above the executor's wiring block asserted the opposite in plain English — "the rest are
+legitimate compiler output and simply never fire, which the capability sheet shows as inert" — which is
+the worst version of this bug: the intent was written down, believed, and never implemented. Fixed by
+`WIRED_TRIGGERS` in `integration/capability.ts`, checked first in `isExecutable()`, which feeds the
+sheet badge, the `runs` column of `api.surveyCapabilities()` and the executor's own refusal from one
+place. **Wiring a new hook means adding its event to that list in the same change**, or the sheet will
+go on calling a working rule dead — the inverse failure, and the harder one to notice.
+
+This is the same principle as the ownership resolver, arriving from the other direction: there we made
+a rule that had stood aside say so, and here a rule that cannot fire. `always`, `on_short_rest` and
+`on_long_rest` are all correctly inert today; `noteRest()` in `capability/uses.ts` exists and has no
+callers.
+
+### What the enabled-module audit gave the compiler (2026-08-11)
+
+From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from source.
+
+- **Aura Effects answers `on_enter_area` in the platform's own terms, and we should copy it rather than
+  stand aside from it.** It converts an aura into a real `RegionDocument` flagged with its own origin,
+  then reads entry and exit as a **set difference on `token.regions`** against a `_priorRegions`
+  snapshot stashed in the `updateToken` options — core's containment bookkeeping doing the geometry, so
+  shape and elevation come free. Application is routed to a single client through
+  `CONFIG.queries["auraeffects.applyAuraEffects"]` invoked as `activeGM.query(...)`, which is our
+  `isPrimaryGM()` discipline in the newer core idiom. **No libWrapper anywhere in it.** Strictly better
+  than the movement-hook distance scan we would otherwise have reached for, and the two cannot collide
+  because ours would carry our own origin flag.
+- **Effect Macro is the one real conflict, and it is ours to fix.** Its trigger list duplicates six of
+  ours by meaning (`onTurnStart`, `onTurnEnd`, `onCreate` on a status-bearing effect, and via dnd5e
+  `damageActor` and `restCompleted`). It fires nothing on its own — a human must paste JS into
+  `flags.effectmacro.<trigger>` — so the collision is narrow and specific: **a premade or DDB-imported
+  item that already carries a macro for the trait our compiler reads off the same prose**, e.g. a
+  regeneration that heals twice. Nothing on either side detects it and no setting of theirs removes it.
+  Planned stand-aside, same shape as `alreadyAutomated()`: the collector skips a feature whose effects
+  carry `flags.effectmacro` keys. Their executor election is `getDesignatedUser() ?? activeGM`, the
+  same answer as our `rollerForActor`.
+- **Rest Recovery cancels dnd5e's `pre*` rest hooks and then re-enters `actor._rest()`**, so
+  `dnd5e.restCompleted` still fires and is the hook to use when rest triggers are wired. It owns
+  per-item recovery, so a descriptor restoring the same counter double-restores — harmless for
+  set-to-max, wrong for "regain 1d4 uses".
+- **DAE is trending legacy and must not be leaned on.** Foundry v14 absorbed the expiry model
+  (`CONST.ACTIVE_EFFECT_EXPIRY_EVENTS`, plus `start.combatant` so source-turn versus target-turn is
+  expressible natively), and DAE v14 is down to two corrective libWrapper patches whose own comments
+  defer further to dnd5e 6.0. What it still uniquely supplies is the change-key vocabulary
+  (`macro.*`, `ATL.*`, `StatusEffect`) that DDB-imported items depend on — which is the DDB finding
+  already recorded below, seen from the other end. It does **not** manage exhaustion
+  (`DAEdnd5e.ts:382` deletes it from its own base-value handling), so our
+  `flags.dnd5e.<condition>Level` encoding is uncontested.
+- Convenient Effects 9.2.5 does **not** override `CONFIG.statusEffects` or the token HUD, and applies
+  nothing without the separate `dfreds-triggers` module, which is not installed. Its exhaustion code is
+  gated on its own `ceEffectId`, so a status we write natively never reaches it. Automated Evocations,
+  Polyglot and Visual Active Effects are inert with respect to everything here.
+
+### What the same audit found about space, sight and movement (2026-08-11)
+
+From `_research\_audit\overlap-space-and-sight.md`. The cover half of it retired build-queue item 1,
+above. The rest:
+
+- **A module that teleports by deleting and recreating the token destroys every flag we own, silently.**
+  `stairways` 0.12.0 does exactly this (`teleport.js:37-40`), so the arriving token is a new id with no
+  banked stealth, no economy budget stamp, and — the one that matters — **no `mercyForfeit` payload,
+  which is the only copy of a stripped party's gear.** No movement hook fires either, so nothing of ours
+  gets a chance to migrate anything. There is no defence available from our side short of watching
+  `deleteToken`, and the honest mitigation is to know it: a forfeiture that must survive is one the GM
+  should restore before anyone takes the stairs. Terrain Mapper's stairs are the safe kind — they pause
+  the move and prompt, which our stall watchdog already survives.
+- **`isForcedMovement()` is broader than our own action, deliberately, and the audit's proposed split is
+  based on a misreading — checked before acting on it.** The finding is right that `regionba` 1.5.2 uses
+  `action: "displace"` for teleports and for Prevent-Movement bounce-backs (`teleportToken.js:53`,
+  `stopMovement.js:109`). The recommendation was to stop exempting `displace` from the Speed budget.
+  **There is no such exemption to remove:** every path in `rules/economy/speed.ts` — the `maxCost`
+  truncation, the `preMoveToken` refusal and the `moveToken` Dash charge — gates on
+  `movement.method` being `dragging` or `keyboard`, so an API move never reaches any of them, and
+  `isForcedMovement` is not imported anywhere in `economy/`. Its only two callers are the reaction layer
+  and the grapple-drag guard, and for both a bounce-back genuinely should not provoke. The residue is
+  the opposite of the one reported: a bounced creature keeps the walked distance charged in core's
+  `movementHistory` while standing where it started, so it is under-refunded rather than over-served.
+  That is the safe direction and it is core's history doing it, so it stays.
+- **Patrol's shallowness is confirmed from source**, as the older note here inferred: `patrol.js:242` is
+  literally `visionPolygon.fov.contains(centre)` with no `testVisibility` and no detection modes. It
+  creates no combat and is gated on `!game.combat?.started`. It exposes a stopping hook,
+  `prePatrolAlerted` — worth taking, so Patrol stops raising the alarm about a creature our stealth
+  layer has already ruled unseen.
+- `walls-have-ears` is audio only, but its `CONFIG.Canvas.polygonBackends.sound.testCollision(...,
+  {type: "sound"})` is the answer if hearing ever becomes a sense we model. `smarttarget` is harmless;
+  `about-face` only matters in rotate mode, and this table is on flip.
+
+### What it found about turn flow and the economy (2026-08-11)
+
+From `_research\_audit\overlap-turnflow-and-economy.md`.
+
+- **A module that suppresses the system's chat card makes every capture we own go blind, silently.**
+  Monk's Token Bar passes `messageConfig.create = false` for group and contested rolls
+  (`systems/dnd5e-rolls.js:174`), so no dnd5e card is created and `flags.dnd5e.roll` never exists.
+  Everything here that watches `createChatMessage` — the Stealth capture above all, but also the
+  attack and save readings the forced-movement layer depends on — simply never sees those rolls. A
+  group Stealth check requested through the token bar hides nobody, and nothing anywhere reports why.
+  Its own surface is `updateChatMessage` on `flags["monks-tokenbar"].tokens[<id>].roll` if we ever want
+  to read it. **Generalise the lesson: our roll captures assume the system's card exists, and that is an
+  assumption any roll-requesting module can break.** Now warned about in `advisories()`.
+- **`hurry-up` races the planner's own turn advance.** `CombatTimer.onEnd()` calls
+  `game.combat?.nextTurn()` gated on nothing but its `goNext` setting and `game.user.isGM` — it asks
+  nothing about whether a turn is mid-resolution — so with `runForNPC` on it fires on exactly the turns
+  we play, and a slow automated turn gets skipped or double-advanced. Its `runForNPC: false` scopes the
+  timer to players and removes the conflict. Warned about in `conflicts()` when both switches are on.
+- **`show-xp-dialog` is a second writer of `system.details.xp.value`**, beside `dnd5e-rewards.ts`. Not a
+  race — both are deliberate GM actions — but an award that appears twice has two plausible authors.
+- **Argon (`enhancedcombathud`) is complementary, which matters because it puts the 2024 PHB action
+  items on the bar.** Its `consumeActionEconomy` is client-local display state on its own panel objects;
+  nothing is written to the actor and nothing dnd5e reads. Items go through the standard `Activity#use`,
+  so the `dnd5e.preUseActivity` veto fires normally and a refused use just fails to light the button.
+  It was therefore *not* implicated in the PHB `Attack` double-charge, which was ours and is now fixed —
+  see the declarations note under the Speed invariants below.
+- `combatbooster` releases and re-selects tokens on turn change when `controlToken` is on, which fights
+  GM selection during automated turns but touches no rules state. `blind-skill-rolls` always keeps GM
+  ids in the whisper array, so our captures cannot go blind through it — our own care is the reverse,
+  not to publicly echo a roll that arrived blinded. `chatlog-prune` deletes no documents.
+
 ## The general rules (2026-08-09) — the finite queue, worked
 
 The other half of what the corpus is for. `coverage.json` finished with **ten** rules keys that dnd5e
@@ -496,6 +624,13 @@ what it remembered. That is only affordable because the sources are already on d
 - **PowerShell output is unreliable in the agent shell (observed 2026-08-06).** `Get-ChildItem` and
   `Select-String` have silently returned empty output where the paths plainly existed. `cmd /c dir` and the
   file-reading tools were unaffected. Do not conclude a file is missing from a bare PowerShell listing.
+- **Read a clone's version with `git describe --tags`, never from its committed manifest (2026-08-11).**
+  Most of these repos template the version in at release time, so the checked-in value is whatever was
+  last hand-edited: Convenient Effects' `static/module.json` says `7.0.0` on the `v9.2.5` tag, and its
+  `package.json` says `1.0.0`. Aura Effects writes `"#{VERSION}#"`, which is harmless precisely because
+  it is obviously wrong — **a plausible-looking stale number is the dangerous form**, since it invites
+  no second look and quietly ages a finding by two major versions. Cite the tag, and say which file the
+  number came from.
 
 **Subagent protocol (adopted 2026-08-06, after losing a batch — twice).** Six research subagents were
 launched as blocking calls in one message. All five that started **finished their work within about a
@@ -615,11 +750,25 @@ not a rules engine. Do not open these as rules work.
 same category as jumping and Influence. Ordered by value over cost. The first three are cheap *now* and
 were not in August, because the hard half shipped for unrelated reasons:
 
-1. **Cover as an AC bonus.** dnd5e already applies `coverHalf` / `coverThreeQuarters` — +2 and +5 to AC
-   **and** to Dexterity saves (`actor.mjs:115-120`, `attributes.mjs:228-234`) — the instant the status is
-   present. Nothing sets it from geometry, and we already count blocked corner rays in `rules/hide.ts` for
-   the Hide prerequisite. This is wiring a measurement we own to a consumer the system owns. Verified
-   unbuilt: `coverHalf`, `coverThreeQuarters` and `coverBonus` appear nowhere in `src/`.
+1. ~~**Cover as an AC bonus.**~~ **Dropped 2026-08-11 — `simplecover5e` already does it, and does it
+   better than we specified.** The reasoning that put it first still holds as far as dnd5e goes: the
+   system applies `coverHalf` / `coverThreeQuarters` (+2 and +5 to AC **and** to Dexterity saves,
+   `actor.mjs:115-120`, `attributes.mjs:228-234`) the instant the status is present, sets it from
+   nothing, and we already count blocked corner rays in `rules/hide.ts`. What the audit found is that
+   Simple Cover 5e 2.2.1 sets the status (`config.mjs:52-57` → `status.mjs:179-190`, routed to the GM
+   through a `CONFIG.queries` handler) **and independently pre-adjusts the target's AC net of dnd5e's
+   own `ac.cover`** (`automation.mjs:452-465`), plus Dexterity saves and a hard block on saves under
+   total cover — automatically, off `dnd5e.preRollAttack` / `preRollSavingThrow`, with no libWrapper.
+   Its geometry is 3D occluder prisms with elevation banding and Wall Height support, corner-to-corner
+   with grid-aware line counts, iterating the attacker's corners too; our 3-of-4 rule is the flat
+   special case of it. **Building ours would double-apply, not fill a gap.** The `today` line on the
+   cover row in `apps/pages.ts` now says so, which is the whole point of that field.
+   - Worth doing instead, cheaply: consume `api.getCover()` to replace the corner-ray approximation in
+     the Hide prerequisite when the module is present. That is the raise-fidelity-when-available
+     pattern principle #0 already permits for midi, not a dependency — the approximation stays.
+   - Caution if this is ever revisited: it stands down for midi **only** when midi's
+     `coverCalculation === "simplecover5e"`, and it has no awareness of AC5e at all
+     (`rg -ni "ac5e|automated-conditions"` returns nothing). Two cover implementations can both be live.
 2. **Unseen attacker and unseen target.** Advantage when the attacker cannot be seen, disadvantage when the
    target cannot be. `rules/perception.ts` already answers "can this creature see that one" per-creature
    against a hand-built vision source, and the injection point is the same `preRollAttack` the condition
@@ -809,9 +958,18 @@ broken, and it is the single most likely thing to be reported as a bug in this r
     hangs a creature's turn and the whole automated initiative chain behind it.
   - `update({x, y})` is not a teleport any more and not a fallback: since v13 it is routed through the
     same constraint/veto pipeline, and merely hides the outcome behind a truthy return.
-  - Third-party vetoes to suspect first: **NotYourTurn** (`preMoveToken`, never checks `movement.method`,
-    so an API move is treated as a player drag; only warns at default GM setting) and **Token Warp**
-    (clamps out-of-bounds moves, vetoing ours while moving the token itself).
+  - Third-party vetoes to suspect first: **Token Warp** (clamps out-of-bounds moves, vetoing ours while
+    moving the token itself). **NotYourTurn was on this list and has been cleared** — see below.
+  - **NotYourTurn cannot block a planned turn, corrected from source 2026-08-11.** The old note here said
+    it never checks `movement.method` so an API move reads as a player drag. True, and irrelevant: its
+    `preMoveToken` handler exempts the current combatant outright — `if (token.id == combatTokenId)
+    return;` (`NotYourTurn.js:159-162`) — before it ever reaches the role check, and the planner moves
+    precisely the creature whose turn it is. Its role modes are 0 off / 1 warning-only / 2 dialog /
+    3 autoblock, and only mode 3 returns false; `BlockGM` defaults to **1**, so at stock settings it
+    cannot veto anything on a GM client anyway. **The real exposure is forced movement**, which displaces
+    a token that is *not* the current combatant: at the default that costs a spurious "moved out of turn"
+    warning and a GM whisper, and at dialog or autoblock it would break shoves outright. Its
+    `moduleForcedMovement` flag is its own undo bookkeeping, not an API anyone else can set.
   - **Do not let our own geometry veto a move (2026-08-04).** v0.4.26 still moved nothing, and the reason
     was not in `moveTo` at all: the callers discarded every candidate destination first, silently, so core
     was never asked. Two causes, both ours. `occupied()` compared a Token placeable against a
@@ -1312,6 +1470,35 @@ broken, and it is the single most likely thing to be reported as a bug in this r
     `flags.noodlr.extraAction`, so they never reach a refusal. `force` is the override, and it now skips the
     cost as well as the cover prerequisites. Charged after the roll so a cancelled dialog is free, but
     charged whether or not the check beat the DC — spending the action is the rule.
+  - **The Attack and Magic buttons are announcements, and cost nothing (2026-08-11).** Third instance of
+    the shape Dash and Hide taught, and the plainest: the 2024 PHB ships all thirteen actions as feat
+    items, and two of them are followed by the thing that actually costs the Action. Pressing `Attack`
+    (identifier `attack`, a `utility` activity claiming an action) charged one, and then the weapon's own
+    attack activity charged another through the attack count — so a character without Extra Attack was
+    refused their first swing of the turn. `magic` is identical and was missed in the first report, with
+    three activities (Spell, Magic Item, Ritual) each claiming an action before the spell claims its own.
+    `system/dnd5e-declarations.ts` is the quarantined table; `enforce.ts` consults it after the
+    Incapacitated refusal and before the ledger.
+    - **Charge nothing at the button rather than making the follow-through free.** The ledger already
+      models the Attack action correctly — the first attack roll buys the Action and the rest of
+      `attacksPerAction` rides on it — so a fighter with Extra Attack comes out right with nobody
+      counting declarations at all. And a declaration is not a commitment: pressing Attack and thinking
+      better of it should cost nothing, which is the generous direction this layer takes everywhere.
+    - **Both the identifier and the name are matched only on `type === "feat"`**, tighter than the rider
+      table, because "Attack" and "Magic" are generic enough to be a homebrew weapon. Exempting a weapon
+      would not merely miss a rider — it would make that weapon free to use every turn, forever, with
+      nothing reporting it.
+    - **Dash stays out of the table.** It is charged twice for the same reason and cannot simply be
+      skipped: whoever charges it has to record the Dash itself so the movement cap knows the Speed is
+      paid for. Hide stays out too — our button and the item are two ways of pressing one thing, so
+      whichever the player uses exactly one Action goes. Dodge, Disengage, Help, Ready, Search, Study,
+      Influence and Stabilize are complete actions with no follow-through, and are correctly billed.
+    - **Known imperfection, left alone:** a readied attack is the Reaction the Ready action bought, but it
+      reaches the ledger as an attack claiming an Action, so a player who readies and then fires looks
+      over budget and is asked. Nothing distinguishes a readied use from a normal one.
+    - The claims census field `treatedAsRider` became `exemptedAs` and `claims.ridersExempted` became
+      `claims.exempted`, because a field saying "rider" about the Attack button is a diagnostic telling a
+      lie. `test/economy.test.ts` locks the arithmetic down.
 
 - **Ammunition is not a consumption type (fixed v0.4.39).** `activityAvailable` looked for a consumption
   target of `type: "ammunition"`, which does not exist: dnd5e 5.3.3 has exactly six consumption types
@@ -1600,9 +1787,10 @@ Recorded because they will be reported again.
   constraint, which refuses a path costing more than the creature's Speed rather than moving it as far as
   it can. **The v13 theory is dead** (census, 2026-08-07): the host is 14.365, so `maxCost` exists there.
   The same census settles the other half — all four movement-veto modules are active in that world:
-  `NotYourTurn@4.0.0`, `tokenwarp@14.365.2`, `Rideable@5.0.17` and `monks-active-tiles@14.01`. Disable
-  NotYourTurn first: it hooks `preMoveToken` without checking `movement.method`, so an API move is
-  treated as a player drag.
+  `NotYourTurn@4.0.0`, `tokenwarp@14.365.2`, `Rideable@5.0.17` and `monks-active-tiles@14.01`.
+  **"Disable NotYourTurn first" was wrong advice and has been withdrawn (2026-08-11):** it exempts the
+  current combatant, which is the only token a planned turn moves, so it can never have caused this.
+  Suspect Token Warp and Rideable first, then our own `maxCost` and `reachableElevation`.
 - **UNVERIFIED CONFLICT — `wm5e` (Weapon Mastery 5e) versus our Push mastery.** Active in the user's world
   at 14.533.6, a version scheme matching AC5e's, so probably the same author. `system/dnd5e-forced-movement.ts`
   implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`) and
