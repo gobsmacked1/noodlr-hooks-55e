@@ -346,6 +346,20 @@ export function advisories(): Advisory[] {
     }
   }
 
+  // Same shape of trap as midi's range check: nothing here is wrong, but a whole class of roll stops
+  // reaching us and the symptom is a rule of ours quietly not firing.
+  if (moduleActive("monks-tokenbar")) {
+    out.push({
+      level: "warn",
+      title: "Monk's Token Bar group rolls are invisible to this module",
+      detail:
+        "Its group and contested rolls suppress the system's own chat card, so they never carry the " +
+        "roll data every capture here reads. A Stealth check requested through the token bar will " +
+        "not hide anybody, and the same blindness applies anywhere a roll result is watched for. " +
+        "Roll from the sheet when the result has to be enforced.",
+    });
+  }
+
   return out;
 }
 
@@ -362,6 +376,22 @@ export function conflicts(): Advisory[] {
         "Greatclub) and does not recognise wm5e, so a hit with one of those may move the target " +
         "twice. UNVERIFIED — wm5e's source has not been read. If you see a double push, turn off " +
         "forced movement here and let wm5e have it.",
+    });
+  }
+
+  if (
+    moduleActive("hurry-up") &&
+    moduleSetting("hurry-up", "goNext") === true &&
+    moduleSetting("hurry-up", "runForNPC") === true
+  ) {
+    out.push({
+      level: "warn",
+      title: "Hurry Up will advance turns this module is still playing",
+      detail:
+        "Its combat timer calls nextTurn() when it expires, and asks nothing about whether a turn is " +
+        "mid-resolution. On an automated creature that races this module's own advance, so a slow " +
+        "turn can be skipped or double-advanced. Turning off its Run for NPCs scopes the timer to " +
+        "players and removes the conflict entirely.",
     });
   }
 

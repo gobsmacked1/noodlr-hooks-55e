@@ -173,13 +173,14 @@ const HOUSE: Page = {
           id: "cover",
           label: "Cover as an AC bonus",
           hint:
-            "dnd5e already applies +2 and +5 to AC and Dexterity saves the moment its cover statuses " +
-            "are present — nothing sets them from geometry. We already count blocked corner rays for " +
-            "the Hide prerequisite, so this is wiring a measurement we own to a consumer the system " +
-            "owns. Highest-value unbuilt rule in the module.",
+            "dnd5e applies +2 and +5 to AC and Dexterity saves the moment its cover statuses are " +
+            "present, and nothing in the system sets them from geometry. We are unlikely to build " +
+            "this: Simple Cover 5e already sets the status AND adjusts AC, so a second implementation " +
+            "would double-apply rather than fill a gap.",
           state: "planned",
           today:
-            "Midi QoL and Automated Conditions 5e both ship cover logic; AC5e stands down when midi is present.",
+            "Simple Cover 5e, thoroughly — 3D geometry, Dexterity saves and total cover included. " +
+            "Midi QoL and Automated Conditions 5e also ship cover logic; AC5e stands down for midi.",
         },
         {
           id: "flanking",

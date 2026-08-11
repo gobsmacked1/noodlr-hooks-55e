@@ -57,6 +57,26 @@ export const TRIGGER_EVENTS = [
 
 export type TriggerEvent = (typeof TRIGGER_EVENTS)[number];
 
+/**
+ * The subset of {@link TRIGGER_EVENTS} that `registerCapabilityExecutor()` attaches a real hook to.
+ *
+ * The compiler is deliberately offered all seventeen: "the troll regenerates at the start of its turn"
+ * and "the cloak recharges on a long rest" are both true readings of the prose, and a vocabulary that
+ * hid the events this build cannot hear would teach the model to mis-file rules rather than to skip
+ * them. This list is the other half of that bargain — a rule whose event never fires is badged inert
+ * instead of being shown as live.
+ *
+ * Wiring a new hook in `capability/executor.ts` means adding its event here in the same change, or the
+ * sheet will go on calling a working rule dead.
+ */
+export const WIRED_TRIGGERS: readonly TriggerEvent[] = [
+  "on_damage_taken",
+  "on_zero_hp",
+  "on_turn_start",
+  "on_turn_end",
+  "on_activity_use",
+];
+
 /** Units a quantity can be in. `hp` and `temp_hp` are separate because they are spent differently. */
 export const UNITS = [
   "ft",
@@ -662,6 +682,7 @@ export function capabilityVocabulary(): Record<string, unknown> {
 /** Whether anything in this build actually runs the rule, for the sheet's inert/active badge. */
 export function isExecutable(rule: CapabilityRule): boolean {
   if (rule.adjudication !== "engine") return false;
+  if (!WIRED_TRIGGERS.includes(rule.trigger?.event as TriggerEvent)) return false;
   if (!EFFECT_PARAMS[rule.effect?.kind as EffectKind]?.executable) return false;
   // One unevaluable guard is enough to stop the rule: see the fail-closed note at the top.
   return (rule.condition ?? []).every((p) => PREDICATE_PARAMS[p.kind]?.executable);
