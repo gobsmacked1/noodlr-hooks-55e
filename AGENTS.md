@@ -641,7 +641,7 @@ visibility-aware Blinded already, and ships cover and range logic of its own tha
 midi is present. The stand-aside that exists for the condition matrix may cover part of this queue outright,
 and dual enablement is the silent-race failure documented below — measure before writing.
 
-## A silent stand-aside is a bug report waiting to happen (2026-08-11)
+## A silent stand-aside is a bug report waiting to happen (v0.2.0, 2026-08-11)
 
 Every stand-aside in this module was written as a correctness measure and each one is right. Together
 they created a failure nobody had named: **the setting still reads ON while nothing happens.**
@@ -692,6 +692,11 @@ broken, and it is the single most likely thing to be reported as a bug in this r
  Registration is wrapped in try/catch: the rules are the product and the windows are the convenience.
 - Templates are fetched by path at render time, so a missing one is a console 404 rather than a build
  error. `scripts/package.ps1` asserts every `.hbs` by name; add to that list when adding a template.
+- **`scripts/check-i18n.mjs` runs as part of `npm run check`**, because a missing key renders as the raw
+ dotted string in the middle of a settings page and reads as a broken window rather than as a missing
+ translation. A regex cannot see through a template literal, so the two key families assembled at
+ runtime (`Rules.State.*`, `Capabilities.Status.*`) have their members named in the script itself —
+ **add a family there whenever a key is built from a variable**, or nothing checks it.
 - Presets write settings and hold no state of their own; `currentPreset()` reports whichever profile the
  world happens to match. **"Alongside Midi QoL" sets dying and concentration off explicitly even though
  the runtime stand-asides already do it**, because making that split visible is the entire point of the
