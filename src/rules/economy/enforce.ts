@@ -35,6 +35,7 @@ import { isDashActivity } from "../../system/dnd5e-dash";
 import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
 import { isDnd5e } from "../../system/dnd5e-rewards";
+import { interceptHideActivity } from "../hide";
 import { check, slotFor, spend, takeDash, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
@@ -172,6 +173,12 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
     log(`action economy: ${declared} declares an action; whatever follows pays for it`);
     return true;
   }
+
+  // The sheet's Hide button is our Hide action under another name, so it is handed over rather than
+  // charged: `takeHideAction` runs the prerequisites, rolls, and bills the slot itself. Charging here as
+  // well would be the Dash double-charge again, from the other direction. It is deliberately AFTER the
+  // Incapacitated refusal, so a stunned creature is stopped at the button.
+  if (interceptHideActivity(activity)) return false;
 
   // Outside a fight there is no turn to be over budget in, and nothing here should touch downtime.
   const combat: any = game.combat;

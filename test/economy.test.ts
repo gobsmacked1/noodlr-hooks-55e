@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import { actionDeclarationOf } from "../src/system/dnd5e-declarations";
+import { isHideActivity } from "../src/system/dnd5e-stealth";
 import { notable, slotClaims } from "../src/rules/economy/claims";
 import { budget, check, spend } from "../src/rules/economy/ledger";
 
@@ -127,6 +128,44 @@ test("a second Action is still refused once one has genuinely been spent", () =>
 
   assert.equal(check(hero, combat, combatant, "action", false).allowed, false);
   assert.equal(check(hero, combat, combatant, "action", true).allowed, false);
+});
+
+/* -------------------------------------------- */
+/*  Which button is the Hide action              */
+/* -------------------------------------------- */
+
+test("the sheet's Hide button is recognised by identifier and by activity name", () => {
+  // The standalone PHB item: midi renames its activity to "Midi Use", so the identifier is the only route.
+  assert.equal(
+    isHideActivity(
+      item({ name: "Hide", type: "feat", identifier: "hide" }),
+      activity("Midi Use", "utility", "action"),
+    ),
+    true,
+  );
+
+  // A multi-purpose feature keeps its activities named, and ONLY the Hide one may be caught — intercepting
+  // Cunning Action wholesale would swallow Dash and Disengage with it.
+  const cunning = item({ name: "Cunning Action", type: "feat", identifier: "cunning-action" });
+  assert.equal(isHideActivity(cunning, activity("Hide", "utility", "bonus")), true);
+  assert.equal(isHideActivity(cunning, activity("Dash", "utility", "bonus")), false);
+  assert.equal(isHideActivity(cunning, activity("Disengage", "utility", "bonus")), false);
+});
+
+test("a re-identified feature is not intercepted on the strength of its name", () => {
+  // Same discipline as the declaration table: the name is consulted only when the sheet states no
+  // identifier, so a house variant keeps whatever behaviour its own sheet describes.
+  assert.equal(
+    isHideActivity(item({ name: "Hide", type: "feat" }), activity("Use", "utility", "action")),
+    true,
+  );
+  assert.equal(
+    isHideActivity(
+      item({ name: "Hide", type: "feat", identifier: "house-hide-variant" }),
+      activity("Use", "utility", "action"),
+    ),
+    false,
+  );
 });
 
 /* -------------------------------------------- */

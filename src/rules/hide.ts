@@ -49,6 +49,7 @@ import {
   HIDING_STATUS,
   hideDc,
   hidesWithAdvantage,
+  isHideActivity,
   rulesVersion,
 } from "../system/dnd5e-stealth";
 import { blocked, centerOf } from "../core/positioning";
@@ -317,29 +318,88 @@ export async function hideSelected(options: { force?: boolean } = {}): Promise<v
     return;
   }
 
-  const lines: string[] = [];
-  for (const token of selected) {
-    const result = await takeHideAction(token, options);
-    const name = foundry.utils.escapeHTML(String(token?.name ?? "?"));
-    lines.push(
-      result.hidden
-        ? `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Hidden", {
-            dc: String(result.total),
-          })}`
-        : `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Failed", {
-            reason: foundry.utils.escapeHTML(result.reason),
-          })}`,
-    );
-  }
+  const lines = [];
+  for (const token of selected) lines.push(hideLine(token, await takeHideAction(token, options)));
+  await postHide(lines, selected);
+}
 
+/** One creature's outcome, worded for the table. */
+function hideLine(token: any, result: HideResult): string {
+  const name = foundry.utils.escapeHTML(String(token?.name ?? "?"));
+  return result.hidden
+    ? `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Hidden", {
+        dc: String(result.total),
+      })}`
+    : `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Failed", {
+        reason: foundry.utils.escapeHTML(result.reason),
+      })}`;
+}
+
+async function postHide(lines: string[], subjects: any[]): Promise<void> {
   const ChatMessage = (globalThis as any).ChatMessage;
   await ChatMessage.create({
     content: `<p>${lines.join("</p><p>")}</p>`,
     // One token means the card is that creature's; several means it is a summary and belongs to nobody.
     // Named either way, because an unsigned card is stamped with the author's assigned character.
-    speaker: selected.length === 1 ? speakerFor(selected[0]) : narrator(),
+    speaker: subjects.length === 1 ? speakerFor(subjects[0]) : narrator(),
     flags: { [MODULE_ID]: { hide: true } },
   });
+}
+
+/**
+ * The sheet's own Hide button, routed through the rule above.
+ *
+ * Returns true when it has taken the action over, and the caller cancels the activity.
+ *
+ * WHY THIS EXISTS. `takeHideAction` was reachable only from `api.hide()` — there is no toolbar tool and no
+ * keybind — while any world carrying the 2024 PHB action items has a `Hide` feature on every character
+ * sheet, which Argon puts on the action bar. So the button a player actually presses spent an Action and
+ * did nothing else: no cover or line-of-sight prerequisite, no Stealth roll, no banked DC, leaving
+ * `hidingState()` to fall back to passive Stealth if the item happened to stamp the status at all. Two
+ * entrances to one action, priced the same and enforcing differently, is the third time this shape has bitten
+ * (see Dash and the Attack declaration in `system/dnd5e-declarations.ts`).
+ *
+ * The activity is cancelled rather than allowed to run alongside, because it has nothing left to contribute
+ * once we have rolled and stamped the status, and letting it post its own card would say a second, quieter
+ * thing about the same action. The cost is charged inside `takeHideAction` exactly once, which is why the
+ * economy layer must hand over here rather than charge on the way past.
+ */
+export function interceptHideActivity(activity: any): boolean {
+  const actor = activity?.actor;
+  if (!actor || !isHideActivity(activity?.item, activity)) return false;
+
+  // No token means no geometry, so there is no prerequisite to test and nothing to stamp. Fail toward
+  // letting the sheet do whatever it would have done, rather than cancelling into silence.
+  const token = tokenFor(actor);
+  if (!token) {
+    log(`hide: ${String(actor?.name)} has no token on this scene; leaving the sheet's Hide alone`);
+    return false;
+  }
+
+  // The hook is synchronous and the roll is not, so the answer is given now and the work runs after. Any
+  // failure has to surface: a cancelled activity that then silently does nothing is the worst outcome
+  // available, because it looks exactly like the button being dead.
+  void (async () => {
+    try {
+      await postHide([hideLine(token, await takeHideAction(token))], [token]);
+    } catch (err) {
+      log(`hide: the sheet's Hide button failed for ${String(token?.name)}:`, err);
+      ui.notifications?.error(game.i18n.localize("NOODLRHOOKS.Combat.Hide.Unexpected"));
+    }
+  })();
+  return true;
+}
+
+/** The token this actor is on the current scene, preferring the synthetic one an unlinked token carries. */
+function tokenFor(actor: any): any {
+  try {
+    const own = actor?.token?.object;
+    if (own) return own;
+    const active = actor?.getActiveTokens?.(true, false) ?? [];
+    return active[0] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** What the prerequisites say about every selected token, without rolling anything. */

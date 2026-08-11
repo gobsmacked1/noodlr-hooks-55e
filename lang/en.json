@@ -113,6 +113,7 @@
   "NOODLRHOOKS.Combat.Hide.Failed": "cannot hide: {reason}.",
   "NOODLRHOOKS.Combat.Hide.Hidden": "slips out of sight — anyone searching needs a Perception check of {dc} or better to find them.",
   "NOODLRHOOKS.Combat.Hide.NoSelection": "Select the token that wants to hide first.",
+  "NOODLRHOOKS.Combat.Hide.Unexpected": "The Hide action could not be completed. See the console for what went wrong.",
   "NOODLRHOOKS.Combat.InvisBreak.Hint": "The Invisibility spell ends the moment its target makes an attack roll, deals damage, or casts a spell, and nothing in Foundry enforces that — the break condition is written only in the spell's description. Greater Invisibility is deliberately left alone, because not ending is the entire reason it costs a fourth-level slot. Potions and innate invisibility are untouched. This is separate from hiding on purpose; the two are different states and are switched separately.",
   "NOODLRHOOKS.Combat.InvisBreak.Name": "End Invisibility when its target attacks",
   "NOODLRHOOKS.Combat.IsPC": "The current combatant is a player character — Noodlr won't act for PCs.",

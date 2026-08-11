@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.2
+
+### The Hide button on your sheet now actually hides you
+
+Reported from play, and worse than it looked. Everything Noodlr Hooks does for the Hide action — the
+cover and line-of-sight check, a real Stealth roll on your own sheet, and the DC that anyone
+searching has to beat — could only be reached by typing a command into the browser console. There is
+no toolbar button and no keybind.
+
+So the Hide button you actually press, the one from the Player's Handbook that Argon puts on your
+action bar, spent your Action and did nothing else. No check on whether you had anywhere to hide, no
+roll, and no number for the guard to beat. If the item applied the Hiding condition at all, anyone
+looking for you rolled against your passive Stealth instead of the check you never made.
+
+Pressing Hide anywhere now runs the same rule. One Action, or a bonus action if you have Cunning
+Action, Nimble Escape or Shadow Stealth. Rogues keep the rest of Cunning Action untouched: Dash and
+Disengage behave exactly as before.
+
+**Pressing Hide again does not un-hide you**, and is not meant to — that is a second Hide action with
+a new DC. To stop hiding, remove the Hiding condition from the token, which is the one place the
+module reads it from. It also clears itself when you attack, cast a spell out loud, or the fight ends.
+
+### Not us: a console error from Token Note Hover
+
+If you see `canvas.hud.tokenNoteHover is undefined` in the console, that is Token Note Hover 4.1.2,
+and it throws whenever you select a token before hovering over one. It is harmless and nothing of
+ours is affected. Hover any token once after a reload to silence it.
+
 ## 0.2.1
 
 Two fixes, both found by looking at what the 2024 Player's Handbook module actually puts on a

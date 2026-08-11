@@ -1470,6 +1470,32 @@ broken, and it is the single most likely thing to be reported as a bug in this r
     `flags.noodlr.extraAction`, so they never reach a refusal. `force` is the override, and it now skips the
     cost as well as the cover prerequisites. Charged after the roll so a cancelled dialog is free, but
     charged whether or not the check beat the DC — spending the action is the rule.
+    - **Pricing the two entrances the same was only half the job; they are now ONE entrance (2026-08-11).**
+      Reported from play as a Hide problem and it was: `takeHideAction` was reachable only from
+      `api.hide()` — there is no toolbar tool and no keybind, and the scene-control group registers just
+      Act-as-NPC, GM-only, in `partial` mode. So the button a player actually presses is the PHB `Hide`
+      feature on their own sheet, which Argon puts on the action bar, and pressing it spent an Action and
+      did **nothing else**: no cover or line-of-sight prerequisite, no Stealth roll, no banked DC, leaving
+      `hidingState()` to fall back to passive Stealth *if* the item stamped the status at all. Every word
+      of the Hide implementation was unreachable at the table. `interceptHideActivity()` in `rules/hide.ts`
+      now catches it from `enforce.ts` and cancels the activity, and `takeHideAction` bills the slot once.
+    - **`isHideActivity` matches the activity name first and the item identifier second**, the same two
+      routes and the same order as `isDashActivity`, and the order is load-bearing for the same reason:
+      Cunning Action holds Dash, Disengage and Hide as separately-named activities so only the Hide one may
+      be caught, while the standalone item is the case midi renames to "Midi Use" and must be found by
+      identifier. Intercepting on the item alone would swallow a rogue's Dash and Disengage.
+    - **The economy layer hands over rather than charging on the way past**, which is why the intercept
+      lives inside `police()` rather than in a second `preUseActivity` listener. Two listeners would make
+      the outcome depend on registration order, and getting it wrong means enforce charges and then
+      `takeHideAction` charges again — the Dash double-charge rebuilt from parts. It sits after the
+      Incapacitated refusal so a stunned creature is stopped at the button.
+    - **A second press is not a toggle, deliberately (user, 2026-08-11).** Taking the Hide action twice is
+      two Hide actions with a new DC, and the way out is removing the status — which is exactly what makes
+      the status-presence rule above work, since every route to clearing it ends the state without knowing
+      we exist. Expect this reported again: the button looks like it should toggle.
+    - No token on the scene means no geometry to test and nothing to stamp, so the intercept declines and
+      lets the sheet do whatever it would have done. Cancelling into silence is the one outcome worse than
+      not intercepting, which is also why the async half surfaces a failure rather than logging it.
   - **The Attack and Magic buttons are announcements, and cost nothing (2026-08-11).** Third instance of
     the shape Dash and Hide taught, and the plainest: the 2024 PHB ships all thirteen actions as feat
     items, and two of them are followed by the thing that actually costs the Action. Pressing `Attack`
