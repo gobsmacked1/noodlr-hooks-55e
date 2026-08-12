@@ -22,7 +22,14 @@
 //   * CONFLICTS — two packages that will both act on one event. Not a stand-aside, because standing
 //     aside needs certainty and these are suspicions; the GM is told and decides.
 
-import { COMBAT_SETTINGS, GENERAL_SETTINGS, MODULE_ID } from "../constants";
+import {
+  COMBAT_SETTINGS,
+  GENERAL_SETTINGS,
+  MODULE_ID,
+  SPLIT_COMBAT_SETTINGS,
+  audienceKey,
+} from "../constants";
+import { AUDIENCES, type Audience } from "../util/audience";
 import { ac5eOwnsConditions, ac5eOwnsIncapacitatedUse } from "../system/dnd5e-conditions";
 import { midiOwnsConcentration } from "../system/dnd5e-concentration";
 import { midiOwnsDying } from "../system/dnd5e-dying";
@@ -61,9 +68,18 @@ export interface Ownership {
 
 interface Area {
   id: string;
+  /**
+   * The world setting that governs our half. For a split rule this is the BASE key, which is not
+   * registered — `keyFor` resolves it against the audience being asked about.
+   */
   setting?: string;
-  /** Our switch. Defaults to reading `setting` as a boolean. */
-  enabled?: () => boolean;
+  /**
+   * Our switch. Defaults to reading `setting` as a boolean, per audience where the rule is split.
+   *
+   * Takes the resolved key rather than reading `area.setting` itself, so a rule with a non-boolean
+   * setting (the economy's three-way mode) does not have to know whether it is split.
+   */
+  enabled?: (key: string) => boolean;
   /** Who else has claimed it, if anyone. Consulted only when our switch is on. */
   contender?: () => { by: string; note: string } | null;
   /**
@@ -193,7 +209,7 @@ const AREAS: Area[] = [
     },
   },
   { id: "movement", setting: COMBAT_SETTINGS.movement },
-  { id: "economy", setting: COMBAT_SETTINGS.economy, enabled: () => economyOn() },
+  { id: "economy", setting: COMBAT_SETTINGS.economy, enabled: (key) => economyOn(key) },
   { id: "stealth", setting: COMBAT_SETTINGS.stealth },
   { id: "surprise", setting: COMBAT_SETTINGS.surprise },
   { id: "invisBreak", setting: COMBAT_SETTINGS.invisBreak },
@@ -201,9 +217,9 @@ const AREAS: Area[] = [
   { id: "influence", setting: GENERAL_SETTINGS.influence },
 ];
 
-function economyOn(): boolean {
+function economyOn(key: string): boolean {
   try {
-    return String(game.settings.get(MODULE_ID, COMBAT_SETTINGS.economy) ?? "warn") !== "off";
+    return String(game.settings.get(MODULE_ID, key) ?? "warn") !== "off";
   } catch {
     return true;
   }
@@ -222,19 +238,55 @@ function gambitsOwnsOpportunity(): boolean {
   return moduleSetting("gambits-premades", "Opportunity Attack") !== false;
 }
 
-/** Resolve one rule area. Unknown ids resolve to an honest "we do not model this". */
-export function ownershipOf(id: string): Ownership {
+/** Is this rule configured separately for each side? */
+function isSplit(area: Area): boolean {
+  return Boolean(
+    area.setting && (SPLIT_COMBAT_SETTINGS as readonly string[]).includes(area.setting),
+  );
+}
+
+/**
+ * The registered key for this area, for the side being asked about.
+ *
+ * A split area asked with no audience answers about the NPC side, which is arbitrary and is why every
+ * caller that has a side passes it. `enabledEitherSide` below is what "is this on at all" goes through.
+ */
+function keyFor(area: Area, audience?: Audience): string | undefined {
+  if (!area.setting) return undefined;
+  if (!isSplit(area)) return area.setting;
+  return audienceKey(area.setting, audience ?? "npc");
+}
+
+function ourSwitch(area: Area, audience?: Audience): boolean {
+  const key = keyFor(area, audience);
+  if (!key) return false;
+  return area.enabled ? area.enabled(key) : settingOn(key);
+}
+
+/**
+ * Resolve one rule area. Unknown ids resolve to an honest "we do not model this".
+ *
+ * `audience` picks which side of a split rule is being reported, and the settings window always passes
+ * one because a column heading has already promised the reader which side they are looking at. Omitted,
+ * a split rule reads as on if EITHER side is: that is the right answer for a survey and for deciding
+ * whether a listener is needed, and the wrong one for a checkbox.
+ */
+export function ownershipOf(id: string, audience?: Audience): Ownership {
   const area = AREAS.find((a) => a.id === id);
   if (!area) return { id, enabled: false, owner: "nobody", covered: false };
 
-  const enabled = area.enabled ? area.enabled() : area.setting ? settingOn(area.setting) : false;
+  const enabled =
+    isSplit(area) && !audience
+      ? AUDIENCES.some((a) => ourSwitch(area, a))
+      : ourSwitch(area, audience);
+  const setting = keyFor(area, audience);
 
   if (enabled) {
     const rival = area.contender?.() ?? null;
     if (rival && rival.by !== "shared") {
       return {
         id,
-        setting: area.setting,
+        setting,
         enabled,
         owner: "other",
         by: rival.by,
@@ -242,21 +294,14 @@ export function ownershipOf(id: string): Ownership {
         covered: true,
       };
     }
-    return {
-      id,
-      setting: area.setting,
-      enabled,
-      owner: "us",
-      note: rival?.note,
-      covered: true,
-    };
+    return { id, setting, enabled, owner: "us", note: rival?.note, covered: true };
   }
 
   const other = area.fallback?.() ?? area.contender?.() ?? null;
   if (other && "owner" in other) {
     return {
       id,
-      setting: area.setting,
+      setting,
       enabled,
       owner: other.owner,
       by: other.by,
@@ -265,20 +310,12 @@ export function ownershipOf(id: string): Ownership {
     };
   }
   if (other) {
-    return {
-      id,
-      setting: area.setting,
-      enabled,
-      owner: "other",
-      by: other.by,
-      note: other.note,
-      covered: true,
-    };
+    return { id, setting, enabled, owner: "other", by: other.by, note: other.note, covered: true };
   }
-  return { id, setting: area.setting, enabled, owner: "nobody", covered: false };
+  return { id, setting, enabled, owner: "nobody", covered: false };
 }
 
-/** Every rule area, for the settings pages and for `api.surveyOwnership()`. */
+/** Every rule area, for `api.surveyOwnership()`. Split rules report either side being on. */
 export function allOwnership(): Ownership[] {
   return AREAS.map((a) => ownershipOf(a.id));
 }

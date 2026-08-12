@@ -18,13 +18,29 @@
 // the windows are a convenience and the rules are the product, so a change in Foundry's application
 // namespace must never be able to stop conditions, dying and the action economy from loading.
 //
-// Saving is per-control and immediate rather than on a Save button. These are world settings, a GM is
-// the only person who can open this, and every one takes effect on the next roll — a form that
-// batches them would only add a way to lose them.
+// Saving is batched behind the title-bar Save button, matching `noodlr`'s config windows down to the
+// class name — a GM moving between the two should not be able to tell which module drew the window.
+// This reverses an earlier decision to save each control immediately, and the reason it reverses is not
+// only consistency: an immediate save has to re-render to keep the ownership badges honest (turning
+// concentration off changes what the row beside it reports), and a re-render mid-edit discards every
+// other control the GM had already moved. Batching means one re-render, after the write, when the
+// badges can be recomputed from settings that actually exist.
+//
+// The exposure that buys is real and is why the button turns amber: edits closed without saving are
+// lost. Same trade `noodlr` makes.
+//
+// There are no navigation tabs. There used to be, and they were broken in a way worth recording:
+// `data-action="tab"` is RESERVED by ApplicationV2. Its `#onClickAction` has a `case "tab"` that calls
+// core's own `_onClickTab`, which wants a `.tabs` ancestor and a `static TABS` declaration this window
+// never had — and which returns early when the clicked button already carries `.active`, so the visible
+// symptom was a pane that could not be left. A custom `actions.tab` handler never got a look in. The
+// general rule: never name a `data-action` after one of core's own verbs.
 
 import { MODULE_ID, log, warn } from "../constants";
 import { advisories, conflicts, ownershipOf, type Ownership } from "../integration/ownership";
-import { PAGES, pageById, type Page, type Row } from "./pages";
+import type { Audience } from "../util/audience";
+import { installHeaderSaveButton } from "./header-save";
+import { PAGES, pageById, settingKey, type Page, type Row, type Section } from "./pages";
 import { PRESETS, applyPreset, currentPreset } from "./presets";
 
 const TEMPLATE = `modules/${MODULE_ID}/templates/rules-config.hbs`;
@@ -49,6 +65,8 @@ function readSetting(key: string): unknown {
 }
 
 interface ViewRow {
+  /** Unique within the rendered page, so the two halves of a split row get distinct `for`/`id` pairs. */
+  domId: string;
   id: string;
   label: string;
   hint: string;
@@ -106,17 +124,27 @@ function badgeFor(own: Ownership): ViewRow["badge"] {
     : undefined;
 }
 
-function viewRow(row: Row): ViewRow {
-  const value = row.setting ? readSetting(row.setting) : undefined;
-  const own = row.ownership ? ownershipOf(row.ownership) : null;
-  const kind = row.setting ? (row.kind ?? "boolean") : "";
+/**
+ * One row, resolved for one side.
+ *
+ * `audience` is the column being drawn, and it does two things: it picks which of a split rule's two
+ * settings this control edits, and it asks the ownership resolver about that same side — so an economy
+ * switched off for monsters and on for players badges honestly in both columns rather than reporting
+ * whichever half happened to be checked first.
+ */
+function viewRow(row: Row, audience?: Audience): ViewRow {
+  const key = settingKey(row, audience);
+  const value = key ? readSetting(key) : undefined;
+  const own = row.ownership ? ownershipOf(row.ownership, audience) : null;
+  const kind = key ? (row.kind ?? "boolean") : "";
   return {
+    domId: audience ? `${row.id}-${audience}` : row.id,
     id: row.id,
     label: localize(row.label),
     hint: localize(row.hint),
     state: row.state,
     today: row.today ?? "",
-    setting: row.setting ?? "",
+    setting: key ?? "",
     kind,
     isBool: kind === "boolean",
     isNumber: kind === "number",
@@ -136,17 +164,44 @@ function viewRow(row: Row): ViewRow {
   };
 }
 
-/** A section split into the rows a GM can act on and the rows that only inform. */
-function viewSection(section: Page["tabs"][number]["sections"][number]) {
-  const all = section.rows.map(viewRow);
+/**
+ * Split the rows a GM can act on from the rows that only inform.
+ *
+ * Planned and system rows are the map, not the controls. They render collapsed, so a page stays a
+ * settings page rather than becoming a roadmap with checkboxes hidden inside it.
+ */
+function partition(rows: Row[], audience?: Audience) {
+  const all = rows.map((r) => viewRow(r, audience));
+  return {
+    rows: all.filter((r) => r.state === "live"),
+    notes: all.filter((r) => r.state !== "live"),
+  };
+}
+
+/**
+ * A section, always as a list of columns.
+ *
+ * A full-width section becomes a single unlabelled column rather than a separate shape. That keeps the
+ * template to ONE loop over rows: the alternative was a Handlebars partial, which would mean adding
+ * partial registration and another filename for the packaging script to assert, or the same markup
+ * written out twice, which is how the two halves eventually stop matching.
+ */
+function viewSection(section: Section) {
+  const columns = section.columns?.length
+    ? section.columns.map((column) => ({
+        audience: column.audience as string,
+        label: localize(column.label),
+        blurb: column.blurb ? localize(column.blurb) : "",
+        ...partition(column.rows, column.audience),
+      }))
+    : [{ audience: "", label: "", blurb: "", ...partition(section.rows ?? []) }];
+
   return {
     id: section.id,
     title: localize(section.title),
     blurb: section.blurb ? localize(section.blurb) : "",
-    rows: all.filter((r) => r.state === "live"),
-    // Planned and system rows are the map, not the controls. Collapsed, so the page stays a settings
-    // page rather than becoming a roadmap with checkboxes hidden in it.
-    notes: all.filter((r) => r.state !== "live"),
+    columns,
+    split: Boolean(section.columns?.length),
   };
 }
 
@@ -162,20 +217,26 @@ function windowClass(): any {
 
   WindowClass = class RulesConfig extends HandlebarsApplicationMixin(ApplicationV2) {
     static DEFAULT_OPTIONS = {
-      tag: "div",
+      // The root element IS the form, which is what lets the header Save button survive a PART
+      // re-render: it is attached to the window frame, and the frame is not what gets replaced.
+      tag: "form",
       classes: ["noodlr-hooks", "noodlr-rules-config"],
       window: { title: "NOODLRHOOKS.Rules.Title", icon: "fa-solid fa-sliders", resizable: true },
-      position: { width: 720, height: 760 },
+      // Wider than it was: two columns of controls plus their hints need the room.
+      position: { width: 900, height: 780 },
+      form: {
+        handler: RulesConfig.#onSubmit,
+        submitOnChange: false,
+        closeOnSubmit: false,
+      },
       actions: {
         preset: RulesConfig.#onPreset,
-        tab: RulesConfig.#onTab,
       },
     };
 
     static PARTS = { main: { template: TEMPLATE, scrollable: [".noodlr-rules__body"] } };
 
     #pageId: string;
-    #tabId = "";
 
     constructor(options: any = {}) {
       super(options);
@@ -192,15 +253,11 @@ function windowClass(): any {
 
     async _prepareContext(): Promise<Record<string, unknown>> {
       const page = this.page;
-      const tabs = page.tabs;
-      const active = tabs.find((t) => t.id === this.#tabId) ?? tabs[0];
       const preset = currentPreset();
       return {
         pageId: page.id,
         blurb: localize(page.blurb),
-        multiTab: tabs.length > 1,
-        tabs: tabs.map((t) => ({ id: t.id, label: localize(t.label), active: t.id === active.id })),
-        sections: active.sections.map(viewSection),
+        sections: page.sections.map(viewSection),
         presets: PRESETS.map((p) => ({
           id: p.id,
           label: localize(p.label),
@@ -218,40 +275,47 @@ function windowClass(): any {
 
     _onRender(context: unknown, options: unknown): void {
       super._onRender?.(context, options);
-      const root: HTMLElement = (this as any).element;
+      installHeaderSaveButton(this, localize("NOODLRHOOKS.Rules.Save"));
+    }
+
+    /**
+     * Collect and write every changed control.
+     *
+     * The controls carry no `name` attribute and are read out of the DOM by `data-setting` instead.
+     * That is not stylistic: a setting key contains dots (`combat.dying.npc`), and Foundry's form
+     * serializer expands a dotted name into a nested object, so the submitted data would arrive shaped
+     * like `{combat: {dying: {npc: true}}}` and every key would have to be flattened back. `noodlr`'s
+     * prompt fields solved the same problem the same way.
+     */
+    static async #onSubmit(this: any): Promise<void> {
+      const root: HTMLElement | null = this.element ?? null;
+      if (!root) return;
+      let changed = 0;
       for (const input of root.querySelectorAll<HTMLElement>("[data-setting]")) {
-        input.addEventListener("change", (event) => void this.#onChange(event));
+        const key = input.getAttribute("data-setting");
+        if (!key) continue;
+        let value: unknown;
+        if (input instanceof HTMLInputElement && input.type === "checkbox") value = input.checked;
+        else if (input instanceof HTMLInputElement && input.type === "number") {
+          value = Number(input.value);
+          // A box someone cleared is not an instruction to store NaN.
+          if (!Number.isFinite(value as number)) continue;
+        } else if (input instanceof HTMLSelectElement || input instanceof HTMLInputElement) {
+          value = input.value;
+        } else continue;
+
+        if (readSetting(key) === value) continue;
+        try {
+          await game.settings.set(MODULE_ID, key, value as never);
+          changed += 1;
+        } catch (err) {
+          warn(`could not save ${key}:`, err);
+        }
       }
-    }
-
-    async #onChange(event: Event): Promise<void> {
-      const target = event.currentTarget as HTMLInputElement | HTMLSelectElement;
-      const key = target?.getAttribute("data-setting");
-      if (!key) return;
-      let value: unknown;
-      if (target instanceof HTMLInputElement && target.type === "checkbox") value = target.checked;
-      else if (target instanceof HTMLInputElement && target.type === "number") {
-        value = Number(target.value);
-        if (!Number.isFinite(value as number)) return;
-      } else value = target.value;
-      try {
-        await game.settings.set(MODULE_ID, key, value as never);
-      } catch (err) {
-        warn(`could not save ${key}:`, err);
-        return;
-      }
-      // Re-render rather than patching in place: a setting can change another row's ownership badge
-      // (turning concentration off changes what the row beside it reports), and a badge that lies
-      // until the next open is the exact failure this window exists to fix.
-      void this.render();
-    }
-
-    static async #onTab(this: any, _event: Event, target: HTMLElement): Promise<void> {
-      this.setTab(String(target?.getAttribute("data-tab") ?? ""));
-    }
-
-    setTab(id: string): void {
-      this.#tabId = id;
+      if (changed) log(`saved ${changed} setting(s)`);
+      // Re-render even when nothing changed, so the ownership badges are recomputed: one rule going off
+      // changes what the row beside it reports, and a badge that lies until the next open is the exact
+      // failure this window exists to fix.
       void this.render();
     }
 

@@ -19,6 +19,12 @@ export const LEGACY_MODULE_ID = "noodlr" as const;
  * Deliberately still prefixed `combat.` even though this whole module is combat: the values are
  * migrated key-for-key out of `noodlr`, and a rename would turn a one-line copy into a mapping table
  * nobody would keep correct.
+ *
+ * THREE OF THESE ARE NOT REGISTERED UNDER THE KEY WRITTEN HERE. `dying`, `concentration` and `economy`
+ * are per-audience: each registers as `<key>.npc` and `<key>.pc`, and the bare key exists only as the
+ * base to build those from and as the name the migration reads a pre-split world's value out of. Never
+ * `game.settings.get` one of them directly — it throws, because nothing registers it — and see
+ * `SPLIT_COMBAT_SETTINGS` below.
  */
 export const COMBAT_SETTINGS = {
   /** How much of an NPC's turn this module takes over: "full" | "partial" | "off". */
@@ -37,7 +43,7 @@ export const COMBAT_SETTINGS = {
   surprise: "combat.surprise",
   /** Whether the Invisibility spell ends itself on attacking, damaging or casting. */
   invisBreak: "combat.invisBreak",
-  /** How hard the action economy is enforced against players: "off" | "warn" | "block". */
+  /** Per audience. How hard the action economy is enforced: "off" | "warn" | "block". */
   economy: "combat.economy",
   /** Whether a creature's Speed caps how far a player can drag it in a turn. */
   movement: "combat.movement",
@@ -45,15 +51,35 @@ export const COMBAT_SETTINGS = {
   forced: "combat.forced",
   /** Whether condition combat math (adv/disadv, auto-fail, crit-on-hit, incapacitated) is applied. */
   conditions: "combat.conditions",
-  /** Whether dropping to 0 HP applies Unconscious/Dead and damage-at-0 death failures. */
+  /** Per audience. Whether dropping to 0 HP applies Unconscious/Dead and damage-at-0 death failures. */
   dying: "combat.dying",
   /** Whether NPCs flagged Important get death saves like PCs instead of dying at 0. */
   importantNpcSaves: "combat.importantNpcSaves",
-  /** Whether damage rolls a real concentration save, and a failure actually ends the spell. */
+  /** Per audience. Whether damage rolls a real concentration save, and a failure ends the spell. */
   concentration: "combat.concentration",
   /** Whether the tracker clears itself once nothing hostile is left standing. */
   autoEnd: "combat.autoEnd",
 } as const;
+
+/**
+ * The rules configured separately for the party and for everything else.
+ *
+ * Kept as a list rather than as a flag on each key so that the migration, the presets, the ownership
+ * resolver and the settings window all agree on which keys are split by reading one array. A fourth
+ * candidate — forced movement — was considered and left alone: its gate fires while reading a chat
+ * message, before the creature being displaced has been resolved, so splitting it would mean pushing
+ * the check down into every target branch of a 700-line file for a preference nobody has asked for.
+ */
+export const SPLIT_COMBAT_SETTINGS = [
+  COMBAT_SETTINGS.dying,
+  COMBAT_SETTINGS.concentration,
+  COMBAT_SETTINGS.economy,
+] as const;
+
+/** The registered key for one side of a split setting. */
+export function audienceKey(base: string, audience: "npc" | "pc"): string {
+  return `${base}.${audience}`;
+}
 
 /**
  * The general rules — the ones that read the same for every creature in every campaign.
@@ -76,7 +102,22 @@ export const SETTINGS = {
   compileCapabilities: "capabilities.compile",
   /** Verbose console diagnostics. Client-scoped: it is for whoever has a console open. */
   debugLogging: "debugLogging",
-  /** Marks the one-time copy of a world's tuned values out of the `noodlr` namespace. */
+  /**
+   * How far the one-time settings migrations have run. See `migrateSettings()`.
+   *
+   * A number rather than a boolean because there are now two steps and a world can have run either,
+   * both or neither: the copy out of the `noodlr` namespace shipped in 0.1.0, and the fan-out of the
+   * three per-audience settings shipped in 0.3.0. A world that had already run the first would never
+   * see the second if both shared one flag.
+   */
+  migration: "settingsMigration",
+  /**
+   * The 0.1.0 migration's own marker. Registered but no longer written.
+   *
+   * Kept because it is the only evidence that a world already ran step one, and reading it is how
+   * `migrateSettings()` knows not to copy stale `noodlr` values back over settings the GM has since
+   * tuned here. Do not remove it: `game.settings.get` throws on an unregistered key.
+   */
   settingsMigrated: "settingsMigrated",
 } as const;
 

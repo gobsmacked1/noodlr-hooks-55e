@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.0
+
+### The settings windows work now, and there are no tabs
+
+The Combat page had three navigation tabs and they were broken: whichever pane was showing could not be
+left, so the other two were unreachable. The cause was a name collision — `tab` is a word Foundry
+reserves for its own use, and it was quietly handling every click before this module got a look in.
+
+Rather than fix the tabs, they are gone. **The NPC and player settings are drawn side by side**, which
+is what they should always have been: choosing death saves for the party and a clean kill for the mooks
+is one decision, and a tab strip turned reading it into an act of memory.
+
+- **Three rules are now set separately for monsters and for player characters** — dying and death
+  saves, concentration, and the action economy. Your existing setting is copied to both sides on
+  upgrade, so nothing changes at your table until you change it.
+- Which side a creature falls on is decided by its sheet, not by who owns the token. A world set to
+  "All Players: Owner" makes every goblin player-owned, and that must not put the bestiary under the
+  party's settings.
+- The rules that read the same for everybody — shoving, the Speed cap, opportunity attacks — stay full
+  width. The Speed cap already exempts the GM and every creature this module plays, so splitting it
+  would have offered a switch whose other half does nothing.
+- The Combat page is also reorganised: staying upright and what one turn allows, then taking a turn,
+  then resources, then the whole rolling-and-reporting workflow that this module deliberately leaves to
+  a human. Nothing was removed.
+
+### Save, and legibility
+
+- **A "Save" button in the title bar**, which turns amber the moment you change anything — the same
+  button, in the same place, as the main Noodlr module's settings. Changes are now written when you
+  save rather than the instant you click a checkbox. That is what lets the ownership badges beside each
+  rule stay honest: turning concentration off changes what the row next to it reports, and the window
+  can only recompute that after a write.
+  - The exposure is the usual one and is why the button changes colour: close the window without
+    saving and your edits are lost.
+- **The fonts are readable.** They had been rendering far smaller than intended.
+- Text in these windows can be selected and copied again, which matters most for the hints that name
+  another module's setting.
+
 ## 0.2.3
 
 ### Four more buttons that were doing nothing

@@ -50,7 +50,7 @@ export function turnBill(actor: any, slot: Slot): TurnBill | null {
 
 /** Can this be paid for? True when there is nothing to pay, which is not the same as free. */
 export function affordable(bill: TurnBill | null): boolean {
-  if (!bill || getEconomyMode() === "off") return true;
+  if (!bill || getEconomyMode(bill.actor) === "off") return true;
   return check(bill.actor, bill.combat, bill.combatant, bill.slot, false).allowed;
 }
 

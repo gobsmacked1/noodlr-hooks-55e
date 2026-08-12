@@ -7,13 +7,18 @@
 // reason a legal swing was refused.
 
 import { readFlag } from "../../util/flags";
+import { audienceOf } from "../../util/audience";
 import { getEconomyMode } from "../../settings";
 import { notable, slotClaims } from "./claims";
 import { budget, explainAttacksPerAction, stampFor } from "./ledger";
 
 export function surveyEconomy(): Record<string, unknown> {
   const combat: any = game.combat;
-  const mode = getEconomyMode();
+  // Both sides, because the mode is per audience and one number would be a coin flip about which.
+  const mode = {
+    npc: getEconomyMode({ type: "npc" }),
+    pc: getEconomyMode({ type: "character" }),
+  };
 
   if (!combat?.started) {
     return {
@@ -29,7 +34,11 @@ export function surveyEconomy(): Record<string, unknown> {
     const per = explainAttacksPerAction(actor);
     return {
       name: String(combatant?.name ?? "?"),
+      // Which column governs this creature, and separately whether anyone at the table owns it. They
+      // are different questions and a permissive world makes them disagree on every goblin.
+      audience: audienceOf(actor),
       isPlayer: Boolean(actor?.hasPlayerOwner),
+      mode: getEconomyMode(actor),
       turn: stampFor(combat, combatant),
       actionsLeft: left.action,
       bonusLeft: left.bonus,

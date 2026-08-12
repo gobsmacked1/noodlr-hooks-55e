@@ -20,8 +20,11 @@ import {
   LEGACY_MODULE_ID,
   MODULE_ID,
   SETTINGS,
+  SPLIT_COMBAT_SETTINGS,
+  audienceKey,
   log,
 } from "./constants";
+import { AUDIENCES, audienceOf, type Audience } from "./util/audience";
 import { PAGES } from "./apps/pages";
 import { menuShimFor } from "./apps/rules-config";
 
@@ -52,6 +55,25 @@ function world(key: string, i18n: string, type: any, defaultValue: unknown, extr
     default: defaultValue,
     ...extra,
   });
+}
+
+/**
+ * Register both halves of a per-audience rule.
+ *
+ * The two sides share one name and hint. That is deliberate: the settings window draws them in labelled
+ * columns, so repeating "(NPCs)" in every label would say twice what the column heading already says,
+ * and it keeps a translator from having to translate each rule's description twice.
+ */
+function split(
+  base: string,
+  i18n: string,
+  type: any,
+  defaults: Record<Audience, unknown>,
+  extra: object = {},
+) {
+  for (const audience of AUDIENCES) {
+    world(audienceKey(base, audience), i18n, type, defaults[audience], extra);
+  }
 }
 
 /** The same, for the general rules, which have their own i18n branch because they are not combat. */
@@ -114,19 +136,30 @@ export function registerCombatSettings(): void {
   world(COMBAT_SETTINGS.stealth, "Stealth", Boolean, true);
   world(COMBAT_SETTINGS.surprise, "Surprise", Boolean, true);
   world(COMBAT_SETTINGS.invisBreak, "InvisBreak", Boolean, true);
-  world(COMBAT_SETTINGS.economy, "Economy", String, "warn", {
-    choices: {
-      off: L("Economy.Off"),
-      warn: L("Economy.Warn"),
-      block: L("Economy.Block"),
+  // Both sides default to what the single setting used to do, so a fresh world behaves as before and an
+  // upgraded one keeps the value the GM chose (the migration copies it into both). Tempting to ship NPCs
+  // on "block" — a stat block has no Haste to justify a third action — and it would be very nearly a
+  // no-op, because a GM is asked rather than refused whatever this says. Changing a default to buy
+  // nothing is how a setting stops meaning what it reads.
+  split(
+    COMBAT_SETTINGS.economy,
+    "Economy",
+    String,
+    { npc: "warn", pc: "warn" },
+    {
+      choices: {
+        off: L("Economy.Off"),
+        warn: L("Economy.Warn"),
+        block: L("Economy.Block"),
+      },
     },
-  });
+  );
   world(COMBAT_SETTINGS.movement, "Movement", Boolean, true);
   world(COMBAT_SETTINGS.forced, "Forced", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
-  world(COMBAT_SETTINGS.dying, "Dying", Boolean, true);
+  split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.importantNpcSaves, "Dying.Important", Boolean, true);
-  world(COMBAT_SETTINGS.concentration, "Concentration", Boolean, true);
+  split(COMBAT_SETTINGS.concentration, "Concentration", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoEnd, "AutoEnd", Boolean, true);
 
   general(GENERAL_SETTINGS.jump, "Jump", Boolean, true);
@@ -155,47 +188,94 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: false,
   });
+  game.settings.register(MODULE_ID, SETTINGS.migration, {
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 0,
+  });
 }
 
+/** The migration step this build knows how to reach. */
+const MIGRATION_TARGET = 2;
+
 /**
- * Copy a world's tuned values out of the `noodlr` namespace, exactly once.
+ * Bring a world's stored settings up to what this build registers. Runs once per step.
  *
- * These sixteen settings lived under `noodlr.combat.*` until this module was split out of it. World
- * settings are stored per module id, so without this every table that had tuned them would silently
- * revert to defaults on upgrade — and a reverted setting looks like a bug in the new module rather
- * than like the migration it is.
+ * Step 1 — copy the sixteen combat settings out of the `noodlr` namespace, where they lived until this
+ * module was split out of it in 0.2.0. World settings are stored per module id, so without this every
+ * table that had tuned them silently reverts to defaults on upgrade, and a reverted setting looks like
+ * a bug in the new module rather than like the migration it is.
  *
- * Reads through `game.settings.storage` rather than `game.settings.get`, because the old keys are no
- * longer registered and `get` throws on an unregistered key. Absent values are left alone, so a world
- * that never had `noodlr` installed keeps this module's own defaults.
+ * Step 2 — fan the three per-audience settings out into their `.npc` and `.pc` halves (0.3.0). Both
+ * sides get the value the world already had, so the split changes nothing until somebody uses it.
+ *
+ * Both steps read through `game.settings.storage` rather than `game.settings.get`, because in each case
+ * the source key is no longer registered and `get` throws on an unregistered key. Absent values are
+ * left alone, so a world that never had the old key keeps this module's defaults.
  */
-export async function migrateLegacySettings(): Promise<void> {
-  if (game.settings.get(MODULE_ID, SETTINGS.settingsMigrated)) return;
-  let moved = 0;
+export async function migrateSettings(): Promise<void> {
+  // A world that ran step 1 under the old boolean marker has already done it.
+  let done = Number(game.settings.get(MODULE_ID, SETTINGS.migration) ?? 0);
+  if (!done && game.settings.get(MODULE_ID, SETTINGS.settingsMigrated)) done = 1;
+  if (done >= MIGRATION_TARGET) return;
+
   try {
-    const store = (game.settings as any)?.storage?.get?.("world");
-    if (store) {
-      for (const key of Object.values(COMBAT_SETTINGS)) {
-        const row = store.getSetting?.(`${LEGACY_MODULE_ID}.${key}`);
-        if (row?.value === undefined || row?.value === null) continue;
-        let value: unknown = row.value;
-        // Foundry stores world settings JSON-encoded; older rows may already be primitives.
-        if (typeof value === "string") {
-          try {
-            value = JSON.parse(value);
-          } catch {
-            /* a bare string is a legitimate value for the three non-boolean settings */
-          }
-        }
-        await game.settings.set(MODULE_ID, key, value as never);
-        moved += 1;
-      }
-    }
+    if (done < 1) await migrateFromNoodlr();
+    if (done < 2) await migrateToPerAudience();
   } catch (err) {
-    log("could not read the previous module's settings; keeping defaults:", err);
+    log("settings migration failed; keeping whatever is stored:", err);
   }
-  await game.settings.set(MODULE_ID, SETTINGS.settingsMigrated, true);
+  await game.settings.set(MODULE_ID, SETTINGS.migration, MIGRATION_TARGET);
+}
+
+/** Step 1: `noodlr.combat.*` -> `noodlr-hooks-55e.combat.*`. */
+async function migrateFromNoodlr(): Promise<void> {
+  let moved = 0;
+  for (const key of Object.values(COMBAT_SETTINGS)) {
+    const value = storedValue(`${LEGACY_MODULE_ID}.${key}`);
+    if (value === undefined) continue;
+    // The three split keys are not registered under their bare name, so each has to land on both
+    // sides. Missing this would throw and abandon the rest of the copy half-done.
+    await writeSetting(key, value);
+    moved += 1;
+  }
   if (moved) log(`migrated ${moved} setting(s) from ${LEGACY_MODULE_ID}`);
+}
+
+/** Step 2: `combat.dying` -> `combat.dying.npc` + `combat.dying.pc`, and the other two. */
+async function migrateToPerAudience(): Promise<void> {
+  let moved = 0;
+  for (const base of SPLIT_COMBAT_SETTINGS) {
+    const value = storedValue(`${MODULE_ID}.${base}`);
+    if (value === undefined) continue;
+    await writeSetting(base, value);
+    moved += 1;
+  }
+  if (moved) log(`split ${moved} setting(s) into their NPC and player halves`);
+}
+
+/** Write one setting, fanning a split key out to both audiences. */
+async function writeSetting(base: string, value: unknown): Promise<void> {
+  const keys = (SPLIT_COMBAT_SETTINGS as readonly string[]).includes(base)
+    ? AUDIENCES.map((a) => audienceKey(base, a))
+    : [base];
+  for (const key of keys) await game.settings.set(MODULE_ID, key, value as never);
+}
+
+/** A stored world setting, read past the registry. Undefined when there is no row. */
+function storedValue(fullKey: string): unknown {
+  const store = (game.settings as any)?.storage?.get?.("world");
+  const row = store?.getSetting?.(fullKey);
+  if (row?.value === undefined || row?.value === null) return undefined;
+  const raw = row.value;
+  // Foundry stores world settings JSON-encoded; older rows may already be primitives.
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw; // a bare string is a legitimate value for the enum settings
+  }
 }
 
 /**
@@ -235,9 +315,12 @@ export function isConditionAutomationEnabled(): boolean {
  * Stock floors hit points at zero and never writes those statuses. Instant death when excess damage
  * meets or exceeds max HP is journal prose only. On by default. Stands aside when midi-qol's
  * "Add Dead" mechanic is enabled, so the two do not double-apply.
+ *
+ * Per audience, and this is the pairing the split was built for: death saves for the party and a
+ * straight kill for the mooks is how most tables already play, and it took a code change to express.
  */
-export function isDyingAutomationEnabled(): boolean {
-  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.dying));
+export function isDyingAutomationEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.dying, subject);
 }
 
 /**
@@ -258,9 +341,12 @@ export function honorImportantNpcDeathSaves(): boolean {
  * the save is rolled on the client that owns the creature and a failure drops the spell — as does
  * being Incapacitated, dying, or hitting 0 hit points, which no part of the stack enforces. On by
  * default. Stands aside when midi-qol's concentration handling is anything but "None".
+ *
+ * Per audience: the save is a roll the player expects to make, while a monster's is one more dialog in
+ * front of a GM who has six of them waiting.
  */
-export function isConcentrationAutomationEnabled(): boolean {
-  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.concentration));
+export function isConcentrationAutomationEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.concentration, subject);
 }
 
 /**
@@ -286,10 +372,10 @@ export function isAutoEndEnabled(): boolean {
 }
 
 /**
- * How hard a player is held to one action, one bonus action and one reaction per turn.
+ * How hard a creature is held to one action, one bonus action and one reaction per turn.
  *
  * Creatures this module plays are always held to the rules exactly and this setting does not reach
- * them; it governs the people at the table, who are a different problem (user, 2026-08-05).
+ * them; it governs whoever is clicking, who is a different problem (user, 2026-08-05).
  *
  *   off   — count nothing, stop nobody. What Foundry and dnd5e do today.
  *   warn  — ask, and write every "continue anyway" to the public chat log. The default.
@@ -299,10 +385,34 @@ export function isAutoEndEnabled(): boolean {
  * Haste hands out an extra action, and a system with no way to say yes turns every such feature into a
  * bug report. Asking privately and answering publicly keeps the override usable without making it
  * abusable — the table sees each one, so nobody has to police it.
+ *
+ * Per audience, on the creature being used rather than on who is using it: a player driving a familiar
+ * is playing a monster, and the NPC column is where a GM would look for it.
  */
-export function getEconomyMode(): "off" | "warn" | "block" {
-  const raw = String(game.settings.get(MODULE_ID, COMBAT_SETTINGS.economy) ?? "warn");
+export function getEconomyMode(subject: unknown): "off" | "warn" | "block" {
+  const raw = String(splitValue(COMBAT_SETTINGS.economy, subject) ?? "warn");
   return raw === "off" || raw === "block" ? raw : "warn";
+}
+
+/**
+ * Is a per-audience rule on for ANY audience?
+ *
+ * For the ownership resolver and for registering a hook: a listener has to exist if either side wants
+ * it, and the per-creature check inside decides whether it does anything. Never use this to decide
+ * whether to apply a rule to a creature — that is what passing the creature is for.
+ */
+export function enabledForEither(base: string): boolean {
+  return AUDIENCES.some((a) => Boolean(game.settings.get(MODULE_ID, audienceKey(base, a))));
+}
+
+/** One side of a split boolean, chosen by what the creature is. */
+function splitFlag(base: string, subject: unknown): boolean {
+  return Boolean(splitValue(base, subject));
+}
+
+/** One side of any split setting. */
+function splitValue(base: string, subject: unknown): unknown {
+  return game.settings.get(MODULE_ID, audienceKey(base, audienceOf(subject)));
 }
 
 /**

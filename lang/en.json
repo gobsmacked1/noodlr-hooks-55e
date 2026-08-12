@@ -184,7 +184,10 @@
 
   "NOODLRHOOKS.Rules.Title": "Rules",
   "NOODLRHOOKS.Rules.OpenFailed": "This Foundry version could not open the settings window. The settings themselves are unaffected.",
+  "NOODLRHOOKS.Rules.Save": "Save",
   "NOODLRHOOKS.Rules.AlwaysOn": "always on",
+  "NOODLRHOOKS.Rules.Audience.Npc": "Monsters and NPCs",
+  "NOODLRHOOKS.Rules.Audience.Pc": "Player characters",
   "NOODLRHOOKS.Rules.NotBuilt": "{count} more rules in this area — what covers them today",
   "NOODLRHOOKS.Rules.Today": "Today:",
   "NOODLRHOOKS.Rules.State.live": "on",

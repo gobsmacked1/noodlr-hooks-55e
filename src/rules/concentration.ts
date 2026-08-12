@@ -22,9 +22,9 @@
 // one. What we do instead is make every ending legible: the roll is public, the card names the spell
 // and the reason, and the whole feature has an off switch.
 
-import { log, MODULE_ID } from "../constants";
+import { COMBAT_SETTINGS, log, MODULE_ID } from "../constants";
 import { announceRuling } from "../integration/contract";
-import { isConcentrationAutomationEnabled } from "../settings";
+import { enabledForEither, isConcentrationAutomationEnabled } from "../settings";
 import { isRollerFor, rollerForActor } from "../util/gm";
 import { speakerFor } from "../util/speaker";
 import { isDnd5e } from "../system/dnd5e-rewards";
@@ -42,10 +42,21 @@ import {
 /** Actors whose concentration is being torn down right now, so two paths cannot both do it. */
 const ending = new Set<string>();
 
-function enabled(): boolean {
+/** Is this layer running for the creature holding the spell? Per audience. */
+function enabled(subject: unknown): boolean {
   return (
     isDnd5e() &&
-    isConcentrationAutomationEnabled() &&
+    isConcentrationAutomationEnabled(subject) &&
+    systemTracksConcentration() &&
+    !midiOwnsConcentration()
+  );
+}
+
+/** For diagnostics, where there may be no creature selected. */
+function enabledAtAll(): boolean {
+  return (
+    isDnd5e() &&
+    enabledForEither(COMBAT_SETTINGS.concentration) &&
     systemTracksConcentration() &&
     !midiOwnsConcentration()
   );
@@ -120,7 +131,7 @@ async function endAll(actor: any, reason: string): Promise<void> {
  * each one asks whether it is the elected roller and only one says yes.
  */
 async function onDamaged(actor: any, changes: { total?: number }): Promise<void> {
-  if (!enabled() || !isConcentrating(actor)) return;
+  if (!enabled(actor) || !isConcentrating(actor)) return;
 
   const damage = -Number(changes?.total ?? 0);
   if (!(damage > 0)) return;
@@ -162,9 +173,8 @@ async function onDamaged(actor: any, changes: { total?: number }): Promise<void>
  * the actor, so it can delete the effect without a relay and no election is needed.
  */
 function onConcentrationRolled(rolls: any, data: { subject?: any }): void {
-  if (!enabled()) return;
   const actor = data?.subject;
-  if (!actor || !isConcentrating(actor)) return;
+  if (!actor || !enabled(actor) || !isConcentrating(actor)) return;
 
   const verdict: SaveVerdict = readVerdict(rolls);
   if (!verdict.failed) return;
@@ -208,9 +218,8 @@ function ownerOf(effect: any): any {
  * carries.
  */
 async function onEffectCreated(effect: any): Promise<void> {
-  if (!enabled()) return;
   const actor = ownerOf(effect);
-  if (!actor || !isConcentrating(actor)) return;
+  if (!actor || !enabled(actor) || !isConcentrating(actor)) return;
   const cause = breaksConcentration(actor) ?? carriesBreak(effect);
   if (!cause) return;
   if (!isRollerFor(actor)) return;
@@ -222,7 +231,7 @@ export function registerConcentrationHooks(): void {
   // election comes back empty the button is better than nothing, so it stays.
   Hooks.on("preUpdateActor", (actor: any, changed: any, options: any) => {
     try {
-      if (!enabled()) return;
+      if (!enabled(actor)) return;
       if (!changed?.system?.attributes?.hp) return;
       if (!isConcentrating(actor)) return;
       if (options?.dnd5e?.concentrationCheck === false) return;
@@ -265,8 +274,11 @@ export function surveyConcentration(): unknown {
   const actor = token?.actor;
   const rollerId = actor ? rollerForActor(actor) : null;
   return {
-    enabled: enabled(),
-    settingOn: isConcentrationAutomationEnabled(),
+    enabled: actor ? enabled(actor) : enabledAtAll(),
+    settingOn: {
+      npc: isConcentrationAutomationEnabled({ type: "npc" }),
+      pc: isConcentrationAutomationEnabled({ type: "character" }),
+    },
     systemTracking: systemTracksConcentration(),
     midiOwns: midiOwnsConcentration(),
     selected: actor?.name ?? null,

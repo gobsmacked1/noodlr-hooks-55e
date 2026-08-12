@@ -210,7 +210,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
     return false;
   }
 
-  const mode = getEconomyMode();
+  const mode = getEconomyMode(actor);
   if (mode === "off") {
     charge(actor, combat, combatant, slot, isAttack, activity);
     return true;

@@ -12,8 +12,8 @@
 // now nothing distinguishes them unless it is written down. `api.surveyGeneralRules()` prints this
 // table, so the answer is a console call rather than an afternoon.
 
-import { MODULE_ID, log } from "../constants";
-import { isInfluenceEnabled, isJumpEnabled, isDyingAutomationEnabled } from "../settings";
+import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
+import { enabledForEither, isInfluenceEnabled, isJumpEnabled } from "../settings";
 import { DC_LADDER, OBJECT_REFERENCE, generalRulesApply } from "../system/dnd5e-checks";
 
 /** What happened to one general rule. */
@@ -56,7 +56,9 @@ function dispositions(): Disposition[] {
       rule: "Three death-save successes, or a DC 10 Wisdom (Medicine) check, makes a dying creature Stable; damage ends it.",
       enforcedBy: MODULE_ID,
       why: "The death-save half and the damage clear already shipped with the dying layer. Administering first aid did not, because 2024 files it under Utilize and dnd5e ships no item for it — the same gap as the Hide action, with the same answer.",
-      enabled: isDyingAutomationEnabled(),
+      // The dying layer is per audience, so this is on if either side wants it; which creatures it
+      // actually runs for is answered when one is in hand.
+      enabled: enabledForEither(COMBAT_SETTINGS.dying),
     },
     {
       key: "hazards",

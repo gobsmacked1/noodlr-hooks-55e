@@ -852,6 +852,98 @@ broken, and it is the single most likely thing to be reported as a bug in this r
  exercise.
 - Diagnostics: `api.surveyOwnership()`, `api.openRules("house"|"mechanics"|"combat")`.
 
+## Never name a `data-action` after one of core's own verbs (v0.3.0, 2026-08-12)
+
+The Combat page had three navigation tabs and they were unusable: the pane that was already selected
+could not be left, so the other two were unreachable. Reported as "something very wrong with the
+navigation tabs", and the cause is a namespace collision nothing warns about.
+
+**`tab` is RESERVED by `ApplicationV2`.** Its `#onClickAction` has a `case "tab"` that calls core's own
+`_onClickTab` before any custom `actions` entry is consulted, and that method wants a `.tabs` ancestor
+and a `static TABS` declaration this window never had. Its first line is an early return when the
+clicked button already carries `.active` — which is exactly the symptom, arrived at from a direction
+nobody would guess from the outside. A custom `actions.tab` handler is dead code that looks live.
+
+The general rule: **a `data-action` name is shared with core, so treat the reserved verbs as taken.**
+`tab` is the one that bit us; `close`, `submit` and `toggleDisabled` are the others in that switch.
+
+### The layout that replaced them, and why it is better rather than merely different
+
+The user's answer was to remove the navigation and draw both sides at once, and it is the right one
+for reasons beyond the bug: **the two columns of a split rule are one decision, and a tab strip makes
+comparing them an act of memory.** A table that wants death saves for the party and a clean kill for
+the mooks is answering one question, and it should be able to see both halves of its answer.
+
+- `pages.ts` lost its `Tab` layer. A `Page` holds `Section`s; a `Section` carries EITHER `rows` (full
+ width, applies to everyone) or `columns` (one per audience, drawn side by side).
+- **A full-width section is rendered as a single unlabelled column**, so the template has exactly one
+ loop over rows. The alternatives were a Handlebars partial — which means registration, another
+ filename for `package.ps1` to assert, and a second thing to keep in step — or the same markup twice,
+ which is how two branches stop matching.
+- **The three split rows are ONE literal appearing in both columns.** `settingKey(row, audience)`
+ resolves the base key against the column, so `DYING_ROW` edits `combat.dying.npc` on the left and
+ `combat.dying.pc` on the right with no chance of the two halves' wording drifting apart.
+- Every `id`/`for` pair is `noodlr-<rowId>-<audience>`, because a duplicated `id` makes the second
+ column's label focus the first column's checkbox — a bug that looks like the setting not saving.
+- Movement and the Speed cap stayed **shared**, deliberately: the cap already exempts the GM and every
+ creature this module plays, so splitting it would offer a switch whose other half changes nothing.
+
+### Three settings are per audience now, and the migration has two steps
+
+`combat.dying`, `combat.concentration` and `combat.economy` register as `<key>.npc` and `<key>.pc`.
+**The bare key is no longer registered and `game.settings.get` throws on it**, which is why
+`SPLIT_COMBAT_SETTINGS` and `audienceKey()` exist in `constants.ts` and why nothing may read one of
+those keys directly. `settings.ts` (`splitValue`), `pages.ts` (`settingKey`), `ownership.ts` (`keyFor`)
+and `presets.ts` (`expand`) are the four places that resolve a base key, and a fifth would be one too
+many.
+
+- **Audience is the sheet type, not `hasPlayerOwner`.** `audienceOf()` answers `pc` only for
+ `type === "character"`. Ownership was the obvious test and is wrong on a common configuration: a
+ world set to "All Players: Owner" makes every goblin player-owned, so the bestiary would silently be
+ governed by the party's column. `surveyEconomy()` reports both fields side by side for that reason.
+- **The accessors take the creature, and the diagnostics need a second answer.** `enabled()` in
+ `dying.ts` and `concentration.ts` is now "is this running for THIS creature", so registration and the
+ surveys — which have no creature in hand — go through `enabledAtAll()` / `enabledForEither(base)`.
+ Reporting the selected token's answer as the layer's would read as the whole thing being off whenever
+ a goblin happens to be selected.
+- The subject is always the creature the rule happens TO: the one dropping, the one holding the spell,
+ the one spending the action.
+- **`SETTINGS.migration` is a number, not a boolean, and `settingsMigrated` stays registered.** Step 1
+ is the 0.1.0 copy out of the `noodlr` namespace; step 2 is this fan-out. A world that had run step 1
+ under the old boolean would never see step 2 if both shared one flag, and `game.settings.get` throws
+ on the unregistered old marker if it is deleted. Both steps read through `game.settings.storage`,
+ because in each case the source key is no longer registered.
+- Presets still state one position per rule and `expand()` writes it to both sides. That is deliberate:
+ a preset is a starting point, and "death saves for the party but not the mooks" is a decision to make
+ afterwards rather than a profile to ship.
+
+### Saving is batched, and the window looks like `noodlr`'s
+
+Each control used to write immediately. That is now one submit behind a title-bar Save, and the reason
+is not only consistency: **an immediate write has to re-render to keep the ownership badges honest**
+(turning concentration off changes what the row beside it reports), and a re-render mid-edit discards
+every other control the GM had already moved. Batching means one re-render, after the write, when the
+badges can be recomputed from settings that exist. The cost is real and is why the button turns amber:
+edits closed without saving are lost. Same trade `noodlr` makes.
+
+- `src/apps/header-save.ts` is a **deliberate second copy** of `noodlr`'s, down to the
+ `.noodlr-header-save` class name and the amber dirty state. Neither module depends on the other and
+ that is the architecture; ten lines are cheaper than the coupling, and a GM should not be able to tell
+ which module drew the window.
+- `tag: "form"` makes the window frame itself the form, which is what lets the header button survive a
+ PART re-render — it is attached to the frame, and the frame is not what gets replaced.
+- **Controls carry `data-setting` and no `name`.** A setting key contains dots, and Foundry's form
+ serializer expands a dotted name into a nested object, so submitted data would arrive shaped like
+ `{combat: {dying: {npc: true}}}` and need flattening back. `noodlr`'s prompt fields solved the same
+ problem the same way. Consequence: `#onSubmit` reads the DOM itself, and any new control needs
+ `data-setting` or it silently never saves.
+- Fonts were the user's other complaint and the cause was `var(--font-size-11, 0.7rem)` throughout:
+ Foundry's numbered font variables are much smaller than the fallbacks suggested. Explicit `rem` values
+ matching `noodlr`'s 0.8–0.85rem scale replaced them. **Do not reintroduce `--font-size-N`.**
+- The text-selection rule gained `!important` and moved to `.noodlr-hooks`, matching the note in
+ `noodlr`'s stylesheet: core's `user-select: none` shifts between patch releases and has out-specified
+ an unweighted rule before.
+
 ## Hard-won invariants
 
 - **A capability read that comes back empty is a bug until proven otherwise.** Found in the first play

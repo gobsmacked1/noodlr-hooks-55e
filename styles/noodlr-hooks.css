@@ -30,11 +30,15 @@
   overflow: auto;
 }
 
-/* Foundry's own rule turns selection off across application chrome, and a GM reviewing a compiled
-   rule will want to copy one. Scoped to the content so the title bar still drags. */
-.noodlr-capability-sheet .window-content,
-.noodlr-capability-sheet .window-content * {
-  user-select: text;
+/* Foundry turns selection off across application chrome, and everything either of these windows shows
+   is something a GM may want to paste somewhere — a compiled rule, or the name of another module's
+   setting out of a hint. Scoped to the content so the title bar still drags, and `!important` because
+   core's rule is a moving target across patch releases and has out-specified ours before (the same
+   lesson `noodlr`'s stylesheet records). */
+.noodlr-hooks .window-content,
+.noodlr-hooks .window-content * {
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .noodlr-capability-sheet__body {
@@ -115,7 +119,7 @@
   padding: 0 0.4em;
   border: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
   border-radius: 3px;
-  font-size: var(--font-size-11, 0.7rem);
+  font-size: 0.8rem;
   text-transform: lowercase;
   white-space: nowrap;
 }
@@ -184,15 +188,13 @@
 
 /* ---- The rules settings pages --------------------------------------------------------------- */
 
+/* Type scale is stated in rem rather than through Foundry's `--font-size-N` variables, deliberately.
+   Those are pixel-derived (11 and 12 really are 11px and 12px) and this page had reached the point of
+   being unreadable at arm's length. The numbers below are `noodlr`'s: 1rem for a label, 0.85rem for
+   prose, 0.8rem for chrome. The two modules' settings windows should be indistinguishable. */
 .noodlr-rules-config .window-content {
   overflow: auto;
-}
-
-/* Same reason as the capability sheet: a GM reading a hint about another module's setting will want
-   to copy the setting's name out of it. */
-.noodlr-rules-config .window-content,
-.noodlr-rules-config .window-content * {
-  user-select: text;
+  font-size: 1rem;
 }
 
 .noodlr-rules__body {
@@ -204,8 +206,44 @@
 
 .noodlr-rules__blurb {
   margin: 0;
-  font-size: var(--font-size-13, 0.85rem);
+  font-size: 0.85rem;
   opacity: 0.8;
+}
+
+/* The title-bar Save. Same class and same look as `noodlr`'s, including the amber dirty state — the
+   whole point of copying it is that a GM does not have to learn two save conventions. */
+.noodlr-header-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0 0.25rem 0 auto;
+  padding: 0 0.5rem;
+  height: calc(100% - 8px);
+  line-height: 1;
+  font-size: 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.noodlr-header-save:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.noodlr-header-save.is-dirty {
+  background: #b26a00;
+  border-color: #ffb300;
+  color: #fff;
+  font-weight: 700;
+}
+
+.noodlr-header-save.is-dirty span::before {
+  content: "\2022 ";
 }
 
 /* Notices sit above everything and are meant to be read once and then ignored, so they are quiet
@@ -225,7 +263,7 @@
   padding: 0.4em 0.6em;
   border-left: 3px solid rgba(90, 110, 140, 0.7);
   background: rgba(90, 110, 140, 0.1);
-  font-size: var(--font-size-13, 0.85rem);
+  font-size: 0.85rem;
 }
 
 .noodlr-notice.warn {
@@ -271,33 +309,56 @@
 }
 
 .noodlr-preset__blurb {
-  font-size: var(--font-size-11, 0.72rem);
+  font-size: 0.8rem;
   opacity: 0.8;
   white-space: normal;
 }
 
-.noodlr-rules__tabs {
-  display: flex;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));
-}
-
-.noodlr-rules__tabs button {
-  width: auto;
-  flex: 0 0 auto;
-  padding: 0.2em 0.9em;
-  border-bottom: 2px solid transparent;
-  border-radius: 3px 3px 0 0;
-  background: none;
-}
-
-.noodlr-rules__tabs button.active {
-  border-bottom-color: var(--color-text-hyperlink, #7a4b9c);
-  font-weight: bold;
+.noodlr-rules__section {
+  margin: 0.25rem 0;
+  border: 1px solid var(--color-border-light-tertiary, #666);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
 }
 
 .noodlr-rules__section h3 {
   margin: 0 0 0.2em;
+}
+
+/* One column normally; two side by side when the section is per-audience. The gap carries a rule down
+   the middle so it reads as two answers to one question rather than one long list. */
+.noodlr-rules__columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0 1.1rem;
+}
+
+.noodlr-rules__section.is-split .noodlr-rules__columns {
+  grid-template-columns: 1fr 1fr;
+}
+
+.noodlr-rules__section.is-split .noodlr-rules__column + .noodlr-rules__column {
+  padding-left: 1.1rem;
+  border-left: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.15));
+}
+
+.noodlr-rules__column h4 {
+  margin: 0.35em 0 0.1em;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.75;
+}
+
+/* Narrow window, or a narrow monitor: stack rather than squeeze two hints into 20 characters each. */
+@media (max-width: 780px) {
+  .noodlr-rules__section.is-split .noodlr-rules__columns {
+    grid-template-columns: 1fr;
+  }
+  .noodlr-rules__section.is-split .noodlr-rules__column + .noodlr-rules__column {
+    padding-left: 0;
+    border-left: none;
+  }
 }
 
 /* Three columns: label and badge, control, then the hint spanning both. The control column is fixed
@@ -337,7 +398,7 @@
 }
 
 .noodlr-rule__always {
-  font-size: var(--font-size-11, 0.72rem);
+  font-size: 0.8rem;
   opacity: 0.6;
   text-transform: lowercase;
 }
@@ -345,7 +406,7 @@
 .noodlr-rule__hint {
   grid-column: 1 / -1;
   margin: 0;
-  font-size: var(--font-size-12, 0.78rem);
+  font-size: 0.85rem;
   opacity: 0.75;
 }
 
@@ -370,7 +431,7 @@
 
 .noodlr-rules__notes summary {
   cursor: pointer;
-  font-size: var(--font-size-12, 0.78rem);
+  font-size: 0.85rem;
   opacity: 0.7;
 }
 

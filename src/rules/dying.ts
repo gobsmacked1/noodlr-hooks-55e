@@ -6,12 +6,16 @@
 //
 // Register on every client: the updating user's client is the one that writes (same gate as bloodied).
 
-import { log, MODULE_ID } from "../constants";
+import { COMBAT_SETTINGS, log, MODULE_ID } from "../constants";
 import { speakerFor } from "../util/speaker";
 import { targetedTokens, tokenFor } from "../util/tokens";
 import { isStabilizeActivity } from "../system/dnd5e-actions";
 import { announceRuling } from "../integration/contract";
-import { isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../settings";
+import {
+  enabledForEither,
+  honorImportantNpcDeathSaves,
+  isDyingAutomationEnabled,
+} from "../settings";
 import { affordable, payBill, turnBill } from "./economy/bill";
 import { firstAidDc } from "../system/dnd5e-checks";
 import {
@@ -57,8 +61,19 @@ const pendingSave = new Map<string, "dead" | "stable">();
 const undoStack: UndoEntry[] = [];
 const UNDO_CAP = 40;
 
-function enabled(): boolean {
-  return isDnd5e() && isDyingAutomationEnabled() && !midiOwnsDying();
+/**
+ * Is this layer running for THIS creature?
+ *
+ * Per audience, and the subject is always the one dropping rather than the one doing the dropping: a
+ * table that wants death saves for the party and a clean kill for the mooks is configuring the victim.
+ */
+function enabled(subject: unknown): boolean {
+  return isDnd5e() && isDyingAutomationEnabled(subject) && !midiOwnsDying();
+}
+
+/** For registration and diagnostics, where there is no creature yet. */
+function enabledAtAll(): boolean {
+  return isDnd5e() && enabledForEither(COMBAT_SETTINGS.dying) && !midiOwnsDying();
 }
 
 function actorKey(actor: any): string {
@@ -96,7 +111,7 @@ function messageIsCritical(options: any): boolean {
 }
 
 function capturePending(actor: any, amount: number, options: any): void {
-  if (!enabled() || !(amount > 0)) return;
+  if (!enabled(actor) || !(amount > 0)) return;
   const key = actorKey(actor);
   if (!key) return;
   const snap = hpSnapshot(actor);
@@ -273,7 +288,7 @@ async function addDeathFailures(actor: any, before: PendingDamage, add: number):
 }
 
 async function resolveAppliedDamage(actor: any): Promise<void> {
-  if (!enabled()) {
+  if (!enabled(actor)) {
     pending.delete(actorKey(actor));
     return;
   }
@@ -339,7 +354,7 @@ async function onHpChanged(
   changes: { hp: number; temp: number; total: number },
   userId: string,
 ): Promise<void> {
-  if (!enabled()) return;
+  if (!enabled(actor)) return;
   if (userId !== game.userId) return;
   if (pending.has(actorKey(actor))) return; // applyDamage path owns this update
 
@@ -424,9 +439,8 @@ function onDeathSave(
   _rolls: any[],
   details: { chatString?: string; subject?: any; updates?: any },
 ): void {
-  if (!enabled()) return;
   const actor = details?.subject;
-  if (!actor) return;
+  if (!actor || !enabled(actor)) return;
   const key = actorKey(actor);
   const failures = Number(details?.updates?.["system.attributes.death.failure"]);
   if (Number.isFinite(failures) && failures >= 3) {
@@ -443,9 +457,8 @@ function onDeathSave(
  * 3 successes → Stable (stock clears counters, leaves no status).
  */
 async function onPostDeathSave(_rolls: any[], data: { subject?: any }): Promise<void> {
-  if (!enabled()) return;
   const actor = data?.subject;
-  if (!actor) return;
+  if (!actor || !enabled(actor)) return;
   if (!actor.isOwner && !game.user?.isGM) return;
 
   const key = actorKey(actor);
@@ -560,7 +573,8 @@ export async function administerFirstAid(
   const fail = (reason: string) => ({ stabilized: false, total: null, dc, reason });
 
   if (!helper || !actor) return fail("select who is helping and target who is dying");
-  if (!enabled()) return fail("the dying layer is off");
+  // Asked about the patient: they are the one whose death saves this layer is or is not running.
+  if (!enabled(actor)) return fail("the dying layer is off for this creature");
 
   const snap = hpSnapshot(actor);
   if (snap.value > 0) return fail(`${String(actor.name)} is not dying`);
@@ -635,7 +649,9 @@ export async function administerFirstAid(
 export function interceptStabilizeActivity(activity: any): boolean {
   const actor = activity?.actor;
   if (!actor || !isStabilizeActivity(activity?.item, activity)) return false;
-  if (!enabled()) return false;
+  // Whether to take the button over is asked of the layer as a whole, not of the healer: the patient is
+  // who this rule is configured for, and they are not resolved until the targets are read below.
+  if (!enabledAtAll()) return false;
 
   const healer = tokenFor(actor);
   if (!healer) {
@@ -744,8 +760,13 @@ export function surveyDying(): unknown {
   const actor = token?.actor;
   const snap = actor ? hpSnapshot(actor) : null;
   return {
-    enabled: enabled(),
-    settingOn: isDyingAutomationEnabled(),
+    // Both, because "is this on" has two answers now and reporting only the selected creature's would
+    // read as the whole layer being off whenever a goblin happens to be selected.
+    enabled: actor ? enabled(actor) : enabledAtAll(),
+    settingOn: {
+      npc: isDyingAutomationEnabled({ type: "npc" }),
+      pc: isDyingAutomationEnabled({ type: "character" }),
+    },
     midiOwns: midiOwnsDying(),
     honorImportantNpc: honorImportantNpcDeathSaves(),
     selected: actor?.name ?? null,

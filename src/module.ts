@@ -28,7 +28,7 @@
 //     listener had been registered for GMs only.
 
 import { MODULE_ID, log } from "./constants";
-import { migrateLegacySettings, registerCombatSettings, getCombatAutomation } from "./settings";
+import { migrateSettings, registerCombatSettings, getCombatAutomation } from "./settings";
 import { announceRuling, proposeRuling, requestBehavior, PROTOCOL } from "./integration/contract";
 import { registerDossierCleanup } from "./tactics/dossier";
 import { toggleSelectedCombatantAutomation } from "./tactics/control";
@@ -317,8 +317,9 @@ Hooks.once("ready", () => {
   registerCapabilityCollector();
 
   if (game.user?.isGM) {
-    // Carry a world's tuned values across from the module this one was split out of, exactly once.
-    void migrateLegacySettings();
+    // Bring stored settings up to what this build registers: the copy out of the `noodlr` namespace,
+    // and the fan-out of the three per-audience rules. Each step runs once per world.
+    void migrateSettings();
     // Combat dossiers live only for the skirmish: forget a creature's turn history when it dies or
     // the fight ends. Automation opt-ins are per-encounter too.
     registerDossierCleanup();

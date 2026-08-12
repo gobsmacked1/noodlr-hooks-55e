@@ -11,7 +11,14 @@
 // silent stand-aside leaves a switch reading ON while nothing happens. A GM running midi should be
 // able to SEE that concentration is midi's.
 
-import { COMBAT_SETTINGS, GENERAL_SETTINGS, MODULE_ID } from "../constants";
+import {
+  COMBAT_SETTINGS,
+  GENERAL_SETTINGS,
+  MODULE_ID,
+  SPLIT_COMBAT_SETTINGS,
+  audienceKey,
+} from "../constants";
+import { AUDIENCES } from "../util/audience";
 
 const C = COMBAT_SETTINGS;
 const G = GENERAL_SETTINGS;
@@ -108,10 +115,29 @@ function read(key: string): unknown {
   }
 }
 
+/**
+ * Fan a preset's base keys out to the keys that actually exist.
+ *
+ * A preset states one position per rule, which is the right thing for it to state: these are starting
+ * points, and "death saves for the party but not the mooks" is a decision to make afterwards rather
+ * than a profile. The three per-audience settings are not registered under their base key, though, so
+ * every one of them is written to both sides. Expanding here rather than in the literals keeps those
+ * readable — and this is also why a preset written against a bare key does not silently no-op.
+ */
+function expand(values: Record<string, unknown>): Array<[string, unknown]> {
+  const out: Array<[string, unknown]> = [];
+  for (const [key, value] of Object.entries(values)) {
+    if ((SPLIT_COMBAT_SETTINGS as readonly string[]).includes(key)) {
+      for (const audience of AUDIENCES) out.push([audienceKey(key, audience), value]);
+    } else out.push([key, value]);
+  }
+  return out;
+}
+
 /** The preset whose every value the world currently matches, if any. */
 export function currentPreset(): string | null {
   for (const preset of PRESETS) {
-    const same = Object.entries(preset.values).every(([key, value]) => read(key) === value);
+    const same = expand(preset.values).every(([key, value]) => read(key) === value);
     if (same) return preset.id;
   }
   return null;
@@ -122,7 +148,7 @@ export async function applyPreset(id: string): Promise<number> {
   const preset = presetById(id);
   if (!preset) return 0;
   let changed = 0;
-  for (const [key, value] of Object.entries(preset.values)) {
+  for (const [key, value] of expand(preset.values)) {
     if (read(key) === value) continue;
     await game.settings.set(MODULE_ID, key, value as never);
     changed += 1;
