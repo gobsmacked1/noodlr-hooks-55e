@@ -44,9 +44,17 @@ import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
 import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
 import { announceJump, surveyJump } from "./rules/jump";
-import { clearInfluenceLocks, influenceTargets, surveyInfluence } from "./rules/influence";
+import {
+  clearInfluenceLocks,
+  influenceTargets,
+  registerInfluenceQueries,
+  surveyInfluence,
+} from "./rules/influence";
+import { registerDisengageWatch } from "./rules/disengage";
+import { registerDodgeHooks } from "./rules/dodge";
 import type { Stance } from "./rules/influence";
 import { surveyGeneralRules } from "./rules/general";
+import { surveyActionButtons } from "./system/dnd5e-actions";
 import { advisories, allOwnership, conflicts } from "./integration/ownership";
 import { openRulesConfig } from "./apps/rules-config";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
@@ -102,6 +110,7 @@ export interface NoodlrHooksApi {
   clearInfluenceLocks(): Promise<number>;
   firstAid(): Promise<unknown>;
   surveyGeneralRules(): unknown;
+  surveyActionButtons(): unknown;
   push(feet?: number): Promise<unknown>;
   pull(feet?: number): Promise<unknown>;
   undoForcedMovement(): Promise<number>;
@@ -210,6 +219,12 @@ const api: NoodlrHooksApi = {
   firstAid: () => firstAidTargets(),
   /** What this module does about each of the general rules, and why it does nothing about the rest. */
   surveyGeneralRules: () => surveyGeneralRules(),
+  /**
+   * Every 2024 PHB action item on this world's character sheets, and what pressing it actually does.
+   * Reach for it when a button appears to do nothing: an `unbuilt` row is a rule nobody wired, which
+   * from the table looks exactly like one that broke.
+   */
+  surveyActionButtons: () => surveyActionButtons(),
   /** Manual forced movement, for a rule the automatic layer does not recognise. */
   push: (feet = 10) => shoveTargets(feet, "away"),
   pull: (feet = 10) => shoveTargets(feet, "toward"),
@@ -280,6 +295,15 @@ Hooks.once("ready", () => {
   registerStealthWatch();
   // Same reasoning: the Invisibility spell ends on the caster's own client.
   registerInvisibilityHooks();
+  // The Disengage button, watched wherever it is pressed: the client that presses owns the sheet, and
+  // so is the only one allowed to write the mark the opportunity-attack layer reads.
+  registerDisengageWatch();
+  // Dodge: the same watch, plus the expiry nothing in the stack performs. Half of it is GM-only, and
+  // that gate is inside.
+  registerDodgeHooks();
+  // Influence needs the GM's ruling and writes a flag on an NPC the asking player cannot touch. The
+  // handlers are registered everywhere because core resolves a query on the RECEIVING client.
+  registerInfluenceQueries();
   // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is
   // only computable from `updateActor` (which fires everywhere) while the damage TYPES arrive on the
   // applying client. A GM-only ledger would be blind to damage a player applied.

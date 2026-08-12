@@ -20,8 +20,8 @@
 //     "Concentrating: <spell>", so the spell's own name is what has to be matched rather than the prefix.
 //   * an item name, as a last resort, for homebrew and imported sheets that carry no identifier.
 
-import { isDnd5e } from "./dnd5e-rewards";
-import { hasFlag, readFlag } from "../util/flags";
+import { DASH_ACTION, isActionActivity } from "./dnd5e-actions";
+import { readFlag } from "../util/flags";
 
 export interface DashSource {
   label: string;
@@ -100,12 +100,6 @@ export function bonusDashSource(actor: any): string | null {
   return null;
 }
 
-/** An activity or item that IS the Dash action, rather than one that changes what Dash costs. */
-const DASH = /^\s*dash\s*$/i;
-
-// Both namespaces — see util/flags.ts. The pre-split documentation named `flags.noodlr.*`.
-const flagged = hasFlag;
-
 /**
  * Is pressing this the Dash action?
  *
@@ -115,24 +109,8 @@ const flagged = hasFlag;
  * and then its whole Action to the movement that followed (measured in the 2026-08-07 census). Whoever
  * charges has to record the Dash itself, not merely the slot, and that means recognising one.
  *
- * The activity name is the primary signal and is checked first: a multi-purpose feature keeps its
- * activities named ("Cunning Action" holds Dash, Disengage and Hide), and midi only renames the ones whose
- * names were left at the default. The single-purpose Dash item is the case midi DOES rename — its activity
- * reads "Midi Use" — so that one is recognised by the item's identifier instead.
+ * The two-route matching, and why the order of the routes matters, is in `dnd5e-actions.ts`.
  */
 export function isDashActivity(item: any, activity: any): boolean {
-  if (!isDnd5e()) return false;
-  const owner = item ?? activity?.item ?? null;
-  if (!owner) return false;
-
-  if (flagged(activity, "dash") || flagged(owner, "dashActivity")) return true;
-  if (DASH.test(String(activity?.name ?? ""))) return true;
-
-  const identifier = String(owner?.system?.identifier ?? "")
-    .trim()
-    .toLowerCase();
-  if (identifier === "dash") return true;
-  // Only when the sheet states no identifier, so a world that deliberately re-identified the feature is
-  // not overruled by what it happens to be called. Same discipline as the damage-rider table.
-  return !identifier && DASH.test(String(owner?.name ?? ""));
+  return isActionActivity(item, activity, DASH_ACTION);
 }

@@ -30,6 +30,7 @@
 // what we get, which is precisely why all three routes are tried and why the flag exists.
 
 import { isDnd5e } from "./dnd5e-rewards";
+import { HIDE_ACTION, isActionActivity } from "./dnd5e-actions";
 import { hasFlag as hasNamespacedFlag } from "../util/flags";
 
 /**
@@ -148,37 +149,19 @@ export function bonusHideSource(actor: any): string | null {
   return null;
 }
 
-/** An activity or item that IS the Hide action, rather than one that changes what Hide costs. */
-const HIDE = /^\s*hide\s*$/i;
-
 /**
  * Is pressing this the Hide action?
  *
- * The same shape as `isDashActivity`, for the same reason and with the same two routes. Hide exists twice
- * over: as `rules/hide.ts`, which is the only way most of the party can hide at all, and — in any world
- * carrying the 2024 PHB action items — as a real feature with a real activation that Argon puts on the
- * action bar. Until they were joined up, which one a player pressed decided whether the rule was enforced:
- * the item spent an Action and did nothing else, with no prerequisite check, no roll and no DC.
+ * Hide exists twice over: as `rules/hide.ts`, which is the only way most of the party can hide at all,
+ * and — in any world carrying the 2024 PHB action items — as a real feature with a real activation that
+ * Argon puts on the action bar. Until they were joined up, which one a player pressed decided whether the
+ * rule was enforced: the item spent an Action and did nothing else, with no prerequisite check, no roll
+ * and no DC.
  *
- * The activity name is checked first because a multi-purpose feature keeps its activities named — Cunning
- * Action holds Dash, Disengage and Hide, and only the Hide activity should be caught, never the whole
- * feature. The standalone item is the case midi renames to "Midi Use", so that one is found by identifier.
+ * The two-route matching, and why the order of the routes matters, is in `dnd5e-actions.ts`.
  */
 export function isHideActivity(item: any, activity: any): boolean {
-  if (!isDnd5e()) return false;
-  const owner = item ?? activity?.item ?? null;
-  if (!owner) return false;
-
-  if (hasFlag(activity, "hide") || hasFlag(owner, "hideActivity")) return true;
-  if (HIDE.test(String(activity?.name ?? ""))) return true;
-
-  const identifier = String(owner?.system?.identifier ?? "")
-    .trim()
-    .toLowerCase();
-  if (identifier === "hide") return true;
-  // Only when the sheet states no identifier, so a world that deliberately re-identified the feature is not
-  // overruled by what it happens to be called. Same discipline as the rider and declaration tables.
-  return !identifier && HIDE.test(String(owner?.name ?? ""));
+  return isActionActivity(item, activity, HIDE_ACTION);
 }
 
 /** Is this a spell that gives you away by being cast — one with a Verbal component? */

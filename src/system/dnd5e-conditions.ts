@@ -49,6 +49,9 @@ export const AUTO_FAIL_STR_DEX: ReadonlySet<string> = new Set([
 /** Statuses for which a hit within 5 feet is a critical hit (2024: not auto-hit). */
 export const CRIT_ON_HIT_WITHIN_5: ReadonlySet<string> = new Set(["paralyzed", "unconscious"]);
 
+/** The status dnd5e stamps for the Dodge action, and reads nowhere. */
+export const DODGING_STATUS = "dodging";
+
 const SAVE_ABILITIES_AUTO_FAIL = new Set(["str", "dex"]);
 
 /** Does this actor carry any of the named statuses? Respects condition immunity when readable. */
@@ -162,6 +165,31 @@ export function critOnHitWithin5(target: any): string | null {
   return hasAnyStatus(target, CRIT_ON_HIT_WITHIN_5);
 }
 
+/** The creature's best movement speed in scene units, or 0 when it cannot move at all. */
+function bestSpeed(actor: any): number {
+  const movement = actor?.system?.attributes?.movement ?? {};
+  let best = 0;
+  for (const key of ["walk", "fly", "swim", "climb", "burrow"]) {
+    const value = Number((movement as any)[key]);
+    if (Number.isFinite(value) && value > best) best = value;
+  }
+  return best;
+}
+
+/**
+ * Is this creature getting the benefit of the Dodge action right now?
+ *
+ * The status is only half the answer: 2024 ends the benefits "if you have the Incapacitated condition or
+ * your Speed is 0", and both of those can arrive after the button was pressed. Reading the two live is
+ * why nothing has to watch for a grapple or a stun in order to take Dodge away — a creature that is
+ * paralysed mid-round simply stops qualifying.
+ */
+export function isDodging(actor: any): boolean {
+  if (!isDnd5e() || !hasStatus(actor, DODGING_STATUS)) return false;
+  if (isIncapacitated(actor)) return false;
+  return bestSpeed(actor) > 0;
+}
+
 const AC5E = "automated-conditions-5e";
 
 function ac5eSetting(key: string): unknown {
@@ -199,6 +227,23 @@ export function ac5eOwnsConditions(): boolean {
  * `"off"`. At stock settings it warns about nothing and blocks nothing, so our refusal is the only
  * one and must stay. A GM who has set that to warn or enforce has asked AC5e to own it.
  */
+/**
+ * Is AC5e also enforcing the Dodge action?
+ *
+ * Narrower than `ac5eOwnsConditions`, and the gap between the two is a real hole rather than a nicety.
+ * AC5e's `dodging` entry (`ac5e-setpieces.mjs:967`) is a superset of ours — it tests whether the dodger
+ * can see the attacker with its own visibility machinery, checks Incapacitated and checks Speed — but
+ * every branch of it is gated on `expandedConditions`, which ships **false**. `automateStatuses` ships
+ * **true**. So at stock AC5e settings the whole of our condition layer stands down while AC5e's Dodge
+ * does nothing, and the rule is enforced by nobody at all.
+ *
+ * Hence a separate predicate and a separate gate: the Dodge rules keep running when AC5e is present but
+ * has not been asked to expand, and step aside the moment it has.
+ */
+export function ac5eOwnsDodging(): boolean {
+  return ac5eOwnsConditions() && ac5eSetting("expandedConditions") === true;
+}
+
 export function ac5eOwnsIncapacitatedUse(): boolean {
   if (!isDnd5e()) return false;
   const mode = ac5eSetting("autoArmorSpellUse");

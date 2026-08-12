@@ -39,6 +39,7 @@ import { shouldAutomate } from "../tactics/registry";
 import { useActionAt } from "../tactics/execute";
 import { can, mentalScore, tierForScore, tierProfile } from "../tactics/tiers";
 import { turnRandom } from "../core/random";
+import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
@@ -56,9 +57,6 @@ interface Watcher {
   action: CreatureAction;
   reach: number;
 }
-
-/** Words a system or module might use for "I chose not to provoke this". Matched loosely on purpose. */
-const DISENGAGED = /disengag|withdraw/i;
 
 export function registerReactionHooks(): void {
   Hooks.on("deleteCombat", () => {
@@ -354,20 +352,6 @@ function withholds(combatant: any): boolean {
   if (rand() >= 0.6) return false;
   log(`reaction: ${combatant?.name} keeps its reaction back for something better`);
   return true;
-}
-
-function hasDisengaged(actor: any): boolean {
-  try {
-    for (const status of (actor?.statuses ?? []) as Set<string>) {
-      if (DISENGAGED.test(String(status))) return true;
-    }
-    for (const effect of actor?.appliedEffects ?? actor?.effects ?? []) {
-      if (DISENGAGED.test(String(effect?.name ?? effect?.label ?? ""))) return true;
-    }
-  } catch {
-    /* an unreadable effect list is not evidence of a disengage */
-  }
-  return false;
 }
 
 /**

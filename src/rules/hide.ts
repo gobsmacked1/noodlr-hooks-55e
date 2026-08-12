@@ -41,8 +41,8 @@
 
 import { log, MODULE_ID } from "../constants";
 import { narrator, speakerFor } from "../util/speaker";
-import { getEconomyMode } from "../settings";
-import { check, spend } from "./economy/ledger";
+import { tokenFor } from "../util/tokens";
+import { affordable, payBill, slotLabel, turnBill, type TurnBill } from "./economy/bill";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   bonusHideSource,
@@ -85,37 +85,25 @@ function fightIsOn(): boolean {
 
 /** What taking the Hide action costs, and who to bill. */
 interface HideCost {
-  slot: "action" | "bonus";
+  bill: TurnBill | null;
   /** The feature that makes the bonus action legal, for the log. Empty on the ordinary Action path. */
   source: string;
-  combat: any;
-  combatant: any;
-  actor: any;
 }
 
 /**
- * What Hide costs this creature right now, or null when nothing should be charged.
+ * What Hide costs this creature right now. A null `bill` means nothing is charged — see `turnBill`.
  *
- * Null outside a started fight and outside the creature's own turn, matching the movement cap and the
- * activity veto: there is no turn to be over budget in during downtime, and a GM hiding a token during prep
- * is not spending anything. The bonus action wins when something grants it, falling back to the Action once
- * it is gone — Hide remains legal as an Action for everybody.
+ * The bonus action wins when something grants it, falling back to the Action once it is gone: Hide
+ * remains legal as an Action for everybody.
  */
-function hideCost(token: any): HideCost | null {
-  const combat: any = game.combat;
-  if (!combat?.started) return null;
-
-  const combatant = token?.document?.combatant;
-  if (!combatant || String(combatant.id) !== String(combat.combatant?.id ?? "")) return null;
-
+function hideCost(token: any): HideCost {
   const actor = token?.actor;
-  if (!actor) return null;
-
-  const source = bonusHideSource(actor);
-  if (source && check(actor, combat, combatant, "bonus", false).allowed) {
-    return { slot: "bonus", source, combat, combatant, actor };
+  const source = actor ? bonusHideSource(actor) : "";
+  if (source) {
+    const bonus = turnBill(actor, "bonus");
+    if (affordable(bonus)) return { bill: bonus, source };
   }
-  return { slot: "action", source: "", combat, combatant, actor };
+  return { bill: turnBill(actor, "action"), source: "" };
 }
 
 /** Creatures this one is trying not to be seen by: anything of the opposing disposition. */
@@ -251,12 +239,10 @@ export async function takeHideAction(
   // before the roll rather than after, so a player is not asked for dice they were never going to keep;
   // charged after, so a cancelled dialog costs nothing. A failed check still spends the action, which is
   // the rule.
-  const cost = hideCost(token);
-  if (cost && !options.force && getEconomyMode() !== "off") {
-    if (!check(cost.actor, cost.combat, cost.combatant, cost.slot, false).allowed) {
-      const slot = cost.slot === "bonus" ? "bonus action" : "action";
-      return { hidden: false, total: null, dc: null, reason: `no ${slot} left this turn` };
-    }
+  const cost = options.force ? { bill: null, source: "" } : hideCost(token);
+  if (!affordable(cost.bill)) {
+    const slot = slotLabel(cost.bill!.slot);
+    return { hidden: false, total: null, dc: null, reason: `no ${slot} left this turn` };
   }
 
   const advantage = hidesWithAdvantage(actor, fightIsOn());
@@ -274,10 +260,10 @@ export async function takeHideAction(
   if (total === null)
     return { hidden: false, total: null, dc: null, reason: "the roll was cancelled" };
 
-  if (cost) {
-    spend(cost.actor, cost.combat, cost.combatant, cost.slot, false);
+  if (cost.bill) {
+    payBill(cost.bill);
     log(
-      `hide: ${String(token?.name)} spent its ${cost.slot} action` +
+      `hide: ${String(token?.name)} spent its ${cost.bill.slot} action` +
         `${cost.source ? ` (${cost.source})` : ""}`,
     );
   }
@@ -390,18 +376,6 @@ export function interceptHideActivity(activity: any): boolean {
   return true;
 }
 
-/** The token this actor is on the current scene, preferring the synthetic one an unlinked token carries. */
-function tokenFor(actor: any): any {
-  try {
-    const own = actor?.token?.object;
-    if (own) return own;
-    const active = actor?.getActiveTokens?.(true, false) ?? [];
-    return active[0] ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /** What the prerequisites say about every selected token, without rolling anything. */
 export function surveyHide(): unknown {
   const rows = ((canvas as any)?.tokens?.controlled ?? []).map((token: any) => {
@@ -411,8 +385,8 @@ export function surveyHide(): unknown {
       token: String(token?.name ?? "?"),
       allowed: prerequisites.allowed,
       reason: prerequisites.reason,
-      costs: cost
-        ? `${cost.slot}${cost.source ? ` (${cost.source})` : ""}`
+      costs: cost.bill
+        ? `${cost.bill.slot}${cost.source ? ` (${cost.source})` : ""}`
         : "nothing — not its turn",
       advantage: hidesWithAdvantage(token?.actor, fightIsOn()),
       dc: hideDc(),

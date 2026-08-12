@@ -3,6 +3,14 @@ import { beforeEach, test } from "node:test";
 
 import { actionDeclarationOf } from "../src/system/dnd5e-declarations";
 import { isHideActivity } from "../src/system/dnd5e-stealth";
+import {
+  PHB_ACTIONS,
+  isDisengageActivity,
+  isDodgeActivity,
+  isInfluenceActivity,
+  isStabilizeActivity,
+  phbActionOf,
+} from "../src/system/dnd5e-actions";
 import { notable, slotClaims } from "../src/rules/economy/claims";
 import { budget, check, spend } from "../src/rules/economy/ledger";
 
@@ -166,6 +174,58 @@ test("a re-identified feature is not intercepted on the strength of its name", (
     ),
     false,
   );
+});
+
+/* -------------------------------------------- */
+/*  Which button is which PHB action             */
+/* -------------------------------------------- */
+
+test("each of the intercepted PHB buttons is recognised, and only itself", () => {
+  const phb = (name: string, identifier: string) => item({ name, type: "feat", identifier });
+
+  assert.equal(
+    isDisengageActivity(phb("Disengage", "disengage"), activity("Midi Use", "utility", "action")),
+    true,
+  );
+  assert.equal(
+    isStabilizeActivity(phb("Stabilize", "stabilize"), activity("Midi Use", "utility", "action")),
+    true,
+  );
+  assert.equal(
+    isDodgeActivity(phb("Dodge", "dodge"), activity("Midi Use", "utility", "action")),
+    true,
+  );
+
+  // Influence carries a "Use" and a "Check" activity and neither is named for the action, so the
+  // identifier is the only route — and both must match, since either may be the one pressed.
+  const influence = phb("Influence", "influence");
+  assert.equal(isInfluenceActivity(influence, activity("Use", "utility", "action")), true);
+  assert.equal(isInfluenceActivity(influence, activity("Check", "check", "action")), true);
+
+  // A feature holding several of them hands over only the branch that was pressed.
+  const cunning = item({ name: "Cunning Action", type: "feat", identifier: "cunning-action" });
+  assert.equal(isDisengageActivity(cunning, activity("Disengage", "utility", "bonus")), true);
+  assert.equal(isDisengageActivity(cunning, activity("Hide", "utility", "bonus")), false);
+  assert.equal(isDodgeActivity(cunning, activity("Dash", "utility", "bonus")), false);
+});
+
+test("the action inventory answers what pressing a button does", () => {
+  // The point of the table: a rule nobody wired looks exactly like one that broke, so every button
+  // has to have an answer on record — including "nothing, and here is why".
+  const found = phbActionOf(
+    item({ name: "Dodge", type: "feat", identifier: "dodge" }),
+    activity("Midi Use", "utility", "action"),
+  );
+  assert.equal(found?.handling, "observed");
+  assert.equal(
+    phbActionOf(item({ name: "Longsword" }), activity("Attack", "attack", "action")),
+    null,
+  );
+
+  // Every one of the thirteen states how it is handled, and the four that resolve themselves are the
+  // four `enforce.ts` hands over. If a fifth appears here it needs a hand-over too.
+  const intercepted = PHB_ACTIONS.filter((a) => a.handling === "intercepted").map((a) => a.spec.id);
+  assert.deepEqual(intercepted.sort(), ["dash", "hide", "influence", "stabilize"]);
 });
 
 /* -------------------------------------------- */

@@ -8,9 +8,11 @@
 
 import { log, MODULE_ID } from "../constants";
 import { speakerFor } from "../util/speaker";
+import { targetedTokens, tokenFor } from "../util/tokens";
+import { isStabilizeActivity } from "../system/dnd5e-actions";
 import { announceRuling } from "../integration/contract";
-import { getEconomyMode, isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../settings";
-import { check, spend } from "./economy/ledger";
+import { isDyingAutomationEnabled, honorImportantNpcDeathSaves } from "../settings";
+import { affordable, payBill, turnBill } from "./economy/bill";
 import { firstAidDc } from "../system/dnd5e-checks";
 import {
   deathFailuresFromDamage,
@@ -568,15 +570,8 @@ export async function administerFirstAid(
   // Refused rather than asked when there is nothing left to spend, matching the Hide action: the
   // over-budget dialog exists for features that legitimately break the general rule, and kneeling
   // over a body is not one of them.
-  const combat: any = game.combat;
-  const combatant = healer?.document?.combatant;
-  const onTheirTurn =
-    combat?.started && combatant && String(combatant.id) === String(combat.combatant?.id ?? "");
-  if (onTheirTurn && getEconomyMode() !== "off") {
-    if (!check(helper, combat, combatant, "action", false).allowed) {
-      return fail("no action left this turn");
-    }
-  }
+  const bill = turnBill(helper, "action");
+  if (!affordable(bill)) return fail("no action left this turn");
 
   let total: number | null = null;
   try {
@@ -589,9 +584,7 @@ export async function administerFirstAid(
   }
   if (total === null) return fail("the roll was cancelled");
 
-  if (onTheirTurn && getEconomyMode() !== "off") {
-    spend(helper, combat, combatant, "action", false);
-  }
+  payBill(bill);
 
   // Announced either way. A failure that says nothing looks like the button not working, and the
   // action was spent regardless — the table needs to see where it went.
@@ -621,6 +614,52 @@ export async function administerFirstAid(
     false,
   );
   return { stabilized: true, total, dc, reason: `rolled ${total} against DC ${dc}` };
+}
+
+/**
+ * The sheet's own Stabilize button, routed through the rule above.
+ *
+ * Returns true when it has taken the action over, and the caller cancels the activity.
+ *
+ * The 2024 PHB ships Stabilize as an action item, so any world carrying that content has a button for
+ * this on every character sheet — and Argon puts it on the action bar. Pressing it spent an Action and
+ * posted a card: no DC 10 Medicine check, no Stable status, nothing. Same shape as Hide, and the same
+ * answer. The patient comes from what the player has TARGETED, because the item states no target of its
+ * own and there is no other way to say who is being knelt over.
+ *
+ * With nothing targeted the activity is refused rather than allowed through, which is the one place this
+ * differs from the Hide intercept: Hide with no token has a sensible fallback (the sheet's own behaviour)
+ * whereas an untargeted Stabilize would spend an Action to accomplish nothing at all. Refusing costs
+ * nothing and the notification says exactly what to do about it.
+ */
+export function interceptStabilizeActivity(activity: any): boolean {
+  const actor = activity?.actor;
+  if (!actor || !isStabilizeActivity(activity?.item, activity)) return false;
+  if (!enabled()) return false;
+
+  const healer = tokenFor(actor);
+  if (!healer) {
+    log(`dying: ${String(actor?.name)} has no token; leaving the sheet's Stabilize alone`);
+    return false;
+  }
+
+  const patients = targetedTokens();
+  if (patients.length === 0) {
+    ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.Dying.FirstAidNoTarget"));
+    return true;
+  }
+
+  // The hook is synchronous and the check is not, so the answer is given now and the work runs after.
+  // A cancelled activity that then silently does nothing is the worst outcome available.
+  void (async () => {
+    try {
+      for (const patient of patients) await administerFirstAid(healer, patient);
+    } catch (err) {
+      log(`dying: the sheet's Stabilize button failed for ${String(actor?.name)}:`, err);
+      ui.notifications?.error(game.i18n.localize("NOODLRHOOKS.Combat.Dying.FirstAidUnexpected"));
+    }
+  })();
+  return true;
 }
 
 /** GM/player entry point: the selected token gives first aid to whatever it has targeted. */

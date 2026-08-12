@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.3
+
+### Four more buttons that were doing nothing
+
+Last release fixed the Hide button. That turned out to be one instance of a pattern rather than a bug
+on its own: several rules this module implements were reachable only by typing a command into the
+browser console, while the button for the same action sat on the action bar doing something else. So
+every one of the thirteen Player's Handbook actions was checked against what pressing it actually does,
+and the list is now on the record — `api.surveyActionButtons()` prints it for your own characters.
+
+- **Influence** now asks the GM the one question software cannot answer — is the creature willing,
+  hesitant or unwilling — and then rolls the real check on the influencing character's own sheet: DC 15
+  or the creature's Intelligence score, Advantage if it is Friendly, Disadvantage if it is Hostile, and
+  a failed attempt closes that approach for 24 hours. A player can press it; the GM's client answers.
+  With no GM connected it says so and costs nothing, because no ruling means no action was taken.
+- **Stabilize** administers first aid: a DC 10 Wisdom (Medicine) check on whatever you have targeted,
+  announced whether it lands or not, and the Action spent either way.
+- **Disengage** now stops opportunity attacks. It never did before. The item applies no condition of
+  its own, and the only thing this module could previously look for was an effect *named* something
+  like "disengage", which stock D&D 5e never creates — so the Action was spent and the creature was
+  struck at anyway as it walked away.
+- **Dodge** now grants what it says: attacks against you at Disadvantage while you can see the
+  attacker, Dexterity saves at Advantage, and both lost if you are Incapacitated or your Speed drops
+  to zero. **And it ends at the start of your next turn**, which nothing in the stack was doing —
+  D&D 5e ships the Dodging condition and reads it nowhere, so a Dodge taken in round one was still lit
+  in round nine.
+
+Help, Ready and Search remain unbuilt on purpose, and now say so rather than looking broken: Help is a
+promise about a roll somebody else makes later, Ready is a trigger written in prose, and a Search is one
+of four skills whose result is the GM's to interpret.
+
+Nothing else changed. Rogues keep Cunning Action intact — Dash, Disengage and Hide are still three
+separate things, and pressing one does not press the others.
+
 ## 0.2.2
 
 ### The Hide button on your sheet now actually hides you

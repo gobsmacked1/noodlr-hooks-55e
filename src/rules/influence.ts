@@ -32,6 +32,10 @@ import { GENERAL_SETTINGS, MODULE_ID, log, warn } from "../constants";
 import { isInfluenceEnabled } from "../settings";
 import { narrator, speakerFor } from "../util/speaker";
 import { isPrimaryGM } from "../util/gm";
+import { askGm, gmIsListening, registerQuery } from "../util/queries";
+import { targetedTokens, tokenFor } from "../util/tokens";
+import { isInfluenceActivity } from "../system/dnd5e-actions";
+import { affordable, payBill, slotLabel, turnBill } from "./economy/bill";
 import { announceRuling, requestBehavior } from "../integration/contract";
 import { difficultyBand, generalRulesApply } from "../system/dnd5e-checks";
 import {
@@ -135,6 +139,19 @@ async function setLock(target: any, approach: Approach): Promise<void> {
     clock,
     label: approach.label,
   };
+
+  // The lock lives on the creature being talked to, which is nearly always an NPC the player rolling
+  // the check has no permission to write. Nothing here can be done about that locally, so the write is
+  // handed to the GM's client — the same split the stance ruling uses, and for the same reason.
+  if (doc?.canUserModify?.(game.user, "update") === false) {
+    const done = await askGm<boolean>("influenceLock", {
+      targetUuid: String(doc?.uuid ?? ""),
+      locks,
+    });
+    if (!done) warn("influence: the 24-hour lockout was not recorded — no GM answered");
+    return;
+  }
+
   try {
     await doc?.setFlag?.(MODULE_ID, "influenceLocks", locks);
   } catch (err) {
@@ -227,6 +244,56 @@ async function askStance(target: any, approach: Approach): Promise<Stance | null
 }
 
 /**
+ * Get the ruling, from wherever the GM happens to be sitting.
+ *
+ * The judgement is the GM's by the rule's own wording, and the check is a roll on the influencing
+ * character's sheet, so the two halves of one action belong on two different clients. A GM answers in
+ * process; anyone else asks over a query and waits. Null means nobody ruled — an offline GM, a closed
+ * dialog, a timeout — and the attempt stops there rather than guessing a stance.
+ */
+async function resolveStance(target: any, approach: Approach): Promise<Stance | null> {
+  if (game.user?.isGM) return askStance(target, approach);
+  if (!gmIsListening()) {
+    ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.General.Influence.NoGM"));
+    return null;
+  }
+  ui.notifications?.info(game.i18n.localize("NOODLRHOOKS.General.Influence.Asking"));
+  return askGm<Stance>("influenceStance", {
+    targetUuid: String(target?.document?.uuid ?? target?.uuid ?? ""),
+    approach: approach.verb,
+  });
+}
+
+/**
+ * The GM's half of the two questions above.
+ *
+ * Registered at init on every client, because core looks a handler up on the receiving client and which
+ * client that is depends on who is playing. Both handlers resolve their subject by uuid rather than
+ * trusting anything richer off the wire.
+ */
+export function registerInfluenceQueries(): void {
+  registerQuery("influenceStance", async (data: any) => {
+    const doc: any = await (globalThis as any).fromUuid?.(String(data?.targetUuid ?? ""));
+    const token = doc?.object ?? doc;
+    if (!token) return null;
+    const approach = APPROACHES[String(data?.approach ?? "")] ?? APPROACHES.persuade;
+    return askStance(token, approach);
+  });
+
+  registerQuery("influenceLock", async (data: any) => {
+    const doc: any = await (globalThis as any).fromUuid?.(String(data?.targetUuid ?? ""));
+    if (!doc?.setFlag) return false;
+    try {
+      await doc.setFlag(MODULE_ID, "influenceLocks", data?.locks ?? {});
+      return true;
+    } catch (err) {
+      warn("influence: the GM could not record the lockout:", err);
+      return false;
+    }
+  });
+}
+
+/**
  * Make an Influence attempt.
  *
  * The roll is a real Foundry skill check on the influencing creature's own sheet, with the attitude's
@@ -268,8 +335,22 @@ export async function influence(options: InfluenceOptions): Promise<InfluenceRes
     }
   }
 
-  const stance = options.stance ?? (await askStance(target, approach));
+  // Influence is an Action, and until the sheet's button was intercepted the ordinary ledger charged it.
+  // Now that the button is handed over, the charge has to come from here or taking the action became
+  // free. Refused before the GM is bothered for a ruling and paid only once one arrives: a question
+  // nobody answered is not an action anybody took.
+  const bill = options.force ? null : turnBill(by.actor, "action");
+  if (!affordable(bill)) {
+    return {
+      ...none,
+      attitude: reading.attitude,
+      reason: `no ${slotLabel("action")} left this turn`,
+    };
+  }
+
+  const stance = options.stance ?? (await resolveStance(target, approach));
   if (!stance) return { ...none, attitude: reading.attitude, reason: "no ruling was given" };
+  payBill(bill);
 
   // The two branches with no dice in them. Note that an unwilling refusal sets no lockout: the rule
   // hangs the 24 hours on "a failed check", and no check was made.
@@ -402,6 +483,58 @@ async function report(
     incoming: true,
     context: { ...detail, by: String(by?.name ?? "?") },
   });
+}
+
+/**
+ * The sheet's own Influence button, routed through the rule above.
+ *
+ * Returns true when it has taken the action over, and the caller cancels the activity.
+ *
+ * The PHB item carries a `Use` activity and a `Check` activity, neither of which knows about attitude,
+ * the DC floor or the 24-hour lockout — pressing either spent an Action and rolled a bare skill check
+ * against nothing. Both are caught, because whichever the player picked, the same rule resolves it.
+ *
+ * WHICH APPROACH. The item does not say, so it is read from the activity's own name where the sheet
+ * offers a choice, and falls back to Persuasion. That is the common case and the recoverable one: a GM
+ * who wanted Deception can rule on the stance accordingly, and `api.influence({approach})` states it
+ * outright.
+ */
+export function interceptInfluenceActivity(activity: any): boolean {
+  const actor = activity?.actor;
+  if (!actor || !isInfluenceActivity(activity?.item, activity)) return false;
+  if (!enabled()) return false;
+
+  const by = tokenFor(actor);
+  if (!by) {
+    log(`influence: ${String(actor?.name)} has no token; leaving the sheet's Influence alone`);
+    return false;
+  }
+
+  const targets = targetedTokens();
+  if (targets.length === 0) {
+    ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.General.Influence.NoTarget"));
+    return true;
+  }
+
+  const approach = approachFromName(String(activity?.name ?? ""));
+  void (async () => {
+    try {
+      for (const target of targets) await influence({ by, target, approach });
+    } catch (err) {
+      warn(`influence: the sheet's Influence button failed for ${String(actor?.name)}:`, err);
+      ui.notifications?.error(game.i18n.localize("NOODLRHOOKS.General.Influence.Unexpected"));
+    }
+  })();
+  return true;
+}
+
+/** Which approach an activity's name names, if any. */
+function approachFromName(name: string): string {
+  const lower = name.toLowerCase();
+  for (const [key, approach] of Object.entries(APPROACHES)) {
+    if (lower.includes(key) || lower.includes(approach.skill)) return key;
+  }
+  return "persuade";
 }
 
 /* -------------------------------------------- */

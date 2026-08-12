@@ -14,17 +14,31 @@ import { announceRuling } from "../integration/contract";
 import { isConditionAutomationEnabled } from "../settings";
 import {
   ac5eOwnsConditions,
+  ac5eOwnsDodging,
   attackIsMelee,
   attackModifiers,
   autoFailsSave,
   critOnHitWithin5,
   hasStatus,
+  isDodging,
   isIncapacitated,
 } from "../system/dnd5e-conditions";
 import { isDnd5e } from "../system/dnd5e-rewards";
+import { blocked, centerOf } from "../core/positioning";
 
 function enabled(): boolean {
   return isDnd5e() && isConditionAutomationEnabled() && !ac5eOwnsConditions();
+}
+
+/**
+ * Dodge is gated separately, because the two stand-asides are not the same size.
+ *
+ * `ac5eOwnsConditions()` is true at AC5e's stock settings while its Dodge entry is switched off, so
+ * sharing one gate would hand the rule to a module that has been told not to enforce it. See
+ * `ac5eOwnsDodging()` for the settings and the line numbers.
+ */
+function dodgeEnabled(): boolean {
+  return isDnd5e() && isConditionAutomationEnabled() && !ac5eOwnsDodging();
 }
 
 function tokenCenter(token: any): { x: number; y: number; elev: number } | null {
@@ -134,17 +148,44 @@ function fearSourceVisible(attacker: any): boolean | null {
   return null;
 }
 
+/**
+ * Can the dodger see who is attacking it? The Dodge benefit hangs on this and nothing else does.
+ *
+ * An approximation, and stated as one: a sight ray between the two centres, plus the obvious refusal for
+ * a Blinded creature. It is not the per-creature detection-mode sweep `rules/perception.ts` runs, which
+ * would be the right answer and cannot be afforded inside a synchronous pre-roll hook that fires on
+ * every attack in the fight. It fails toward granting the Disadvantage: an unreadable canvas returns
+ * null from `blocked`, and a creature that took the Dodge action should get what it paid for unless
+ * something is definitely in the way.
+ */
+function dodgerSees(dodger: any, dodgerToken: any, attackerToken: any): boolean {
+  if (hasStatus(dodger, "blinded")) return false;
+  const from = centerOf(dodgerToken);
+  const to = centerOf(attackerToken);
+  if (!from || !to) return true;
+  return blocked(from, to, "sight") !== true;
+}
+
 function applyAttackFlags(config: any): void {
-  if (!enabled()) return;
   const attacker = actorOfAttack(config);
   const activity = activityOf(config);
   if (!attacker) return;
   const target = primaryTarget();
   const melee = attackIsMelee(activity);
   const fearVis = fearSourceVisible(attacker);
-  const mods = attackModifiers(attacker, target?.actor ?? null, melee, {
-    fearSourceVisible: fearVis,
-  });
+  const mods = enabled()
+    ? attackModifiers(attacker, target?.actor ?? null, melee, { fearSourceVisible: fearVis })
+    : { advantage: [] as string[], disadvantage: [] as string[] };
+
+  // "Attack rolls against you have Disadvantage if you can see the attacker." Folded in here rather
+  // than into `attackModifiers` because it needs both tokens, and that function is deliberately pure
+  // over actors so the planner and the survey can call it with nothing placed.
+  if (dodgeEnabled() && target?.actor && isDodging(target.actor)) {
+    if (dodgerSees(target.actor, target.token, controlledTokenFor(attacker))) {
+      mods.disadvantage.push("vs:dodging");
+    }
+  }
+
   if (!mods.advantage.length && !mods.disadvantage.length) return;
 
   if (mods.advantage.length) config.advantage = true;
@@ -162,6 +203,27 @@ function applyAttackFlags(config: any): void {
       (mods.disadvantage.length ? ` DIS[${mods.disadvantage.join(",")}]` : "") +
       (target?.actor ? ` vs ${target.actor.name}` : ""),
   );
+}
+
+/**
+ * "You make Dexterity saving throws with Advantage" — the other half of the Dodge action.
+ *
+ * Written onto the config AND the first roll's options, the same pair `applyAttackFlags` sets, because
+ * dnd5e reads the roll's own options when it applies keybindings and a config-only flag can be lost.
+ */
+function applySaveAdvantage(config: any): void {
+  if (!dodgeEnabled()) return;
+  if (String(config?.ability ?? "").toLowerCase() !== "dex") return;
+  const actor = config?.subject ?? null;
+  if (!isDodging(actor)) return;
+
+  config.advantage = true;
+  const roll = config.rolls?.[0];
+  if (roll) {
+    roll.options ??= {};
+    roll.options.advantage = true;
+  }
+  log(`conditions: ${String(actor?.name)} is Dodging — DEX save at advantage`);
 }
 
 async function autoFailSave(config: any, dialog: any, message: any): Promise<boolean> {
@@ -248,6 +310,26 @@ function forceCritOnHit(rolls: any[], data: { subject?: any }): void {
   }
 }
 
+/**
+ * Auto-fail first, then Dodge. Returning false cancels the roll.
+ *
+ * The auto-fail gate is repeated inside rather than left to the async announcement: cancelling is the
+ * synchronous `return false`, so a check that lived only in the message would kill the roll while saying
+ * nothing about it, with the feature switched off. Dodge answers to its own gate — see `dodgeEnabled`.
+ */
+function onPreRollSave(config: any, dialog: any, message: any): boolean | undefined {
+  if (enabled()) {
+    const actor = config?.subject;
+    const ability = String(config?.ability ?? "");
+    if (autoFailsSave(actor, ability)) {
+      void autoFailSave(config, dialog, message);
+      return false;
+    }
+  }
+  applySaveAdvantage(config);
+  return undefined;
+}
+
 export function registerConditionHooks(): void {
   // Always register; each handler self-gates on system + setting so toggling mid-session works.
 
@@ -271,27 +353,14 @@ export function registerConditionHooks(): void {
   // saying nothing about it — silently, and with the feature switched off.
   Hooks.on("dnd5e.preRollSavingThrow", (config: any, dialog: any, message: any) => {
     try {
-      if (!enabled()) return;
-      // Synchronous hook; kick the async post and cancel immediately when auto-fail applies.
-      const actor = config?.subject;
-      const ability = String(config?.ability ?? "");
-      if (autoFailsSave(actor, ability)) {
-        void autoFailSave(config, dialog, message);
-        return false;
-      }
+      return onPreRollSave(config, dialog, message);
     } catch (err) {
       log("conditions: preRollSavingThrow failed:", err);
     }
   });
   Hooks.on("dnd5e.preRollSavingThrowV2", (config: any, dialog: any, message: any) => {
     try {
-      if (!enabled()) return;
-      const actor = config?.subject;
-      const ability = String(config?.ability ?? "");
-      if (autoFailsSave(actor, ability)) {
-        void autoFailSave(config, dialog, message);
-        return false;
-      }
+      return onPreRollSave(config, dialog, message);
     } catch (err) {
       log("conditions: preRollSavingThrowV2 failed:", err);
     }
@@ -327,8 +396,12 @@ export function surveyConditions(): unknown {
   const dist = actor && target?.token && token ? tokenDistance(token, target.token) : null;
   return {
     enabled: enabled(),
+    dodgeEnabled: dodgeEnabled(),
     settingOn: isConditionAutomationEnabled(),
     ac5eOwns: ac5eOwnsConditions(),
+    ac5eOwnsDodge: ac5eOwnsDodging(),
+    attackerDodging: actor ? isDodging(actor) : null,
+    targetDodging: target?.actor ? isDodging(target.actor) : null,
     system: String((game as any).system?.id ?? ""),
     attacker: actor?.name ?? null,
     incapacitated: actor ? isIncapacitated(actor) : null,

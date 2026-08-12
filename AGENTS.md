@@ -1731,6 +1731,74 @@ broken, and it is the single most likely thing to be reported as a bug in this r
  died silently with condition automation switched off. Fixed in the same change. A synchronous
  `return false` needs its own gate; a check in the async half guards the message, not the cancellation.
 
+## Every button on the bar, and what it does (v0.2.3, 2026-08-11)
+
+The Hide bug was not one bug. It was one instance of a shape — **an action we implement, reachable only
+from the console, sitting beside a button on the player's screen that does something else** — and the
+right response to finding one was to enumerate the rest rather than fix the one that got reported. The
+user said so within ten seconds of resuming smoke-testing, and they were right: three more were live.
+
+`src/system/dnd5e-actions.ts` is the answer and the inventory. **`PHB_ACTIONS` lists all thirteen 2024
+general actions with a `handling` and a note**, `api.surveyActionButtons()` prints it against the world's
+actual sheets with a carrier count, and `test/economy.test.ts` asserts that the set marked `intercepted`
+is exactly the set `enforce.ts` hands over. A fifth interception that forgets its hand-over now fails a
+test instead of failing quietly at a table.
+
+- **Argon is not a rules module and never was, which is why this was reachable at all.** Read from
+ `enhancedcombathud-dnd5e/scripts/echDnd5e.js`: each basic-action button is a `DND5eSpecialActionButton`
+ resolving three ways — Convenient Effects if it holds an effect of the same NAME (`:1147`), else **the
+ actor's own item matched by localized name** (`:1111`) used through the ordinary `activity.use()`, else
+ a bare chat card plus a direct status toggle for the only two that name one (`:1164`, dodging and
+ hiding). Route 2 is why intercepting `dnd5e.preUseActivity` catches the bar for free in any world
+ carrying the PHB content, and route 1 is why **Dodge specifically does not arrive that way**: CE ships a
+ "Dodge" effect and no "Hide". Argon's `consumeActionEconomy` is display state on its own panel objects
+ and writes nothing to the actor, so route 3 spends nothing either.
+- **Newly wired: Influence, Administer First Aid, Disengage and Dodge.** The first two are intercepted
+ beside Hide in `police()`; the second two are *observed*, because there is nothing to adjudicate in
+ them and cancelling a working button to reimplement it buys nothing.
+- **Influence is the first rule that needs two clients, and `src/util/queries.ts` is how.** The rule's own
+ wording — "the DM then determines whether the monster feels willing, unwilling, or hesitant" — puts the
+ judgement on the GM, while the check is a roll on the player's sheet and the lockout is a flag on an NPC
+ token the player cannot write. `CONFIG.queries` (v13+) is core's addressed request/response channel: it
+ returns a promise, it has a timeout, and it is what Aura Effects uses to funnel writes to one client. A
+ socket would have meant inventing correlation ids, a reply channel and a timeout that all already exist.
+ Handlers are registered on **every** client because core resolves a query on the receiving one, and a GM
+ asking answers in-process rather than over the wire. **A null answer is a real outcome** — offline GM,
+ closed dialog, timeout are indistinguishable — and every caller must treat it as "no ruling", never as a
+ default. Influence is also billed here (`rules/economy/bill.ts`) precisely because intercepting the
+   button took it out of the ledger's hands; checked before the GM is bothered, paid only once a ruling
+   arrives. **`bill.ts` is now the only answer to "is it this creature's turn"** for the three rules that
+   resolve themselves — Hide, Administer First Aid and Influence — which had grown three copies of that
+   test and would eventually have disagreed. It deliberately does not carry `enforce.ts`'s over-budget
+   dialog: that exists for features which legitimately break the general rule, and every one of those
+   works by raising the allowance through `flags.noodlr.extraAction`, so a self-resolving rule refuses and
+   says why instead.
+- **Dodge's expiry is the half that mattered, and it is deliberately NOT gated on who owns the rules.**
+ dnd5e ships a `dodging` status read by nothing, AC5e reads it and never writes it, and the PHB item
+ carries no duration — so "until the start of your next turn" was enforced by nobody and a round-one
+ Dodge was still lit in round nine. An icon that lies is worse than an unautomated rule, and clearing a
+ stale marker is bookkeeping rather than a rules opinion, so `rules/dodge.ts` expires it whenever the
+ condition layer is on even when `ac5eOwnsDodging()` is true.
+ - **`toggleStatusEffect(id, {active: false})` is not enough to clear it.** Core resolves the effect to
+ delete by the status's static `_id` when it has one (`client/documents/actor.mjs:496`) and every
+ dnd5e condition has one, so it deletes the system's marker and walks past CE's identically-statused
+ effect — which, on a world with CE installed, is the one Argon actually created. Delete by reading
+ `effect.statuses` off the actor instead, single-status effects only.
+- **Disengage's mark is turn-stamped and never cleared**, the action ledger's trick: a stamp that belongs
+ to another turn reads as absent, so nothing has to remember to reset it and every client computes the
+ same answer. Before this, `reactions.ts` could only detect a Disengage by matching an effect NAME against
+ `/disengag|withdraw/` — a premade-library convention the system does not follow — so on a stock world the
+ button spent an Action and the creature was struck at anyway as it walked away.
+- **`isActionActivity` needed a `featOnly` guard the moment it was generalised.** "Attack" and "Magic" are
+ ordinary English inside a statblock: a longsword's `Attack` activity matched the PHB declaration by name,
+ which for `phbActionOf` meant a wildly inflated census and for anything that later billed off it would
+ have meant exempting that weapon from the economy permanently. `dnd5e-declarations.ts` had always carried
+ the same guard; generalising the recogniser is what nearly lost it. Caught by a test, not by review.
+- **Still unbuilt, and now saying so on the record:** Help (a pledge of Advantage on a roll made later,
+ with nothing to hang it on), Ready (a prose trigger, and the reaction it buys is billed as an Action —
+ the known imperfection already recorded under the declarations note), and Search (the roll is one skill
+ of four and the reading is the GM's). Study and Utilize stay refused in `rules/general.ts`.
+
 ## Configuration, not code: what to tell a GM
 
 Problems reported as module bugs that were world configuration, or another module's defaults, instead.
