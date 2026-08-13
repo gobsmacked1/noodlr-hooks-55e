@@ -21,6 +21,7 @@ import { isPrimaryGM } from "../util/gm";
 import { narrator, speakerFor } from "../util/speaker";
 import {
   isExecutable,
+  isStanding,
   type Capability,
   type CapabilityRule,
   type TriggerEvent,
@@ -39,6 +40,7 @@ import {
 } from "./primitives";
 import { clearUse, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
 import { onDamageTaken } from "./damage-log";
+import { noteRepeatSave } from "../rules/repeat-save";
 
 // ---- Firing -------------------------------------------------------------------------------------
 
@@ -223,6 +225,16 @@ async function applyEffect(
       if (!who) return { ok: false, reason: "no target for the condition" };
       const status = String(effect.status).toLowerCase();
       const ok = await setCondition(who, status, true);
+      // A descriptor that states a DC and an ability alongside the status is stating the escape
+      // clause too — "repeat the save at the end of each of its turns" — so register it here rather
+      // than asking the compiler for a second rule that would only ever accompany this one.
+      if (ok) {
+        const dc = Number(effect.dc);
+        const ability = String(effect.ability ?? "");
+        if (Number.isFinite(dc) && ability) {
+          await noteRepeatSave(who, { status, ability, dc, source: capability.label });
+        }
+      }
       return { ok, reason: ok ? undefined : `already ${status}`, detail: `is ${status}` };
     }
 
@@ -471,6 +483,10 @@ export function surveyCapabilities(): Record<string, unknown> {
           does: rule.effect?.kind,
           adjudication: rule.adjudication,
           runs: isExecutable(rule),
+          // A standing fact is not dead code. `runs` answers "will a hook fire this", which is false
+          // for every `always` rule by construction; `standing` answers "is this read when asked",
+          // which is what a third of the compiled corpus actually does.
+          standing: isStanding(rule),
           uses: rule.uses ? `${rule.uses.max} per ${rule.uses.per}` : "unlimited",
         })),
       })),

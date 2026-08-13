@@ -27,9 +27,12 @@
 
 import { MODULE_ID, log } from "../constants";
 import { narrator, speakerFor } from "../util/speaker";
+import { readFlag } from "../util/flags";
 import { isJumpEnabled } from "../settings";
 import { generalRulesApply, JUMP_RUN_UP, jumpDistances } from "../system/dnd5e-checks";
 import type { JumpDistances } from "../system/dnd5e-checks";
+import { isJumpBoostActivity } from "../system/dnd5e-jump";
+import { stampFor } from "./economy/ledger";
 
 /** Core's key for the jump movement action. */
 export const JUMP_ACTION = "jump";
@@ -146,11 +149,79 @@ export function runUpSoFar(doc: any): number {
   return total;
 }
 
+const BOOST_FLAG = "jumpDoubled";
+
+/** The combatant this actor is fighting as, if it is in the fight at all. */
+function combatantFor(combat: any, actor: any): any {
+  const uuid = String(actor?.uuid ?? "");
+  const id = String(actor?.id ?? "");
+  return (combat?.combatants ?? []).find?.(
+    (c: any) => String(c?.actor?.uuid ?? "") === uuid || String(c?.actor?.id ?? "") === id,
+  );
+}
+
+/**
+ * Write down that this creature's jump is doubled for the turn it is currently taking.
+ *
+ * Turn-stamped and never cleared, the action ledger's trick and Disengage's: a stamp belonging to
+ * another turn reads as absent, so nothing has to remember to reset it, every client computes the same
+ * answer, and a fight that ends mid-turn leaves nothing stale behind. "For the turn" then becomes
+ * literally what is stored rather than something a hook has to enforce.
+ *
+ * Outside a fight there is no turn to double for, and no veto is applied to a GM staging a scene
+ * anyway, so nothing is recorded.
+ */
+export async function noteJumpBoost(actor: any): Promise<boolean> {
+  const combat: any = game.combat;
+  if (!combat?.started || !actor) return false;
+  const combatant = combatantFor(combat, actor);
+  if (!combatant) return false;
+
+  try {
+    await actor.setFlag?.(MODULE_ID, BOOST_FLAG, stampFor(combat, combatant));
+    log(`jump: ${String(actor.name)} doubled its jump distance for this turn`);
+    return true;
+  } catch (err) {
+    // Losing the mark widens nothing and narrows the allowance, so it is worth a line in the log —
+    // this is the one direction that can produce a false refusal.
+    log(`jump: could not record ${String(actor?.name)}'s jump boost:`, err);
+    return false;
+  }
+}
+
+/** Is this creature's jump doubled on the turn it is taking right now? */
+export function hasJumpBoost(actor: any): boolean {
+  const combat: any = game.combat;
+  if (!combat?.started) return false;
+  const combatant = combatantFor(combat, actor);
+  if (!combatant) return false;
+  return String(readFlag(actor, BOOST_FLAG) ?? "") === stampFor(combat, combatant);
+}
+
+/**
+ * Watch for Step of the Wind, wherever it was pressed.
+ *
+ * `postUseActivity` rather than `preUseActivity`, for the same reason Disengage uses it: the mark
+ * should record a Focus Point that was actually spent, and a use can still be refused in between.
+ * Registered on every client, because the client that presses owns the sheet and is the only one
+ * allowed to write the flag.
+ */
+export function registerJumpWatch(): void {
+  Hooks.on("dnd5e.postUseActivity", (activity: any) => {
+    try {
+      if (!isJumpBoostActivity(activity?.item, activity)) return;
+      void noteJumpBoost(activity?.actor);
+    } catch (err) {
+      log("jump: the Step of the Wind watch failed:", err);
+    }
+  });
+}
+
 /** What this token can clear from where it is standing. Null when the rules do not apply. */
 export function jumpState(doc: any): JumpState | null {
   const actor = doc?.actor ?? doc;
   if (!actor) return null;
-  const distances = jumpDistances(actor);
+  const distances = jumpDistances(actor, { doubled: hasJumpBoost(actor) });
   if (distances.unreadable) return null;
 
   const runUp = runUpSoFar(doc);
@@ -174,7 +245,7 @@ export function jumpState(doc: any): JumpState | null {
  * creature choosing to jump a gap will take the run-up.
  */
 export function jumpReach(actor: any): number {
-  return jumpDistances(actor).longRunning;
+  return jumpDistances(actor, { doubled: hasJumpBoost(actor) }).longRunning;
 }
 
 /**
@@ -297,7 +368,11 @@ export function surveyJump(): unknown {
     movementAction: String(doc?.movementAction ?? ""),
     // dnd5e's own field, shown beside ours so the discrepancy is visible rather than mysterious.
     systemJumpSpeed: Number(token?.actor?.system?.attributes?.movement?.jump ?? NaN),
-    state: state ?? "unreadable — no Strength score on this sheet",
+    // Named so a surprising allowance can be traced to the trait that produced it rather than
+    // reported as the module inventing a number.
+    modifiers: state?.distances.modifiers ?? [],
+    doubledThisTurn: hasJumpBoost(token?.actor),
+    state: state ?? "unreadable — no ability score and no stated distance on this sheet",
     notAutomated: [
       "DC 10 Athletics to clear a low obstacle — at the DM's option, and Foundry models no obstacle heights",
       "DC 10 Acrobatics or Prone on landing in difficult terrain — checkable, deliberately left to the GM",

@@ -52,16 +52,21 @@
           {{else}}
             <ol class="noodlr-capability__rules">
               {{#each this.rules}}
-                <li class="{{#unless this.runs}}inert{{/unless}}">
+                <li class="{{#if this.inert}}inert{{/if}}">
                   <span class="rule-text">{{this.text}}</span>
                   <span class="rule-tags">
                     <span class="noodlr-badge">{{this.adjudication}}</span>
                     {{#if this.uses}}<span class="noodlr-badge">{{this.uses}}</span>{{/if}}
-                    {{#unless this.runs}}
+                    {{#if this.standing}}
+                      <span class="noodlr-badge" data-tooltip="{{localize 'NOODLRHOOKS.Capabilities.Sheet.StandingHint'}}">
+                        {{localize "NOODLRHOOKS.Capabilities.Sheet.Standing"}}
+                      </span>
+                    {{/if}}
+                    {{#if this.inert}}
                       <span class="noodlr-badge inert" data-tooltip="{{localize 'NOODLRHOOKS.Capabilities.Sheet.InertHint'}}">
                         {{localize "NOODLRHOOKS.Capabilities.Sheet.Inert"}}
                       </span>
-                    {{/unless}}
+                    {{/if}}
                   </span>
                   {{#if this.note}}<p class="notes">{{this.note}}</p>{{/if}}
                 </li>

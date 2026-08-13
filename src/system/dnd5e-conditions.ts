@@ -8,7 +8,7 @@
 //
 // This file is the rule table. The hook engine that applies it lives in `rules/conditions.ts`.
 
-import { moduleActive, moduleSetting } from "../util/modules";
+import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 import { isDnd5e } from "./dnd5e-rewards";
 
 /** Statuses that grant advantage on attack rolls against the creature that has them. */
@@ -248,4 +248,49 @@ export function ac5eOwnsIncapacitatedUse(): boolean {
   if (!isDnd5e()) return false;
   const mode = ac5eSetting("autoArmorSpellUse");
   return Boolean(mode && mode !== "off");
+}
+
+/**
+ * Is somebody else already applying the unseen-attacker and unseen-target rules?
+ *
+ * Both of AC5e's gates ship ON, so on a world that has AC5e at all the answer is normally yes.
+ * `addSyntheticVisibilityAttackOptins` (`ac5e-setpieces.mjs:813`) runs whenever `automateStatuses`
+ * and `visibilityChecks` are both set — the latter registers `default: true` at
+ * `ac5e-settings.mjs:184-189` — and pushes a Disadvantage entry for "cannot see target" and an
+ * Advantage entry for "target cannot see attacker", each passed to `addDefaultOptinSelection(…,
+ * true)`, i.e. ticked rather than merely offered.
+ *
+ * The midi arm is not an extra safety net but the same rule arriving from AC5e's own stand-aside:
+ * `midiHandlesInvisibilityAttackRules` (`:783`) makes AC5e withdraw when midi's `invisAdvantage`
+ * optional rule is live, and in that case midi is applying it, so we still must not.
+ */
+export function visibilityAttackRulesOwned(): boolean {
+  if (!isDnd5e()) return false;
+  if (ac5eOwnsConditions() && ac5eSetting("visibilityChecks") === true) return true;
+  const midi = midiConfig();
+  if (!midi?.optionalRulesEnabled) return false;
+  return midiOn(midi?.optionalRules?.invisAdvantage);
+}
+
+/**
+ * Is somebody else applying Disadvantage to a ranged attack made beside an enemy?
+ *
+ * Almost always no, and that is the finding. AC5e has the rule — `rangedNearbyFoes` inside
+ * `autoRangeChecks` — but that setting is a SetField registering `default: []`
+ * (`ac5e-settings.mjs:213-229`), so every one of its range checks is off until a GM ticks it. midi's
+ * `nearbyFoe` sits under `optionalRules`, which `optionalRulesEnabled` gates and which ships false.
+ * At stock settings for both modules this rule is enforced by nobody, which is why we enforce it.
+ */
+export function rangedNearbyFoeOwned(): boolean {
+  if (!isDnd5e()) return false;
+  const checks = ac5eSetting("autoRangeChecks") as any;
+  try {
+    if (checks && typeof checks.has === "function" && checks.has("rangedNearbyFoes")) return true;
+    if (Array.isArray(checks) && checks.includes("rangedNearbyFoes")) return true;
+  } catch {
+    /* an unreadable setting is not evidence that somebody else owns the rule */
+  }
+  const midi = midiConfig();
+  if (!midi?.optionalRulesEnabled) return false;
+  return Boolean(midi?.optionalRules?.nearbyFoe);
 }

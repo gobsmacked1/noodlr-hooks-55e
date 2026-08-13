@@ -13,6 +13,7 @@
 
 import { pickNumber, systemPaths } from "./profiles";
 import { isDnd5e } from "./dnd5e-rewards";
+import { jumpProfile } from "./dnd5e-jump";
 import { rulesVersion } from "./dnd5e-stealth";
 
 /**
@@ -63,6 +64,21 @@ export interface JumpDistances {
   highStanding: number;
   /** True when neither number could be read off the sheet and both are guesses of zero. */
   unreadable: boolean;
+  /** Features that changed these numbers, named for the card and the diagnostics. */
+  modifiers: string[];
+}
+
+export interface JumpOptions {
+  /**
+   * Whether the turn-scoped doubling is running — Step of the Wind, and anything else a rules layer
+   * decides has doubled this creature's jump for the turn.
+   *
+   * Passed in rather than read here on purpose: everything else in this file is a fact about a sheet
+   * and can be answered from the actor alone, while "was a Focus Point spent this turn" is turn
+   * ledger state that belongs with the rest of the turn's bookkeeping. A system table that reached
+   * for the combat round would stop being a table.
+   */
+  doubled?: boolean;
 }
 
 /**
@@ -86,34 +102,63 @@ export interface JumpDistances {
  * jump and only that. It exists to colour the drag ruler while the jump movement action is selected.
  * Reading it would silently halve every running jump and would have no answer at all for the high
  * jump, so the ability figures are read directly.
+ *
+ * **The general rule is only the starting point.** Whatever `jumpProfile()` found on the sheet is
+ * applied on top: a different ability, a flat bonus, a multiplier, or a stated distance that replaces
+ * the calculation outright. That layer exists because a veto built on the bare rule refuses legal
+ * leaps — a bullywug's Standing Leap is 20 feet against a Strength 12, so every jump it ever made was
+ * blocked with a confident and wrong number. See `dnd5e-jump.ts`.
  */
-export function jumpDistances(actor: any): JumpDistances {
+export function jumpDistances(actor: any, options: JumpOptions = {}): JumpDistances {
   const P = systemPaths();
-  const score = pickNumber(actor, P.strength);
-  const stated = pickNumber(actor, P.strengthMod);
+  const profile = jumpProfile(actor);
+
+  const scorePaths = profile.ability === "dex" ? P.dexterity : P.strength;
+  const modPaths = profile.ability === "dex" ? P.dexterityMod : P.strengthMod;
+  const score = pickNumber(actor, scorePaths);
+  const stated = pickNumber(actor, modPaths);
   const modifier = stated ?? (score === null ? null : Math.floor((score - 10) / 2));
 
-  if (score === null && modifier === null) {
+  // A stated distance stands on its own, so a creature whose ability scores are unreadable but whose
+  // trait says "Long Jump is up to 20 feet" still gets a number. Only the case where NOTHING is
+  // readable is a genuine unreadable.
+  const hasStated =
+    profile.fixedLong !== null || profile.fixedHigh !== null || profile.fixedRunningLong !== null;
+  if (score === null && modifier === null && !hasStated) {
     return {
       longRunning: 0,
       longStanding: 0,
       highRunning: 0,
       highStanding: 0,
       unreadable: true,
+      modifiers: profile.sources,
     };
   }
 
-  const longRunning = Math.max(0, score ?? 0);
-  const highRunning = Math.max(0, 3 + (modifier ?? 0));
-  return {
-    longRunning,
-    // Halved distances round down: half of a Strength 15's fifteen feet is seven, not seven and a
-    // half, because the grid has no half squares and the rules round down everywhere else.
-    longStanding: Math.floor(longRunning / 2),
-    highRunning,
-    highStanding: Math.floor(highRunning / 2),
-    unreadable: false,
-  };
+  const multiplier = profile.multiplier * (options.doubled ? 2 : 1);
+  const scale = (feet: number) => Math.floor(Math.max(0, feet + profile.bonus) * multiplier);
+
+  const baseLong = Math.max(0, score ?? 0);
+  const baseHigh = Math.max(0, 3 + (modifier ?? 0));
+
+  // Halved distances round down: half of a Strength 15's fifteen feet is seven, not seven and a half,
+  // because the grid has no half squares and the rules round down everywhere else. Halving happens
+  // BEFORE the bonus and the multiplier — Step of the Wind doubles the jump the creature is making,
+  // not the score it derives from.
+  const longRunning = scale(profile.fixedLong ?? profile.fixedRunningLong ?? baseLong);
+  const highRunning = scale(profile.fixedHigh ?? baseHigh);
+  let longStanding = scale(profile.fixedLong ?? Math.floor(baseLong / 2));
+  let highStanding = scale(profile.fixedHigh ?? Math.floor(baseHigh / 2));
+
+  // "with or without a running start": the trait's whole point is that standing costs nothing, and
+  // it holds even when no distance could be parsed out of the prose. That half needs no arithmetic
+  // and is the half that fixes the common false refusal.
+  if (profile.noRunUp) {
+    longStanding = Math.max(longStanding, longRunning);
+    highStanding = Math.max(highStanding, highRunning);
+  }
+
+  return { longRunning, longStanding, highRunning, highStanding, unreadable: false, modifiers: profile.sources };
 }
 
 /**

@@ -52,6 +52,12 @@ export interface SystemPaths {
    */
   strength: string[];
   strengthMod: string[];
+  /**
+   * Dexterity, same score/modifier split and for the same reason: a rogue with Second-Story Work
+   * jumps on Dexterity, and the long jump still wants the SCORE.
+   */
+  dexterity: string[];
+  dexterityMod: string[];
   hpValue: string[];
   hpMax: string[];
   armor: string[];
@@ -112,6 +118,8 @@ const GENERIC: SystemPaths = {
   // fighter's sixteen-foot long jump into three feet, and does it without any error to notice.
   strength: ["system.abilities.str.value"],
   strengthMod: ["system.abilities.str.mod"],
+  dexterity: ["system.abilities.dex.value"],
+  dexterityMod: ["system.abilities.dex.mod"],
   hpValue: ["system.attributes.hp.value", "system.hp.value", "system.health.value"],
   hpMax: ["system.attributes.hp.max", "system.hp.max", "system.health.max"],
   armor: ["system.attributes.ac.value", "system.armorClass.value", "system.ac.value"],
@@ -165,6 +173,8 @@ const PROFILES: Record<string, Partial<SystemPaths>> = {
     // the modifier: a caller that needs a score must get nothing and say so.
     strength: [],
     strengthMod: ["system.abilities.str.mod"],
+    dexterity: [],
+    dexterityMod: ["system.abilities.dex.mod"],
     hpValue: ["system.attributes.hp.value"],
     hpMax: ["system.attributes.hp.max"],
     armor: ["system.attributes.ac.value"],

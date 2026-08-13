@@ -25,6 +25,7 @@
 import { MODULE_ID, log } from "../constants";
 import { readFlag } from "../util/flags";
 import { isDisengageActivity } from "../system/dnd5e-actions";
+import { grantsExemptMovement } from "../system/dnd5e-reactions";
 import { stampFor } from "./economy/ledger";
 
 const FLAG = "disengaged";
@@ -48,7 +49,7 @@ function combatantFor(combat: any, actor: any): any {
  * recorded — pressing the button out of combat is a player telling the table what they are doing, which
  * is what the chat card is for.
  */
-export async function noteDisengage(actor: any): Promise<boolean> {
+export async function noteDisengage(actor: any, reason = "disengaged"): Promise<boolean> {
   const combat: any = game.combat;
   if (!combat?.started || !actor) return false;
   const combatant = combatantFor(combat, actor);
@@ -56,7 +57,7 @@ export async function noteDisengage(actor: any): Promise<boolean> {
 
   try {
     await actor.setFlag?.(MODULE_ID, FLAG, stampFor(combat, combatant));
-    log(`reaction: ${String(actor.name)} disengaged; its movement provokes nothing this turn`);
+    log(`reaction: ${String(actor.name)} ${reason}; its movement provokes nothing this turn`);
     return true;
   } catch (err) {
     // A player pressing Disengage on their own character always may; anything else is a sheet they do
@@ -104,8 +105,16 @@ export function hasDisengaged(actor: any): boolean {
 export function registerDisengageWatch(): void {
   Hooks.on("dnd5e.postUseActivity", (activity: any) => {
     try {
-      if (!isDisengageActivity(activity?.item, activity)) return;
-      void noteDisengage(activity?.actor);
+      // Twenty other features hand out movement that does not provoke — Cunning Strike's Withdraw,
+      // Remarkable Athlete, Tactical Shift and the rest. They are recorded through the same mark
+      // rather than a parallel one, which is the whole reason it is a mark and not a Disengage flag.
+      // See `dnd5e-reactions.ts` for why the half-Speed bound is deliberately not enforced.
+      const granted = grantsExemptMovement(activity?.item, activity);
+      if (!granted && !isDisengageActivity(activity?.item, activity)) return;
+      void noteDisengage(
+        activity?.actor,
+        granted ? `used ${String(activity?.item?.name ?? "a feature")}` : "disengaged",
+      );
     } catch (err) {
       log("reaction: the Disengage watch failed:", err);
     }

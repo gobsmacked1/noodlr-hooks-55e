@@ -160,6 +160,11 @@ export function registerCombatSettings(): void {
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.importantNpcSaves, "Dying.Important", Boolean, true);
   split(COMBAT_SETTINGS.concentration, "Concentration", Boolean, { npc: true, pc: true });
+  // Deliberately NOT split by audience, unlike the two above it. Those ask what happens to a creature
+  // on its own account; this one is the escape clause of an effect somebody else put on it, and a world
+  // where the goblins can shake off a Hold Person the party cannot is not a preference anyone has — it
+  // is the same rule read two ways at the same table.
+  world(COMBAT_SETTINGS.repeatSaves, "RepeatSaves", Boolean, true);
   world(COMBAT_SETTINGS.autoEnd, "AutoEnd", Boolean, true);
 
   general(GENERAL_SETTINGS.jump, "Jump", Boolean, true);
@@ -347,6 +352,19 @@ export function honorImportantNpcDeathSaves(): boolean {
  */
 export function isConcentrationAutomationEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.concentration, subject);
+}
+
+/**
+ * Does "it can repeat the saving throw at the end of each of its turns" actually happen?
+ *
+ * Nobody does this. dnd5e models the clause nowhere — an Active Effect carries a duration and a status
+ * and has no field for a save that ends it early — so the effect simply runs its full length unless a
+ * human remembers, every round, for every afflicted creature. midi's `OverTime` can express it, but
+ * only on items that were authored with it (DDB imports, mostly), and only when midi is installed.
+ * On by default, because a save the rules grant and nobody rolls is a rule that is not being played.
+ */
+export function isRepeatSaveEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.repeatSaves));
 }
 
 /**

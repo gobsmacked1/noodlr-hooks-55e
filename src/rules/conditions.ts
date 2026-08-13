@@ -22,7 +22,10 @@ import {
   hasStatus,
   isDodging,
   isIncapacitated,
+  rangedNearbyFoeOwned,
+  visibilityAttackRulesOwned,
 } from "../system/dnd5e-conditions";
+import { sightModifiers } from "./unseen";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { blocked, centerOf } from "../core/positioning";
 
@@ -184,6 +187,21 @@ function applyAttackFlags(config: any): void {
     if (dodgerSees(target.actor, target.token, controlledTokenFor(attacker))) {
       mods.disadvantage.push("vs:dodging");
     }
+  }
+
+  // Unseen attacker, unseen target, and a ranged shot taken beside an enemy. Gated separately from
+  // the status matrix because their contenders are separate: AC5e ships visibility ON and its range
+  // checks OFF, so on the same table the first two are its and the third is nobody's but ours.
+  if (isConditionAutomationEnabled()) {
+    const geometry = sightModifiers({
+      attackerToken: controlledTokenFor(attacker),
+      targetToken: target?.token,
+      melee,
+      skipVisibility: visibilityAttackRulesOwned(),
+      skipCrowding: rangedNearbyFoeOwned(),
+    });
+    mods.advantage.push(...geometry.advantage);
+    mods.disadvantage.push(...geometry.disadvantage);
   }
 
   if (!mods.advantage.length && !mods.disadvantage.length) return;
@@ -400,6 +418,8 @@ export function surveyConditions(): unknown {
     settingOn: isConditionAutomationEnabled(),
     ac5eOwns: ac5eOwnsConditions(),
     ac5eOwnsDodge: ac5eOwnsDodging(),
+    visibilityOwnedElsewhere: visibilityAttackRulesOwned(),
+    rangedNearbyOwnedElsewhere: rangedNearbyFoeOwned(),
     attackerDodging: actor ? isDodging(actor) : null,
     targetDodging: target?.actor ? isDodging(target.actor) : null,
     system: String((game as any).system?.id ?? ""),
@@ -408,7 +428,11 @@ export function surveyConditions(): unknown {
     target: target?.actor?.name ?? null,
     distance: dist,
     attackModifiers: mods,
-    targetAutoFailStrDex: target?.actor ? autoFailsSave(target.actor, "str") : null,
+    // Reported for BOTH melee and ranged whatever the survey's `melee` says, because the question a
+    // GM brings here is "why did that shot have Disadvantage", and answering only about a melee swing
+    // hides the crowding rule exactly when it is being asked about.
+    sightMelee: sightModifiers({ attackerToken: token, targetToken: target?.token, melee: true }),
+    sightRanged: sightModifiers({ attackerToken: token, targetToken: target?.token, melee: false }),
     critOnHitWithin5: target?.actor ? critOnHitWithin5(target.actor) : null,
   };
 }

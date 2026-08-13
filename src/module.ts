@@ -43,7 +43,7 @@ import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
 import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
-import { announceJump, surveyJump } from "./rules/jump";
+import { announceJump, registerJumpWatch, surveyJump } from "./rules/jump";
 import {
   clearInfluenceLocks,
   influenceTargets,
@@ -52,6 +52,12 @@ import {
 } from "./rules/influence";
 import { registerDisengageWatch } from "./rules/disengage";
 import { registerDodgeHooks } from "./rules/dodge";
+import {
+  noteRepeatSave,
+  registerRepeatSaveWatch,
+  surveyRepeatSaves,
+  type RepeatSave,
+} from "./rules/repeat-save";
 import type { Stance } from "./rules/influence";
 import { surveyGeneralRules } from "./rules/general";
 import { surveyActionButtons } from "./system/dnd5e-actions";
@@ -71,6 +77,7 @@ import { registerDamageLog } from "./capability/damage-log";
 import { surveyPrimitives } from "./capability/primitives";
 import { registerCapabilityExecutor, surveyCapabilities } from "./capability/executor";
 import { collectScene, registerCapabilityCollector, surveyScene } from "./capability/collect";
+import { surveyStanding } from "./capability/standing";
 import { openCapabilitySheet, registerCapabilitySheet } from "./apps/capability-sheet";
 
 /**
@@ -105,6 +112,8 @@ export interface NoodlrHooksApi {
   hide(opts?: { force?: boolean }): Promise<void>;
   surveyJump(): unknown;
   jump(): Promise<void>;
+  surveyRepeatSaves(): unknown;
+  repeatSave(clause: RepeatSave): Promise<void>;
   surveyInfluence(): unknown;
   influence(opts?: { approach?: string; stance?: Stance; force?: boolean }): Promise<unknown>;
   clearInfluenceLocks(): Promise<number>;
@@ -118,6 +127,7 @@ export interface NoodlrHooksApi {
   surveyPrimitives(): unknown;
   surveyCapabilities(): unknown;
   surveyScene(): unknown;
+  surveyStanding(): unknown;
   compileScene(): Promise<unknown>;
   openCapabilities(actor?: unknown): void;
   openRules(page?: string): void;
@@ -209,6 +219,17 @@ const api: NoodlrHooksApi = {
   surveyJump: () => surveyJump(),
   /** Post that same reading to chat, because "can I get across that?" is the table's question. */
   jump: () => announceJump(),
+  /** Which save-ends effects the selected creature is still carrying, and who is rolling them. */
+  surveyRepeatSaves: () => surveyRepeatSaves(),
+  /**
+   * Register a save-ends clause on every selected token, for an effect applied off a stat block.
+   * `{status: "paralyzed", ability: "con", dc: 13, source: "Ghoul's Claw"}`.
+   */
+  repeatSave: async (clause) => {
+    for (const token of (canvas as any)?.tokens?.controlled ?? []) {
+      await noteRepeatSave(token?.actor, clause);
+    }
+  },
   /** What an Influence attempt against each target would face: attitude, DC, and what is locked. */
   surveyInfluence: () => surveyInfluence(),
   /** Talk every targeted creature round with the selected one. The GM is asked for the stance. */
@@ -238,6 +259,8 @@ const api: NoodlrHooksApi = {
   surveyCapabilities: () => surveyCapabilities(),
   /** What this scene WOULD ask about, and what it costs nothing because the cache already has it. */
   surveyScene: () => surveyScene(),
+  /** Everything a compiled capability says is permanently true about the selected creatures. */
+  surveyStanding: () => surveyStanding(),
   /** Read the scene now, rather than waiting for the next load. */
   compileScene: () => collectScene(),
   /** The review window for one creature. Defaults to the selected token, or your own character. */
@@ -298,9 +321,15 @@ Hooks.once("ready", () => {
   // The Disengage button, watched wherever it is pressed: the client that presses owns the sheet, and
   // so is the only one allowed to write the mark the opportunity-attack layer reads.
   registerDisengageWatch();
+  // Step of the Wind doubles a jump for one turn, and only once the Focus Point is spent — so the
+  // marker has to come off the button rather than off the sheet, on whichever client pressed it.
+  registerJumpWatch();
   // Dodge: the same watch, plus the expiry nothing in the stack performs. Half of it is GM-only, and
   // that gate is inside.
   registerDodgeHooks();
+  // "Repeat the save at the end of each of its turns." Registered on every client, because the save
+  // is rolled by whoever owns the afflicted creature rather than by the GM.
+  registerRepeatSaveWatch();
   // Influence needs the GM's ruling and writes a flag on an NPC the asking player cannot touch. The
   // handlers are registered everywhere because core resolves a query on the RECEIVING client.
   registerInfluenceQueries();

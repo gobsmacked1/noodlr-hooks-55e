@@ -88,7 +88,9 @@ function rowsFor(actor: any): Row[] {
         ? new Date(capability.compiledBy.at).toLocaleDateString()
         : "",
       rules,
-      inert: rules.filter((r) => !r.runs).length,
+      // A standing fact is not inert. Counting it as such is what made a third of every compiled
+      // corpus look like wasted money on this sheet — see `capability/standing.ts`.
+      inert: rules.filter((r) => r.inert).length,
     });
   }
   return rows;

@@ -33,6 +33,7 @@
 // is matched against active effects only. Treating the second kind as always-on would make every ranger
 // permanently invisible.
 
+import { capabilityNegatedSenses, capabilitySenses } from "../capability/standing";
 import { isDnd5e } from "./dnd5e-rewards";
 
 /** Something making a creature hard to notice. */
@@ -431,6 +432,7 @@ export function screenFor(name: string): Concealment | null {
 export function sheetSenses(actor: any): Record<string, number> {
   const out: Record<string, number> = {};
   if (!actor) return out;
+  const compiled = compiledSenses(actor);
 
   // Vision 5e computes this for every actor whether or not the token has sight switched on, which makes
   // it strictly better than reading the sheet. Keys are Foundry detection mode ids.
@@ -449,10 +451,10 @@ export function sheetSenses(actor: any): Record<string, number> {
       const range = Number(derived[mode]);
       if (Number.isFinite(range) && range !== 0) out[tag] = range < 0 ? Infinity : range;
     }
-    if (Object.keys(out).length > 0) return out;
+    if (Object.keys(out).length > 0) return merge(out, compiled);
   }
 
-  if (!isDnd5e()) return out;
+  if (!isDnd5e()) return merge(out, compiled);
   const senses: any = actor?.system?.attributes?.senses ?? {};
   const ranges: any = senses?.ranges ?? senses;
   for (const [sense, tag] of Object.entries({
@@ -463,5 +465,73 @@ export function sheetSenses(actor: any): Record<string, number> {
     const range = Number(ranges?.[sense]);
     if (Number.isFinite(range) && range > 0) out[tag] = range;
   }
+  return merge(out, compiled);
+}
+
+/**
+ * Senses stated in a creature's prose that no field on its sheet carries.
+ *
+ * This is the corpus's largest complaint answered from the other end. "The eye has Darkvision 30 feet"
+ * came back as a rules gap 6,018 times over, and it is not a rule at all — it is a fact about one
+ * creature, printed in its stat block, which dnd5e never mapped onto a detection mode. A compiled
+ * `always` descriptor states it in machine-readable form, so where the sheet is silent the descriptor
+ * can answer.
+ *
+ * Two rules, both deliberate. **The sheet always wins on range**, because a number the GM can see and
+ * edit outranks a model's reading of a sentence; `merge` takes the larger only when the sheet has
+ * nothing at all to say. And **darkvision is dropped**, exactly as the sheet path drops it: it beats
+ * darkness rather than concealment, and core's own detection modes already apply it, so admitting it
+ * here would let a compiled sentence pierce a Fog Cloud.
+ */
+function compiledSenses(actor: any): Record<string, number> {
+  const out: Record<string, number> = {};
+  try {
+    for (const { sense, range } of capabilitySenses(actor)) {
+      const tag = COMPILED_SENSE_TAGS[sense];
+      if (!tag) continue;
+      out[tag] = Math.max(out[tag] ?? 0, range);
+    }
+    for (const sense of capabilityNegatedSenses(actor)) {
+      const tag = COMPILED_SENSE_TAGS[sense];
+      if (tag) delete out[tag];
+    }
+  } catch {
+    /* the compiler is an enhancement; an unreadable binding must not blind the creature */
+  }
   return out;
+}
+
+/**
+ * Sense names a descriptor may use, mapped onto this file's capability tags.
+ *
+ * The vocabulary is open on the model's side — it writes whatever the stat block said — so this is a
+ * recognition table and an unrecognised name is ignored. Failing that way round matters: a sense we do
+ * not understand must not become a sense that pierces everything.
+ */
+const COMPILED_SENSE_TAGS: Record<string, string> = {
+  truesight: "truesight",
+  "true sight": "truesight",
+  blindsight: "blindsight",
+  "blind sight": "blindsight",
+  tremorsense: "tremorsense",
+  "tremor sense": "tremorsense",
+  "devil's sight": "devilsSight",
+  "devils sight": "devilsSight",
+  devilssight: "devilsSight",
+  "see invisibility": "seeInvisible",
+  "see invisible": "seeInvisible",
+  seeinvisible: "seeInvisible",
+  "ethereal sight": "etherealSight",
+  etherealsight: "etherealSight",
+  "detect magic": "detectMagic",
+  hearing: "hearing",
+  "keen hearing": "hearing",
+};
+
+/** Sheet first: a compiled reading fills a gap, it never revises a number the GM can see. */
+function merge(sheet: Record<string, number>, compiled: Record<string, number>) {
+  for (const [tag, range] of Object.entries(compiled)) {
+    if (sheet[tag] === undefined) sheet[tag] = range;
+  }
+  return sheet;
 }

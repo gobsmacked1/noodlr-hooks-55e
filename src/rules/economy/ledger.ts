@@ -57,6 +57,15 @@ interface Tally {
    * counted above — an Action normally, a bonus action for anything with Cunning Action or its relatives.
    */
   dash: number;
+  /**
+   * Extra attacks taken this turn from the Light property, which the rules allow once and once only.
+   *
+   * Counted separately from `attack` because the Light swing is not bought by the Attack action: it
+   * costs the bonus action, or nothing at all with the Nick mastery. Folding it into `attack` would
+   * charge it against a budget it does not draw on, and leaving it uncounted would make the Nick case
+   * unlimited — free and unbounded are not the same thing.
+   */
+  light: number;
 }
 
 const FLAG = "spent";
@@ -70,7 +79,7 @@ const FLAG = "spent";
 const local = new Map<string, Tally>();
 
 function zero(stamp: string): Tally {
-  return { stamp, action: 0, bonus: 0, reaction: 0, attack: 0, dash: 0 };
+  return { stamp, action: 0, bonus: 0, reaction: 0, attack: 0, dash: 0, light: 0 };
 }
 
 /** The activation types this file is willing to police. Everything else is somebody else's business. */
@@ -111,6 +120,7 @@ function readTally(actor: any, stamp: string): Tally {
         reaction: Number(stored.reaction) || 0,
         attack: Number(stored.attack) || 0,
         dash: Number(stored.dash) || 0,
+        light: Number(stored.light) || 0,
       };
     }
   } catch {
@@ -124,6 +134,7 @@ function readTally(actor: any, stamp: string): Tally {
     tally.reaction = Math.max(tally.reaction, shadow.reaction);
     tally.attack = Math.max(tally.attack, shadow.attack);
     tally.dash = Math.max(tally.dash, shadow.dash);
+    tally.light = Math.max(tally.light, shadow.light);
   }
   return tally;
 }
@@ -188,7 +199,17 @@ export function explainAttacksPerAction(actor: any): { value: number; source: st
   if (ids.has("three-extra-attacks"))
     return { value: 4, source: "identifier: three-extra-attacks" };
   if (ids.has("two-extra-attacks")) return { value: 3, source: "identifier: two-extra-attacks" };
+  // Devouring Blade before Thirsting Blade, because it requires it: a level 12 Pact of the Blade
+  // warlock carries both, and the later invocation is the one that says how many. "The Extra Attack of
+  // your Thirsting Blade invocation confers two extra attacks rather than one."
+  if (ids.has("devouring-blade")) return { value: 3, source: "identifier: devouring-blade" };
   if (ids.has("extra-attack")) return { value: 2, source: "identifier: extra-attack" };
+  // Thirsting Blade grants Extra Attack for the pact weapon only, and does it as an INVOCATION rather
+  // than as a class feature — so it carries no `extra-attack` identifier and a Pact of the Blade
+  // warlock read as having one attack, with their second swing refused. The pact-weapon restriction is
+  // deliberately not modelled: refusing a legal attack is the failure worth avoiding, and a warlock
+  // swinging a longbow twice is a worse turn rather than a broken one.
+  if (ids.has("thirsting-blade")) return { value: 2, source: "identifier: thirsting-blade" };
 
   // A compiled capability, when the scene has been through the capability compiler. Above the prose
   // regex below and beneath the identifiers above, which is the honest ordering: authored structured
@@ -300,6 +321,38 @@ export function spend(
  */
 export function dashesTaken(actor: any, combat: any, combatant: any): number {
   return readTally(actor, stampFor(combat, combatant)).dash;
+}
+
+/** Extra Light-weapon attacks already taken this turn. The rules allow exactly one. */
+export function lightSwings(actor: any, combat: any, combatant: any): number {
+  return readTally(actor, stampFor(combat, combatant)).light;
+}
+
+/**
+ * Record the Light property's extra attack, and the slot it cost.
+ *
+ * `slot` is null for the Nick mastery, which folds the swing into the Attack action and so spends
+ * nothing — but it is still counted, because the once-per-turn limit is the rule and "free" is not
+ * "unlimited". Which of the two applies is a reading of the weapon, and lives in the system table.
+ */
+export function takeLightSwing(
+  actor: any,
+  combat: any,
+  combatant: any,
+  slot: "bonus" | null,
+): void {
+  const stamp = stampFor(combat, combatant);
+  const tally = readTally(actor, stamp);
+  if (slot) tally[slot] += 1;
+  tally.light += 1;
+  local.set(String(actor?.uuid ?? ""), tally);
+  try {
+    void Promise.resolve(actor?.setFlag?.(MODULE_ID, FLAG, tally)).catch(() => {
+      /* see spend() */
+    });
+  } catch {
+    /* ditto */
+  }
 }
 
 /**

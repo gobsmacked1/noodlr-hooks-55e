@@ -41,6 +41,7 @@ import { can, mentalScore, tierForScore, tierProfile } from "../tactics/tiers";
 import { turnRandom } from "../core/random";
 import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
+import { standingExemption } from "../system/dnd5e-reactions";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -300,11 +301,21 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
   });
   if (route.length < 2) return;
 
+  // A standing trait — Flyby, Agile — is checked here rather than beside Disengage because Flyby's
+  // exemption is conditional on HOW the creature left, and the waypoints are the only record of that.
+  const standing = standingExemption(moverDoc?.actor);
+  const exempt = standing && (!standing.requiresFlight || flew(moverDoc, waypoints));
   const disengaged = hasDisengaged(moverDoc?.actor);
 
   for (const watcher of watchersOf(moverDoc)) {
     if (!leftReach(watcher, route, moverDoc)) continue;
 
+    if (exempt) {
+      log(
+        `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
+      );
+      continue;
+    }
     if (disengaged) {
       log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
       continue;
@@ -312,6 +323,25 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
     if (withholds(watcher.combatant)) continue;
 
     await strike(watcher, mover, "as it slips away");
+  }
+}
+
+/**
+ * Was this move made by flying?
+ *
+ * The waypoints are the record of how the creature travelled, and any flying step in the route is
+ * enough: Flyby's wording is about leaving reach in the air, and a creature that takes off mid-move
+ * has done exactly that. Falls back to the token's current movement action for the plain-update path,
+ * which carries no waypoints at all — and to hovering, since a creature that never touched the ground
+ * did not walk out of anybody's reach.
+ */
+function flew(moverDoc: any, waypoints: any[]): boolean {
+  for (const point of waypoints ?? []) if (String(point?.action ?? "") === "fly") return true;
+  if (String(moverDoc?.movementAction ?? "") === "fly") return true;
+  try {
+    return Boolean(moverDoc?.actor?.statuses?.has?.("hover"));
+  } catch {
+    return false;
   }
 }
 

@@ -30,7 +30,12 @@ import {
   audienceKey,
 } from "../constants";
 import { AUDIENCES, type Audience } from "../util/audience";
-import { ac5eOwnsConditions, ac5eOwnsIncapacitatedUse } from "../system/dnd5e-conditions";
+import {
+  ac5eOwnsConditions,
+  ac5eOwnsIncapacitatedUse,
+  rangedNearbyFoeOwned,
+  visibilityAttackRulesOwned,
+} from "../system/dnd5e-conditions";
 import { midiOwnsConcentration } from "../system/dnd5e-concentration";
 import { midiOwnsDying } from "../system/dnd5e-dying";
 import { isDnd5e } from "../system/dnd5e-rewards";
@@ -140,6 +145,33 @@ const AREAS: Area[] = [
         : null,
   },
   {
+    id: "unseen",
+    setting: COMBAT_SETTINGS.conditions,
+    contender: () =>
+      visibilityAttackRulesOwned()
+        ? {
+            by: AC5E_NAME,
+            note:
+              "Its Visibility Checks setting is on — it ships on — so it already ticks Advantage for " +
+              "an unseen attacker and Disadvantage against an unseen target. If Midi QoL's " +
+              "invisibility optional rule is live instead, AC5e defers to midi and so do we.",
+          }
+        : null,
+  },
+  {
+    id: "rangedNearby",
+    setting: COMBAT_SETTINGS.conditions,
+    contender: () =>
+      rangedNearbyFoeOwned()
+        ? {
+            by: AC5E_NAME,
+            note:
+              "Its Ranged Nearby Foes range check has been ticked, or Midi QoL's Optional Rules are " +
+              "enabled with Nearby Foe on. Both ship off, so seeing this means somebody chose it.",
+          }
+        : null,
+  },
+  {
     id: "dying",
     setting: COMBAT_SETTINGS.dying,
     contender: () =>
@@ -173,6 +205,16 @@ const AREAS: Area[] = [
             owner: "nobody",
             note: "The dnd5e system's own concentration tracking is disabled, so there is nothing to break.",
           },
+  },
+  {
+    id: "repeatSaves",
+    setting: COMBAT_SETTINGS.repeatSaves,
+    // No contender, and that is the finding rather than an omission. Midi CAN express a save-ends
+    // clause, but only through `flags.midi-qol.OverTime` on an item that was authored with one — which
+    // in practice means DDB imports and nothing else — so it owns particular effects rather than the
+    // rule. The stand-aside is therefore per effect, inside `rules/repeat-save.ts`, and cannot be
+    // stated here: this table answers "who enforces this rule", and for this one the answer is nobody.
+    fallback: () => null,
   },
   {
     id: "opportunity",

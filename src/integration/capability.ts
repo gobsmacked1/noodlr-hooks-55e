@@ -688,6 +688,40 @@ export function isExecutable(rule: CapabilityRule): boolean {
   return (rule.condition ?? []).every((p) => PREDICATE_PARAMS[p.kind]?.executable);
 }
 
+/**
+ * Effect kinds that state a permanent property, which `capability/standing.ts` answers by query.
+ *
+ * Kept here beside `WIRED_TRIGGERS` because the two together are what the sheet's badge means, and a
+ * list in one file contradicting a badge in another is precisely the failure the `WIRED_TRIGGERS` note
+ * above was written about. `standing.ts` imports this rather than keeping a second copy.
+ */
+export const STANDING_EFFECTS: readonly EffectKind[] = [
+  "grant_sense",
+  "negate_sense",
+  "resist_damage",
+  "grant_capability",
+  "grant_proficiency",
+  "modify_speed",
+  "extra_attack",
+  "substitute_ability",
+  "grant_advantage",
+  "impose_disadvantage",
+];
+
+/**
+ * Is this rule a standing fact rather than something that fires?
+ *
+ * `always` is not in `WIRED_TRIGGERS` and must not be: there is no hook for "permanently true", and
+ * adding one would mean inventing a moment at which a fact happens. But 35.6% of the corpus's atoms
+ * carry it, so treating every one of them as inert told the operator that a third of what they paid to
+ * compile does nothing. It is read instead — see `capability/standing.ts` for who reads what.
+ */
+export function isStanding(rule: CapabilityRule): boolean {
+  if (rule.adjudication !== "engine") return false;
+  if (rule.trigger?.event !== "always") return false;
+  return STANDING_EFFECTS.includes(rule.effect?.kind as EffectKind);
+}
+
 /** Strip everything that came out of a book, so a compiled cache can be shared. */
 export function exportable(capability: Capability): Capability {
   const { prose: _prose, ...rest } = capability;

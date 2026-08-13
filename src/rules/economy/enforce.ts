@@ -35,10 +35,19 @@ import { isDashActivity } from "../../system/dnd5e-dash";
 import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
 import { isDnd5e } from "../../system/dnd5e-rewards";
+import { lightExtraAttackCost } from "../../system/dnd5e-two-weapon";
 import { interceptHideActivity } from "../hide";
 import { interceptStabilizeActivity } from "../dying";
 import { interceptInfluenceActivity } from "../influence";
-import { check, slotFor, spend, takeDash, type Slot } from "./ledger";
+import {
+  check,
+  lightSwings,
+  slotFor,
+  spend,
+  takeDash,
+  takeLightSwing,
+  type Slot,
+} from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
 const cleared = new Set<string>();
@@ -197,22 +206,54 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   if (!combatant) return true;
 
   const isAttack = String(activity?.type ?? "") === "attack";
-  const verdict = check(actor, combat, combatant, slot, isAttack);
+  let effective = slot;
+  let verdict = check(actor, combat, combatant, slot, isAttack);
+
+  // The off-hand swing, considered only once the Attack action has nothing left in it. A Light weapon
+  // buys one extra attack per turn out of the bonus action — or out of nothing at all with the Nick
+  // mastery — and dnd5e models neither, so both swings arrive here claiming the same Action and the
+  // second was refused. See `system/dnd5e-two-weapon.ts` for why asking at the point of refusal is what
+  // keeps this a narrow reading rather than a guess about every Light attack ever made.
+  if (!verdict.allowed && slot === "action" && isAttack) {
+    const cost = lightExtraAttackCost(actor, activity?.item, activity);
+    if (cost && lightSwings(actor, combat, combatant) < 1) {
+      if (cost === "free") {
+        takeLightSwing(actor, combat, combatant, null);
+        log(`action economy: ${combatant?.name}'s Nick attack rides on the Attack action`);
+        return true;
+      }
+      const bonus = check(actor, combat, combatant, "bonus", false);
+      if (bonus.allowed) {
+        takeLightSwing(actor, combat, combatant, "bonus");
+        log(`action economy: charged ${combatant?.name}'s bonus action for the Light extra attack`);
+        return true;
+      }
+      // Out of bonus actions as well. Reported against the bonus action from here on, because that is
+      // the slot the swing actually wanted and naming the Action would send the player looking in the
+      // wrong place.
+      effective = "bonus";
+      verdict = bonus;
+    }
+  }
 
   if (verdict.allowed) {
     charge(actor, combat, combatant, slot, isAttack, activity);
     return true;
   }
 
+  // An attack rerouted to the bonus action is no longer spending the Attack action's allowance, so it
+  // must not be recorded as one either — otherwise approving it would eat a swing the creature still has.
+  const chargeAsAttack = isAttack && effective === "action";
+
   // Noodlr playing a monster gets no say and no dialog: there is nobody to answer it.
   if (isAutomating() || (shouldAutomate(combatant) && !actor?.hasPlayerOwner)) {
-    log(`action economy: ${combatant?.name} has no ${label(slot)} left; the use was refused`);
+    log(`action economy: ${combatant?.name} has no ${label(effective)} left; the use was refused`);
     return false;
   }
 
   const mode = getEconomyMode(actor);
   if (mode === "off") {
-    charge(actor, combat, combatant, slot, isAttack, activity);
+    charge(actor, combat, combatant, effective, chargeAsAttack, activity);
     return true;
   }
 
@@ -220,7 +261,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
     ui.notifications?.warn(
       game.i18n.format("NOODLRHOOKS.Combat.Economy.Blocked", {
         name: String(actor?.name ?? "This creature"),
-        slot: label(slot),
+        slot: label(effective),
       }),
     );
     return false;
@@ -230,8 +271,8 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
     actor,
     combat,
     combatant,
-    slot,
-    isAttack,
+    slot: effective,
+    isAttack: chargeAsAttack,
     spent: verdict.spent,
     max: verdict.max,
   });

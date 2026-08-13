@@ -151,10 +151,12 @@ const HOUSE: Page = {
           label: "Unseen attacker and unseen target",
           hint:
             "Advantage when the attacker cannot be seen, disadvantage when the target cannot be. " +
-            "Cheap to add: per-creature vision is already computed for the hiding contest, and the " +
-            "injection point is the same hook the condition rules use.",
-          state: "planned",
-          today: "Automated Conditions 5e covers Invisible and visibility-aware Blinded.",
+            "Visibility is asked of the same layer that runs the hiding contest, so a creature that " +
+            "is hidden enough to avoid starting a fight is hidden enough to get Advantage.",
+          state: "live",
+          setting: C.conditions,
+          kind: "boolean",
+          ownership: "unseen",
         },
         {
           id: "hiddenPrereq",
@@ -221,8 +223,14 @@ const HOUSE: Page = {
         {
           id: "rangedInMelee",
           label: "Ranged attack with a hostile within 5 feet",
-          hint: "Disadvantage. A board query and one row in the condition matrix; not built yet.",
-          state: "planned",
+          hint:
+            "Disadvantage, when that enemy can see you and is not Incapacitated. Both modules that " +
+            "have this rule ship it switched off — AC5e's range checks default to an empty set and " +
+            "midi's sits under Optional Rules — so at stock settings this is the only one running.",
+          state: "live",
+          setting: C.conditions,
+          kind: "boolean",
+          ownership: "rangedNearby",
         },
         {
           id: "vision",
@@ -481,6 +489,19 @@ const SHARED_STATE: Section = {
       setting: C.movement,
       kind: "boolean",
       ownership: "movement",
+    },
+    // Shared rather than split, unlike death saves and concentration two sections down. Those ask what
+    // happens to a creature on its own account; this is the escape clause of an effect somebody else
+    // imposed, and a table where the goblins can shake off a Hold Person the party cannot is the same
+    // rule read two ways at once.
+    {
+      id: "repeatSaves",
+      label: "NOODLRHOOKS.Combat.RepeatSaves.Name",
+      hint: "NOODLRHOOKS.Combat.RepeatSaves.Hint",
+      state: "live",
+      setting: C.repeatSaves,
+      kind: "boolean",
+      ownership: "repeatSaves",
     },
     {
       id: "dash",

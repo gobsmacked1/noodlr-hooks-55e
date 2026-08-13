@@ -769,14 +769,13 @@ were not in August, because the hard half shipped for unrelated reasons:
    - Caution if this is ever revisited: it stands down for midi **only** when midi's
      `coverCalculation === "simplecover5e"`, and it has no awareness of AC5e at all
      (`rg -ni "ac5e|automated-conditions"` returns nothing). Two cover implementations can both be live.
-2. **Unseen attacker and unseen target.** Advantage when the attacker cannot be seen, disadvantage when the
-   target cannot be. `rules/perception.ts` already answers "can this creature see that one" per-creature
-   against a hand-built vision source, and the injection point is the same `preRollAttack` the condition
-   matrix uses.
-3. **A ranged attack with a hostile within 5 feet is at disadvantage.** A board query and a matrix row.
-4. **Dodge.** dnd5e ships a `dodging` status with **zero** consumers. One condition-matrix entry (attacks
-   against at disadvantage, Dexterity saves at advantage) plus a button of the same shape as Hide's, since
-   nothing in the system presses it either. Verified unbuilt.
+2. ~~**Unseen attacker and unseen target.**~~ **BUILT in v0.4.0** — `rules/unseen.ts`. The prediction held:
+   the per-creature vision answer already existed and the injection point was the same `preRollAttack`.
+3. ~~**A ranged attack with a hostile within 5 feet is at disadvantage.**~~ **BUILT in v0.4.0**, in the same
+   file, and it was the board query and matrix row this line said it was.
+4. ~~**Dodge.**~~ **BUILT in v0.2.3** — `rules/dodge.ts` plus the matrix entry. This line survived a release
+   past its own completion, which is the failure `pages.ts`'s `state` field exists to prevent: check a row's
+   state before trusting a queue entry here.
 5. **Standing up from Prone costs half Speed**, and a prone creature should pay crawl rates to walk — core
    charges the extra distance only if the Crawl action is selected, and never charges the stand-up. The
    Speed ledger already exists; this is a charge levied on a status removal.
@@ -1891,6 +1890,101 @@ test instead of failing quietly at a table.
  the known imperfection already recorded under the declarations note), and Search (the roll is one skill
  of four and the reading is the GM's). Study and Utilize stay refused in `rules/general.ts`.
 
+## What the finished corpus caught (v0.4.0, 2026-08-13)
+
+The first complete `noodlr-rules-corpus` run — 77,039 atoms over nine books — was read against this
+module rather than filed. Four rules here were **wrong**, three were **absent**, and every one was
+verified against the source before being believed; the corpus names a suspicion, it does not diagnose.
+None of the seven was ever reported from a table, which is the argument for doing this again after the
+next book: a rule that silently refuses a legal action is invisible until somebody argues about it.
+
+**Read the atoms, never the counts.** Two of the seven leads dissolved on inspection — the same trap
+the corpus repo records for `coverage.json` — and the four that survived did so because the atom said
+something the code demonstrably did not do.
+
+### Four that were wrong
+
+- **`system/dnd5e-jump.ts` — a jump had no modifiers at all.** `jumpDistances` read Strength and
+  nothing else, so every jump-altering effect in the game produced a **false refusal**, which is the
+  failure mode this module tries hardest to avoid. Four shapes exist and all four are now read:
+  a fixed distance stated in prose ("its Long Jump is up to 25 feet"), an ability substitution
+  (Second-Story Work jumps off Dexterity), a multiplier (Jump, Step of the Wind), and the "with or
+  without a running start" clause, which needs no arithmetic and fixes the commonest case on its own.
+  - **A stated distance stands alone.** A creature whose ability scores are unreadable but whose trait
+    states a distance gets a number; only nothing-readable is `unreadable`. Gating on the score would
+    have thrown away the one thing the prose was explicit about.
+  - **Halving happens before the bonus and the multiplier.** Step of the Wind doubles the jump being
+    made, not the score it derives from, and the order is the difference between 20 and 25 feet.
+  - `movement.jump` is still never read as either distance — see the older jump note above.
+- **`system/dnd5e-reactions.ts` — Flyby exempted nothing.** "Doesn't provoke Opportunity Attacks when
+  it flies out of an enemy's reach" was prose nobody read. Table-matched by identifier then name, like
+  every other system table here. **A creature-level exemption is checked in `provoke()`, not at the
+  Disengage mark**, because it is a permanent property rather than a spent action — putting it beside
+  Disengage would have made it clearable.
+- **Thirsting Blade grants Extra Attack as an INVOCATION**, so it carries no `extra-attack` identifier
+  and a Pact of the Blade warlock read as having one attack, with the second swing refused as over
+  budget. Devouring Blade is checked **first**, because it requires Thirsting Blade and a level 12
+  warlock carries both — first match wins, so the order is the answer. The pact-weapon restriction is
+  deliberately unmodelled: a warlock swinging a longbow twice is a worse turn, a refused legal attack
+  is a bug report.
+- **`system/dnd5e-two-weapon.ts` — the Light property was uncounted.** `Tally.light` is separate from
+  `attack` on purpose: the off-hand swing is not bought by the Attack action, so folding it in charges
+  it against a budget it does not draw on, and leaving it out entirely makes the Nick case unlimited.
+  **Free and unlimited are not the same thing** — Nick costs nothing and is still once per turn, which
+  is why `takeLightSwing` takes a nullable slot and always increments the counter.
+
+### Three that were absent
+
+- **`rules/repeat-save.ts` — an effect that ends on a save now gets one**, at the end of each of the
+  afflicted creature's turns. 408 atoms say "repeats the saving throw", `end_effect` is the fourth
+  largest effect kind at 4,008, and nothing in the world was doing it.
+  - **State lives on the afflicted creature, and the watcher is a separate `updateCombat` listener on
+    every client.** The capability executor is GM-gated and fires on the creature whose descriptor
+    produced the effect; the save belongs to whoever is being poisoned, on a turn that may be nowhere
+    near the caster's.
+  - **Stands aside per-effect for midi's `OverTime` flag**, not per-module. A world may run midi with
+    one imported item carrying its own timer and forty that do not; standing aside wholesale would
+    switch the rule off for the forty.
+  - **A status removed by anything else clears the pending save.** The effect is the state, exactly as
+    with hiding — a pending save for a condition nobody has is a dialog with no cause.
+- **`rules/unseen.ts` — unseen attacker, unseen target, and shooting beside an enemy.** Advantage,
+  Disadvantage, Disadvantage. Visibility is answered per-creature through `rules/stealth.ts`'s
+  `evades()` plus Blinded and a line-of-sight test, never through `token.isVisible`, for the reason the
+  perception note above gives at length.
+  - **`visibilityAttackRulesOwned()` and `rangedNearbyFoeOwned()` are separate predicates** because
+    AC5e and midi own these two rules through *different* settings and either may be on alone. AC5e's
+    `autoRangeChecks` is a Set in some versions and an Array in others, so it is probed both ways and
+    an unreadable setting means "I could not tell", i.e. keep enforcing — same rule as `util/modules.ts`.
+- **`capability/standing.ts` — the compiler's read side.** 27,425 of 77,039 atoms are
+  `trigger.event: "always"` (35.6%, second only to `on_activity_use`), and `always` is not in
+  `WIRED_TRIGGERS` and never will be, because there is no hook for "this is permanently true". Correct,
+  and it made the capability sheet badge a third of everything the operator paid for as **inert** —
+  which reads as the compiler having wasted the money rather than as the executor asking the wrong
+  question. A standing property is a FACT, and facts are queried.
+  - **`STANDING_EFFECTS` lives beside `WIRED_TRIGGERS` in `integration/capability.ts`**, so the sheet's
+    badge and the query layer's answer come from one list. `other` is excluded despite being the
+    largest `always` bucket (10,059) — it is by definition unreadable — as are `restrict_action` and
+    `require_prerequisite`, which are guards on something else rather than properties.
+  - **A grant is consumed at the point of use and never written to the actor.** An Active Effect
+    written from a descriptor would double whatever the sheet already states: dnd5e applies
+    `system.traits.dr` itself, so a compiled resistance that also wrote one halves the damage twice.
+  - **The sheet wins where it speaks.** `sheetSenses` fills gaps from compiled senses rather than
+    merging, so a stated Darkvision 60 is not overwritten by a model reading "sees in the dark".
+  - **The fail-closed rule bites harder here than in the executor.** A guard on an `always` rule is the
+    qualifier that makes it true ("while raging", "against nonmagical damage"), so an unevaluable guard
+    means the grant might be false right now: it is returned `active: false` with a reason, which puts
+    it on the sheet as needing a human instead of into the accessors as a fact.
+  - Diagnostic: `api.surveyStanding()`.
+
+### Two leads that dissolved, recorded so nobody re-opens them
+
+- **`grant_capability` (2,356 `always` atoms) is not a build queue.** It is where the corpus put every
+  true statement about a creature that nobody has wired — "breathes water", "cannot be surprised". It
+  is exposed as free text for the survey and for noodlr's prompt, and wiring one means picking a phrase
+  and owning the match, which is a decision per capability rather than a feature.
+- **`on_activity_use` at 29,974 is not a gap**, it is the corpus describing what an activity does when
+  used, which is the system's own job. The trigger being the largest bucket says nothing about coverage.
+
 ## Configuration, not code: what to tell a GM
 
 Problems reported as module bugs that were world configuration, or another module's defaults, instead.
@@ -1987,11 +2081,8 @@ stand-aside or dismissing the risk. As of 2026-08-11 this is at least **visible*
 `integration/ownership.ts` warns about it in the settings windows whenever wm5e is active and our forced
 movement is on, and says outright that it is unverified. A warning is the honest response to a
 suspicion — a stand-aside would need proof, and guessing wrong there deletes a rule that works.
-- **`attacksPerAction` probably misses Thirsting Blade** — inference, not observed, since the census's only
-  warlock took Pact of the Chain. `economy/ledger.ts` reads `extra-attack`/`two-extra-attacks`/
-  `three-extra-attacks`, right for fighters, rangers, paladins, barbarians and monks, but a Pact of the
-  Blade warlock's second attack comes from the `thirsting-blade` invocation and would read as 1. One
-  identifier to add.
+- ~~**`attacksPerAction` probably misses Thirsting Blade**~~ — **CONFIRMED and FIXED in v0.4.0**, with
+  Devouring Blade alongside it. The inference was right; the corpus is what turned it into a certainty.
 - **The 2026-08-06 audit batch was re-read on 2026-08-10 and is no longer the queue** — most of it shipped
   and the rest belongs to the compiler. The surviving general-rules queue is six items and lives in "The
   standing gap list, re-read after the split and the pivot" above. The audits themselves stay in

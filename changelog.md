@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.4.0
+
+The whole of D&D 5e (2024) was mined into a machine-readable corpus and this release is what reading it
+found: four rules this module was getting wrong, and three it was not attempting. Nothing here was
+noticed at a table — the corpus named each one, and then each one was checked against the actual code
+before being believed.
+
+### Four things that were wrong
+
+- **Jumping ignored everything that changes a jump.** A character with Jump cast on them, a Bullywug,
+  a Grasshopper, a monk spending Focus, an Athlete or a Jumper was still measured against their bare
+  Strength score, so a legal leap was refused. Fixed distances ("its Long Jump is up to 25 feet"),
+  ability substitutions, doubling, and the "with or without a running start" clause are all read off
+  the sheet now, and `api.surveyJump()` names which of them applied.
+- **Flyby was not exempting anything.** A creature whose sheet says it "doesn't provoke Opportunity
+  Attacks when it flies out of an enemy's reach" was provoking them. Flyby and its relatives — Agile
+  Flyer, Wing Flap, the Mobile feat's version — are now honoured.
+- **A Pact of the Blade warlock got one attack.** Thirsting Blade grants Extra Attack as an invocation
+  rather than as a class feature, so it carries none of the identifiers the action economy was reading
+  and the warlock's second swing was refused as over budget. Devouring Blade's third attack was missing
+  for the same reason.
+- **Two-weapon fighting had no accounting at all.** The Light property's extra swing costs the bonus
+  action and may be taken once per turn; the Nick mastery makes it free. Neither was tracked, so a
+  fighter could take it every round for nothing and a rogue's Cunning Action was still available after
+  spending the bonus action on an off-hand attack.
+
+### Three things it was not doing
+
+- **An effect that ends on a save now gets its save**, at the end of each of the afflicted creature's
+  turns, with the effect removed on a success and the whole thing announced. This is the single most
+  common shape in the game after "roll to hit" and nothing in the world was doing it — if Midi QoL is
+  running its own `OverTime` timer for a particular effect, this stands aside for it. There is a switch
+  in Combat Rules, and `api.surveyRepeatSaves()` lists what is pending.
+- **Attacking something you cannot see, and being something that cannot be seen.** Disadvantage for the
+  first, Advantage for the second, worked out per-creature against real vision rather than against what
+  your own screen happens to show. It stands aside when Automated Conditions 5e or Midi QoL are
+  configured to do it.
+- **Shooting with an enemy next to you is now at Disadvantage.** Same stand-aside rules.
+
+### The capability sheet was calling a third of its own work useless
+
+Of everything the ability reader extracts, the largest single category by far is properties that are
+permanently true — a sense, a resistance, an extra attack, "it can breathe water". Those have no
+moment at which they happen, so nothing fires them, and the sheet was badging every one of them **not
+run**. That read as the reader having wasted your credit. They are now badged **always true** and, more
+to the point, they are actually consulted: a compiled sense fills a gap in what the sheet states rather
+than sitting in a cache. `api.surveyStanding()` shows what a creature has.
+
 ## 0.3.0
 
 ### The settings windows work now, and there are no tabs

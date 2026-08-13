@@ -57,6 +57,8 @@ export const COMBAT_SETTINGS = {
   importantNpcSaves: "combat.importantNpcSaves",
   /** Per audience. Whether damage rolls a real concentration save, and a failure ends the spell. */
   concentration: "combat.concentration",
+  /** Whether "repeat the save at the end of each of its turns" actually rolls, and ends the effect. */
+  repeatSaves: "combat.repeatSaves",
   /** Whether the tracker clears itself once nothing hostile is left standing. */
   autoEnd: "combat.autoEnd",
 } as const;

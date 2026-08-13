@@ -11,8 +11,16 @@ import {
   isStabilizeActivity,
   phbActionOf,
 } from "../src/system/dnd5e-actions";
+import { lightExtraAttackCost } from "../src/system/dnd5e-two-weapon";
 import { notable, slotClaims } from "../src/rules/economy/claims";
-import { budget, check, spend } from "../src/rules/economy/ledger";
+import {
+  budget,
+  check,
+  explainAttacksPerAction,
+  lightSwings,
+  spend,
+  takeLightSwing,
+} from "../src/rules/economy/ledger";
 
 /** An activity as dnd5e prepares one, reduced to the fields the ledger reads. */
 function activity(name: string, type: string, activation: string | null) {
@@ -136,6 +144,92 @@ test("a second Action is still refused once one has genuinely been spent", () =>
 
   assert.equal(check(hero, combat, combatant, "action", false).allowed, false);
   assert.equal(check(hero, combat, combatant, "action", true).allowed, false);
+});
+
+/* -------------------------------------------- */
+/*  How many attacks one Action buys             */
+/* -------------------------------------------- */
+
+test("a Pact of the Blade warlock's Extra Attack is an invocation, and still counts", () => {
+  // Thirsting Blade carries no `extra-attack` identifier — it is an Eldritch Invocation granting the
+  // feature for the pact weapon only — so a warlock read as having one attack and was refused a legal
+  // second swing every turn.
+  const warlock = actor([item({ name: "Thirsting Blade", type: "feat", identifier: "thirsting-blade" })]);
+  assert.equal(explainAttacksPerAction(warlock).value, 2);
+});
+
+test("Devouring Blade outranks Thirsting Blade, which it requires", () => {
+  // "The Extra Attack of your Thirsting Blade invocation confers two extra attacks rather than one."
+  // A level 12 warlock holds both, so reading the earlier one first would report three attacks as two.
+  const warlock = actor([
+    item({ name: "Thirsting Blade", type: "feat", identifier: "thirsting-blade" }),
+    item({ name: "Devouring Blade", type: "feat", identifier: "devouring-blade" }),
+  ]);
+  assert.equal(explainAttacksPerAction(warlock).value, 3);
+});
+
+/* -------------------------------------------- */
+/*  The Light property's extra attack            */
+/* -------------------------------------------- */
+
+/** A Light melee weapon, optionally with a mastery the wielder may or may not be entitled to. */
+function lightWeapon(mastery = "", base = "dagger") {
+  return {
+    ...item({ name: "Dagger" }),
+    system: {
+      identifier: "",
+      properties: new Set(["lgt", "fin"]),
+      mastery,
+      type: { baseItem: base },
+      activities: { contents: [] },
+    },
+  };
+}
+
+const swing = { type: "attack", attack: { type: { value: "melee" } } };
+
+test("a Light melee weapon offers the extra attack out of the bonus action", () => {
+  const hero = actor();
+  assert.equal(lightExtraAttackCost(hero, lightWeapon(), swing), "bonus");
+});
+
+test("Nick makes it free, but only for a wielder entitled to the mastery", () => {
+  // `system.mastery` sits on every dagger in the world whether or not its holder may use it, so
+  // reading the field alone would make the bonus action free for everybody.
+  const untrained = actor();
+  assert.equal(lightExtraAttackCost(untrained, lightWeapon("nick"), swing), "bonus");
+
+  const trained = actor();
+  (trained as any).system = { traits: { weaponProf: { mastery: { value: new Set(["dagger"]) } } } };
+  assert.equal(lightExtraAttackCost(trained, lightWeapon("nick"), swing), "free");
+});
+
+test("a heavy weapon, a ranged attack and a spell offer nothing", () => {
+  const hero = actor();
+  const heavy = { ...lightWeapon(), system: { ...lightWeapon().system, properties: new Set(["hvy"]) } };
+  assert.equal(lightExtraAttackCost(hero, heavy, swing), null);
+  assert.equal(
+    lightExtraAttackCost(hero, lightWeapon(), {
+      type: "attack",
+      attack: { type: { value: "ranged" } },
+    }),
+    null,
+  );
+  assert.equal(lightExtraAttackCost(hero, lightWeapon(), { type: "save" }), null);
+});
+
+test("the extra attack is once per turn, free or not", () => {
+  const { combat, combatant } = fight();
+  const hero = actor();
+
+  assert.equal(lightSwings(hero, combat, combatant), 0);
+  takeLightSwing(hero, combat, combatant, null);
+  assert.equal(lightSwings(hero, combat, combatant), 1);
+  // Nick spends no slot, which is exactly why the counter has to exist: free is not unlimited.
+  assert.equal(budget(hero, combat, combatant).bonus, 1);
+
+  takeLightSwing(hero, combat, combatant, "bonus");
+  assert.equal(budget(hero, combat, combatant).bonus, 0);
 });
 
 /* -------------------------------------------- */

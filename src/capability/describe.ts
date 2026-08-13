@@ -20,7 +20,7 @@ import type {
   Predicate,
   Quantity,
 } from "../integration/capability";
-import { isExecutable } from "../integration/capability";
+import { isExecutable, isStanding } from "../integration/capability";
 
 const TRIGGERS: Record<string, string> = {
   on_hit: "when it hits",
@@ -276,18 +276,28 @@ export interface RuleView {
   uses: string;
   /** False when nothing in this build runs it. Shown as a badge, not hidden. */
   runs: boolean;
+  /** A permanently-true property, read on demand rather than fired. Also not inert. */
+  standing: boolean;
+  /** Neither fired nor readable: the only state that is honestly wasted money. */
+  inert: boolean;
   note: string;
 }
 
 export function describeCapability(capability: Capability): RuleView[] {
-  return (capability.rules ?? []).map((rule, index) => ({
-    index,
-    text: describeRule(rule),
-    event: String(rule.trigger?.event ?? "?"),
-    effect: String(rule.effect?.kind ?? "?"),
-    adjudication: String(rule.adjudication ?? "?"),
-    uses: describeUses(rule.uses),
-    runs: isExecutable(rule),
-    note: String(rule.note ?? ""),
-  }));
+  return (capability.rules ?? []).map((rule, index) => {
+    const runs = isExecutable(rule);
+    const standing = isStanding(rule);
+    return {
+      index,
+      text: describeRule(rule),
+      event: String(rule.trigger?.event ?? "?"),
+      effect: String(rule.effect?.kind ?? "?"),
+      adjudication: String(rule.adjudication ?? "?"),
+      uses: describeUses(rule.uses),
+      runs,
+      standing,
+      inert: !runs && !standing,
+      note: String(rule.note ?? ""),
+    };
+  });
 }
