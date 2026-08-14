@@ -43,6 +43,19 @@ for (const file of files) {
 const families = {
   "NOODLRHOOKS.Rules.State": ["live", "planned", "system", "external"],
   "NOODLRHOOKS.Capabilities.Status": ["uncompiled", "compiled", "edited", "locked", "rejected"],
+  // Every reason the damage layer can decline to apply a roll. These reach a GM's chat log, so a
+  // missing one would render as a dotted string in the middle of a sentence.
+  "NOODLRHOOKS.Combat.AutoDamage.Why": [
+    "NeedsSave",
+    "NoActivity",
+    "NoAttack",
+    "NoHitPoints",
+    "NoTargets",
+    "UnknownToken",
+    "UpdateFailed",
+  ],
+  // The same, for the save layer.
+  "NOODLRHOOKS.Combat.AutoSaves.Why": ["NoActivation"],
 };
 for (const [prefix, members] of Object.entries(families))
   for (const member of members) used.set(`${prefix}.${member}`, `${prefix}.* (runtime)`);

@@ -156,6 +156,10 @@ export function registerCombatSettings(): void {
   );
   world(COMBAT_SETTINGS.movement, "Movement", Boolean, true);
   world(COMBAT_SETTINGS.forced, "Forced", Boolean, true);
+  // Both sides on: see `isAutoDamageEnabled()` for why the obvious asymmetry (automate monsters, leave
+  // the party to click) is the wrong way round.
+  split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
+  world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.importantNpcSaves, "Dying.Important", Boolean, true);
@@ -410,6 +414,50 @@ export function isAutoEndEnabled(): boolean {
 export function getEconomyMode(subject: unknown): "off" | "warn" | "block" {
   const raw = String(splitValue(COMBAT_SETTINGS.economy, subject) ?? "warn");
   return raw === "off" || raw === "block" ? raw : "warn";
+}
+
+/**
+ * Does rolled damage land on the creature it was rolled against, without anyone pressing a button?
+ *
+ * Nothing in the stack does this. dnd5e computes whether an attack hit inside its chat card's renderer
+ * and stores the answer nowhere, so it has no basis on which to apply anything; what it ships instead is
+ * the damage tray, a button per target for a human to press. That is a deliberate position rather than a
+ * gap — "Range, reach, & cover" and hit determination are both unshipped roadmap items — and midi-qol is
+ * the module that has always filled it. On a table without midi, every hit costs the GM a click and a
+ * subtraction, which is precisely the arithmetic nobody came to the table for.
+ *
+ * On by default for BOTH sides. The asymmetry a GM might expect — automate the monsters, leave the party
+ * alone — is the wrong way round: a player watching their own hit points move is watching the fiction
+ * happen, and the click they would otherwise make is on the GM's screen anyway, because a damage tray is
+ * pressed by whoever owns the target.
+ *
+ * Per audience on the creature TAKING the damage, not on whoever rolled it, so the NPC column reads as
+ * "monsters' hit points look after themselves" — which is how a GM thinks about it.
+ *
+ * Stands aside for midi when midi is applying damage itself; see `midiOwnsDamage()`.
+ */
+export function isAutoDamageEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.autoDamage, subject);
+}
+
+/**
+ * Is a saving throw joined back to the thing that demanded it, and does it settle the damage?
+ *
+ * dnd5e rolls a save when a button is pressed and then compares it to nothing. The DC is on the roll and
+ * the activity's own "on save" setting says half, none or full, and neither is ever read: the result is a
+ * number in the chat log for a human to interpret, after which that human works out half of 24.
+ *
+ * NOT per audience, unlike applying the damage, and the asymmetry people expect is here already without a
+ * switch: a creature nobody but the GM can roll for has its save rolled automatically, and a character
+ * with a player owner does not, because that player came to the table to roll it. That is derived from
+ * ownership rather than configured, which is the right place for it — a table does not want a preference,
+ * it wants its players rolling their own dice.
+ *
+ * What this does NOT do is apply the conditions a failed save imposes. Those live on the item as prose,
+ * which is the compiler's problem rather than this layer's.
+ */
+export function isAutoSavesEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoSaves));
 }
 
 /**

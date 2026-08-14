@@ -38,6 +38,7 @@ import {
 } from "../system/dnd5e-conditions";
 import { midiOwnsConcentration } from "../system/dnd5e-concentration";
 import { midiOwnsDying } from "../system/dnd5e-dying";
+import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 
@@ -170,6 +171,41 @@ const AREAS: Area[] = [
               "enabled with Nearby Foe on. Both ship off, so seeing this means somebody chose it.",
           }
         : null,
+  },
+  {
+    id: "autoDamage",
+    setting: COMBAT_SETTINGS.autoDamage,
+    contender: () =>
+      midiOwnsDamage()
+        ? {
+            by: MIDI_NAME,
+            note:
+              "Its Auto Apply Damage is not None, so it writes the hit points. Note that it ships as " +
+              "None: seeing this means somebody chose it, and NOT seeing it on a table with midi " +
+              "installed means midi is applying nothing.",
+          }
+        : null,
+  },
+  {
+    id: "autoSaves",
+    setting: COMBAT_SETTINGS.autoSaves,
+    contender: () =>
+      midiOwnsSaves()
+        ? {
+            by: MIDI_NAME,
+            note:
+              "Its Auto Check Saves is not None, so it rolls the saves and decides them, writing the " +
+              "verdict to its own card. That is a real answer rather than a reconstruction of one, so we " +
+              "stand aside whole. It also ships as None.",
+          }
+        : midiOwnsDamage()
+          ? {
+              by: MIDI_NAME,
+              note:
+                "It is applying the damage, so there is nothing left for a save to settle here even " +
+                "though it is not deciding the saves themselves.",
+            }
+          : null,
   },
   {
     id: "dying",

@@ -42,6 +42,16 @@ import { moduleActive } from "../util/modules";
 import { isForcedMovementEnabled } from "../settings";
 import { readHp } from "../core/tracker";
 import {
+  activityOf,
+  damageTypesOf,
+  itemOf,
+  masteryOf,
+  readHits,
+  speakerToken,
+  tokenFromActorUuid,
+  tokenFromTokenUuid,
+} from "./cards";
+import {
   forcedDistance,
   forcedRules,
   grapplerUuidOf,
@@ -114,132 +124,18 @@ function stamp(): string | null {
 }
 
 // ── Reading a message ─────────────────────────────────────────────────────────────────────────────────
+//
+// All of it now lives in `cards.ts`, because automatic damage application needs the same answers and two
+// implementations of "did that attack connect" is a bug whichever one is right. `hitTargets` keeps its
+// name and its logging here; what changed is that the arithmetic behind it is shared.
 
-/** The TokenDocument a chat message speaks for, or null when it does not name one. */
-function speakerToken(speaker: any): any {
-  const sceneId = String(speaker?.scene ?? "");
-  const tokenId = String(speaker?.token ?? "");
-  if (sceneId && tokenId) {
-    const doc = (game.scenes as any)?.get(sceneId)?.tokens?.get(tokenId);
-    if (doc) return doc;
-  }
-  // No token on the speaker: the actor's tokens on the current scene are the only remaining guess, and
-  // it is only unambiguous when there is exactly one of them.
-  const actor: any = speaker?.actor ? (game.actors as any)?.get(String(speaker.actor)) : null;
-  const tokens = actor?.getActiveTokens?.() ?? [];
-  return tokens.length === 1 ? (tokens[0]?.document ?? null) : null;
-}
-
-/**
- * The token behind an ACTOR uuid, which is what dnd5e records for each target.
- *
- * Unlinked tokens resolve exactly, because their synthetic actor knows its own token. Linked ones do
- * not: the uuid contains no token at all, and dnd5e additionally keys its target map by actor uuid, so
- * two copies of the same linked creature collapse into a single entry before we ever see it. That loss
- * is in the system's data and cannot be recovered here — only reported.
- */
-function tokenFromActorUuid(uuid: string): any {
-  try {
-    const actor: any = (globalThis as any).fromUuidSync?.(uuid);
-    if (!actor) return null;
-    if (actor.token) return actor.token;
-    const tokens = actor.getActiveTokens?.() ?? [];
-    if (tokens.length === 1) return tokens[0]?.document ?? null;
-    if (tokens.length > 1) {
-      log(
-        `forced movement: ${String(actor.name ?? uuid)} has ${tokens.length} tokens on this scene and ` +
-          `the target record cannot say which was hit; skipping rather than guessing`,
-      );
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function tokenFromTokenUuid(uuid: string): any {
-  try {
-    const doc: any = (globalThis as any).fromUuidSync?.(uuid);
-    return doc?.documentName === "Token" ? doc : (doc?.document ?? null);
-  } catch {
-    return null;
-  }
-}
-
-function itemOf(message: any): any {
-  const uuid = String(message?.flags?.dnd5e?.item?.uuid ?? "");
-  if (!uuid) return null;
-  try {
-    return (globalThis as any).fromUuidSync?.(uuid) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/** The activity that ran, looked up on its item — activity uuids do not resolve through `fromUuid`. */
-function activityOf(message: any, item: any): any {
-  const id = String(message?.flags?.dnd5e?.activity?.id ?? "");
-  if (!id || !item) return null;
-  try {
-    return item.system?.activities?.get?.(id) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The weapon mastery in use, if any.
- *
- * dnd5e copies the chosen mastery onto its own attack message at `flags.dnd5e.roll.mastery`, which is
- * the authoritative reading. Under midi that separate message is never created, so the weapon's own
- * mastery property is the fallback — best-effort, and only trusted as far as being a string.
- */
-function masteryOf(message: any, item: any): string {
-  const flagged = String(message?.flags?.dnd5e?.roll?.mastery ?? "");
-  if (flagged) return flagged;
-  const declared = item?.system?.mastery;
-  return typeof declared === "string" ? declared : "";
-}
-
-/** Damage types on a message, one per roll — a DamageRoll carries exactly one. */
-function damageTypesOf(message: any): string[] {
-  const out: string[] = [];
-  for (const roll of message?.rolls ?? []) {
-    const type = String((roll as any)?.options?.type ?? "");
-    if (type) out.push(type.toLowerCase());
-  }
-  // Midi summarises the same information in its own flags, which is the only reading available when the
-  // rolls live on a card it assembled rather than on a dedicated damage message.
-  for (const entry of message?.flags?.["midi-qol"]?.damageDetail ?? []) {
-    const type = String(entry?.type ?? "");
-    if (type) out.push(type.toLowerCase());
-  }
-  return out;
-}
-
-/** Did this attack roll beat that target's AC, by dnd5e's own arithmetic? */
+/** Did this attack roll beat each target's AC, reporting the ones we could not read. */
 function hitTargets(message: any): any[] {
-  const roll: any = message?.rolls?.[0];
-  if (!roll) return [];
-  const total = Number(roll.total);
-  if (!Number.isFinite(total)) return [];
-
-  const out: any[] = [];
-  for (const target of message?.flags?.dnd5e?.targets ?? []) {
-    const ac = (target as any)?.ac;
-    if (ac === null || ac === undefined) {
-      log(
-        `forced movement: no readable AC for ${String((target as any)?.name ?? "a target")} — total ` +
-          `cover, or a sheet we cannot read. Not treating it as a hit either way.`,
-      );
-      continue;
-    }
-    const missed = !roll.isCritical && (total < Number(ac) || roll.isFumble);
-    if (missed) continue;
-    const doc = tokenFromActorUuid(String((target as any)?.uuid ?? ""));
-    if (doc) out.push(doc);
+  const reading = readHits(message);
+  for (const skipped of reading.unresolved) {
+    log(`forced movement: skipping ${skipped.name} — ${skipped.why}.`);
   }
-  return out;
+  return reading.hits;
 }
 
 // ── Deciding and applying ────────────────────────────────────────────────────────────────────────────

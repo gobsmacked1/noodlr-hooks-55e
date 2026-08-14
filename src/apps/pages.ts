@@ -537,32 +537,30 @@ const SHARED_ROLLS: Section = {
   id: "rolls",
   title: "Rolling and reporting",
   blurb:
-    "The whole midi workflow lives here, and none of it is built. This module decides and announces; " +
-    "a human presses the buttons. Worth being clear about before you disable midi. When these do arrive " +
-    "they will be per side, because a table that auto-rolls its monsters rarely auto-rolls its players.",
+    "Applying damage is built and lives in the next section, per side; a saving throw settling that damage " +
+    "is here. What is still missing is rolling an attack for you and deciding who a template caught — " +
+    "this module reads rolls off the chat log and acts on them, but it does not make them. Worth being " +
+    "clear about before you disable midi.",
   rows: [
     {
       id: "autoAttack",
-      label: "Roll attacks automatically and report hit or miss",
+      label: "Roll attacks automatically",
       hint:
-        "dnd5e never compares an attack roll to an AC — a person eyeballs it. That single absence is " +
-        "why Shield cannot be timed natively and why we read hits back off chat messages.",
+        "dnd5e never compares an attack roll to an AC — a person eyeballs it — so hit and miss are " +
+        "recomputed here from the AC recorded on the card, which is what applying damage hangs on. " +
+        "What is missing is rolling the attack in the first place, and the 'about to hit' moment Shield " +
+        "would need.",
       state: "planned",
-      today: "Midi QoL, and it is the main reason tables install it.",
-    },
-    {
-      id: "autoDamage",
-      label: "Roll and apply damage automatically",
-      hint: "Including the damage buttons on the card. dnd5e rolls; applying is a click.",
-      state: "planned",
-      today: "Midi QoL, though its auto-apply ships off.",
+      today: "Midi QoL, and it is the main reason tables install it. Hits are read either way.",
     },
     {
       id: "autoSave",
-      label: "Roll saving throws automatically and report success or failure",
-      hint: "dnd5e rolls a save when asked and never compares it to the DC that demanded it.",
-      state: "planned",
-      today: "Midi QoL.",
+      label: "NOODLRHOOKS.Combat.AutoSaves.Name",
+      hint: "NOODLRHOOKS.Combat.AutoSaves.Hint",
+      state: "live",
+      setting: C.autoSaves,
+      kind: "boolean",
+      ownership: "autoSaves",
     },
     {
       id: "targeting",
@@ -598,6 +596,16 @@ const CONCENTRATION_ROW: Row = {
   ownership: "concentration",
 };
 
+const AUTO_DAMAGE_ROW: Row = {
+  id: "autoDamage",
+  label: "NOODLRHOOKS.Combat.AutoDamage.Name",
+  hint: "NOODLRHOOKS.Combat.AutoDamage.Hint",
+  state: "live",
+  setting: C.autoDamage,
+  kind: "boolean",
+  ownership: "autoDamage",
+};
+
 const ECONOMY_ROW: Row = {
   id: "economy",
   label: "NOODLRHOOKS.Combat.Economy.Name",
@@ -613,19 +621,23 @@ const ECONOMY_ROW: Row = {
   ownership: "economy",
 };
 
-/** Staying up, and what one turn allows. The three genuinely symmetric rules. */
+/** Hit points, staying up, and what one turn allows. The genuinely symmetric rules. */
 const PER_SIDE_STATE: Section = {
   id: "perSideState",
-  title: "Staying up, and what a turn allows",
+  title: "Hit points, staying up, and what a turn allows",
   blurb:
     "Set each side to taste. Most tables want death saves and concentration for the party and a " +
-    "cleaner kill for the mooks, and want a budget the players are asked about and monsters are held to.",
+    "cleaner kill for the mooks, and want a budget the players are asked about and monsters are held to. " +
+    "Applying damage is what switches the rest of this section on: death saves and the concentration " +
+    "check both hang off the system's damage hook, which only fires when somebody's hit points actually " +
+    "move.",
   columns: [
     {
       audience: "npc",
       label: "NOODLRHOOKS.Rules.Audience.Npc",
       blurb: "Anything whose sheet is not a character, whoever happens to own the token.",
       rows: [
+        AUTO_DAMAGE_ROW,
         DYING_ROW,
         {
           id: "importantNpc",
@@ -643,7 +655,7 @@ const PER_SIDE_STATE: Section = {
       audience: "pc",
       label: "NOODLRHOOKS.Rules.Audience.Pc",
       blurb: "Character sheets. The GM is never refused here, only ever asked.",
-      rows: [DYING_ROW, CONCENTRATION_ROW, ECONOMY_ROW],
+      rows: [AUTO_DAMAGE_ROW, DYING_ROW, CONCENTRATION_ROW, ECONOMY_ROW],
     },
   ],
 };
