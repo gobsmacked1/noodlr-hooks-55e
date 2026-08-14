@@ -56,6 +56,13 @@ export const COMBAT_SETTINGS = {
   /** Per audience. Whether a triggered reaction is offered to whoever plays the creature, on a clock. */
   reactionPrompts: "combat.reactionPrompts",
   /**
+   * Per audience. Whether a cast is held open long enough for an opposed creature to counter it.
+   *
+   * Split by the CASTER, not by the counterspeller: the cost of this rule is a pause on somebody's cast, so
+   * the audience whose casts may be delayed is the one whose column governs it.
+   */
+  counterspell: "combat.counterspell",
+  /**
    * Whether a failed NPC save offers the legendary resistance dnd5e draws a button for.
    *
    * Deliberately NOT split by audience: `resources.legres` is a field on the NPC data model, so a player
@@ -92,6 +99,7 @@ export const SPLIT_COMBAT_SETTINGS = [
   COMBAT_SETTINGS.economy,
   COMBAT_SETTINGS.autoDamage,
   COMBAT_SETTINGS.reactionPrompts,
+  COMBAT_SETTINGS.counterspell,
 ] as const;
 
 /** The registered key for one side of a split setting. */

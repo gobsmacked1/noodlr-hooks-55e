@@ -1133,15 +1133,16 @@ edits closed without saving are lost. Same trade `noodlr` makes.
       which is what we match.
     - Reaction uses want `isReaction: true` and `workflowOptions.targetConfirmation: "none"` in
       `midiOptions`, which is what midi's own reaction path passes.
-  - **Planned, not built: Shield, Parry, Counterspell.** Without midi, dnd5e never compares an attack roll
-    to an AC — a human eyeballs it — so there is no "about to hit" moment and Shield genuinely cannot be
-    timed natively. The shape that respects principle #0 is a two-part job: an optional adapter that
-    lights up when midi is present, hooking `midi-qol.preCheckHits` (the last point at which an AC change
-    is still read by `checkHits`, followed by `actor.reset()`), `midi-qol.hitsChecked` for Parry, and
-    `midi-qol.isDamaged` for retaliation at higher fidelity than our hit-point watcher; plus a NATIVE
-    Counterspell off dnd5e's own activity-use hooks, since "a spell is being cast" is observable without
-    midi. Every midi hook built from `WorkflowState_X` exists as both `midi-qol.preX` and `midi-qol.postX`
-    and is awaited, so an async handler legitimately delays the workflow.
+  - ~~**Planned, not built: Shield, Parry, Counterspell.**~~ **All three built natively, and the reasoning
+    below was wrong about the hard part.** It said Shield "genuinely cannot be timed natively" because
+    dnd5e never compares an attack roll to an AC, and concluded that the answer was a midi adapter
+    (`midi-qol.preCheckHits`, `hitsChecked`, `isDamaged`). The premise is right and the conclusion was not:
+    dnd5e stores no hit verdict, so **we compute one** — `readHits` in `rules/cards.ts` — and the "when you
+    are hit" moment falls straight out of it. Shield and Defensive Duelist ship in v0.4.2 (`acBoostOf` plus
+    the `incoming` trigger), Counterspell in v0.4.3. The one true sentence in the old note is the last: midi
+    hooks are awaited, so an adapter would still be the way to raise *fidelity* where midi is present. It is
+    not the way to get the feature. **General lesson, and it is the same one twice: "the system does not
+    record X" is an argument for recording X ourselves, not for depending on whoever else does.**
   - **Asking "can that monster see that player" (2026-08-04, source-verified).** Everything in
     `combat/auto/perception.ts`. Three separate traps, each of which fails SILENTLY:
     1. `token.isVisible` and `canvas.visibility.testVisibility` answer whether the CURRENT USER can see
@@ -2114,20 +2115,121 @@ button press.
 
 ### Refused explicitly, because a half-built offer is worse than none
 
-**Counterspell** and **Silvery Barbs** are both in the user's list and neither is offered. One triggers on "a
-creature is casting a spell" and needs a window that holds up somebody else's cast; the other needs to
-substitute a d20 we did not roll. Both are real features and neither is guessed at: an offer that cannot be
-honoured spends the resource and changes nothing, which is the worst outcome available.
+**Counterspell** and **Silvery Barbs** were both refused in v0.4.2. **Counterspell shipped in v0.4.3 — see the
+next section, and note that the reasoning recorded here for refusing it was half wrong.** Silvery Barbs is
+still refused: it needs a d20 somebody else already rolled to be taken back, and an offer that cannot be
+honoured spends the resource and changes nothing, which is the worst outcome available. It is the closer of the
+two now, which is the opposite of the 2026-08-04 assessment — it triggers after a d20 succeeds, we own both of
+those moments (`readHits` for an attack, `readSave` for a save) and already hold the damage back through a
+window. What it needs is a reroll substituted into a verdict we have read, not a hook that does not exist.
 
-**Counterspell is the more tractable of the two and is still not simply a matter of finding the hook.**
-`dnd5e.preUseActivity` does report a cast, but `Hooks.call` is synchronous and the veto is its return value, so
-there is no awaiting a six-second prompt and then cancelling — the same wall `noodlrHooks.preRuling` hit, and
-the reason `noodlr` deliberately does not listen to that. Building it means either vetoing first and asking
-afterwards (wrong: it cancels casts nobody countered) or holding the cast in a way core does not provide.
-**Silvery Barbs is now the closer of the two**, which is the opposite of the 2026-08-04 assessment: it triggers
-after a d20 succeeds, and we now own both moments (`readHits` for an attack, `readSave` for a save) and already
-hold the damage back through a window. What it needs is a reroll substituted into a verdict we have read, not a
-hook that does not exist.
+## Counterspell, and the note that talked itself out of a buildable feature (v0.4.3, 2026-08-14)
+
+`rules/counterspell.ts` + `system/dnd5e-counterspell.ts`. This is worth reading as a lesson about notes as much
+as about the feature, because **the paragraph above was the only thing standing between two releases and a
+working Counterspell**, and it was wrong in a specific and instructive way. It said:
+
+> `dnd5e.preUseActivity` does report a cast, but `Hooks.call` is synchronous and the veto is its return value,
+> so there is no awaiting a six-second prompt and then cancelling. Building it means either vetoing first and
+> asking afterwards (wrong: it cancels casts nobody countered) or holding the cast in a way core does not
+> provide.
+
+Every clause of that is true. The conclusion does not follow. **Veto first and ask afterwards is not wrong if
+you put the cast back**, and this repo had already been doing exactly that for four months: the action economy's
+over-budget dialog cancels a use, asks a question that takes as long as it takes, and then replays it through a
+`cleared` set that stops it being charged twice. The mechanism the note declared absent was three files away and
+in daily use. **The generalisable rule: a note that concludes "core does not provide X" has to name what it
+searched, because the usual reason for that conclusion is that the answer was a pattern rather than an API.**
+
+### The 2024 redesign is what makes it honest, not merely possible
+
+Under 2014 rules the counterspeller rolled an ability check against a DC from the countered spell's level and
+the countered caster **lost the slot**. Both halves fight Foundry: there is no contest primitive, and refunding
+a slot means unpicking a consumption that has already happened. 2024 inverts both, and the two inversions line
+up exactly with what a `preUseActivity` veto can do:
+
+- The countered creature makes an ordinary **Constitution saving throw** against the counterspeller's ordinary
+  spell save DC. dnd5e already ships the spell in that shape (`packs/_source/spells24/3rd-level/counterspell.yml`:
+  a `save` activity, `save.ability: con`, `dc.calculation: spellcasting`, `identifier: counterspell`), so the DC
+  is the system's to compute and never ours — which also means a table's homebrew DC is respected for free.
+- On a failure the slot **"isn't expended"**. So stopping the cast *before* dnd5e's consumption step is not a
+  workaround for the platform, it is the literal rule.
+- Upcasting does nothing, so there is no "at higher levels" scaling to read.
+
+**What a countered caster loses, and where each half comes from, is the part most likely to be broken by a
+later edit.** The Action is charged by `police()` in the ordinary course of allowing the cast, so by the time
+the window opens it is already spent — correct. The slot is never touched, because the veto precedes
+consumption — correct. Both are consequences of *where* `holdForCounterspell` is called from, and neither is
+implemented in `counterspell.ts` at all. Moving that call earlier or later silently changes the rule.
+
+### Gambit's Premades does this, and reading it confirmed the approach rather than replacing it
+
+`gambits/scripts/automations2024/spells/counterspell2024.js` is a complete and careful implementation — 60 feet,
+enemies only, sight, the reaction, the V/S/M test, a timed dialog, and the counter-the-counterspell chain. Two
+things came out of reading it:
+
+- **It aborts midi's workflow AFTER the cast and then refunds the slot** by replaying
+  `flags.dnd5e.use.consumed` in reverse (`refundSpellSlot`). That is the only option available once consumption
+  has happened, and it is exactly what vetoing at `preUseActivity` avoids. Independent confirmation that the
+  earlier interception point is the better one.
+- **`gambitsOwnsCounterspell()` requires Gambit's AND midi**, and that conjunction is the point rather than an
+  aside. Its entry point is `MidiQOL.Workflow.getWorkflow()` and every step routes through `MidiQOL.socket()`,
+  so with midi absent — which is this table — its automation cannot fire at all. Standing aside for an
+  installed-but-inert module would have left Counterspell unimplemented while a settings row claimed somebody
+  had it, which is the exact failure the ownership resolver exists to prevent. Note also that theirs fires only
+  for creatures carrying its own flagged Counterspell item; ours reads whatever Counterspell is on the sheet.
+- Its **Deafened rule is worth having and is an interpretation rather than a printed clause**: a spell with
+  Verbal components and neither Somatic nor Material has nothing to *see*, and the rule says "when you see a
+  creature casting", so a Deafened creature cannot notice it. `CounterableCast.vocalOnly` carries it.
+
+### Invariants
+
+- **Unreadable components mean COUNTERABLE.** The veto is synchronous, so a monster casting through a feat that
+  points at an unloaded compendium spell cannot have its properties read here at all (`fromUuidSync` returns an
+  index stub with no `system`). Assuming components costs the occasional pointless offer; assuming their absence
+  would make most of the bestiary silently immune to being countered, with nothing anywhere saying why. A
+  property set that IS readable and names none of the three is the one honest "no", and the two cases must stay
+  distinguishable — `test/counterspell.test.ts` pins both.
+- **Whether a slot is spent is asked of `CONFIG.DND5E.spellcasting[method].slots`, never hardcoded.** An
+  at-will or innate caster has no pool, and refusing it for want of a resource it does not use would disqualify
+  exactly the creatures most likely to be holding this.
+- **The DC is a hard requirement, not a best guess.** Without one there is no contest to adjudicate, and the
+  failure to avoid is spending somebody's third-level slot on a save nobody can judge. Read from
+  `save.dc.value` after data preparation rather than recomputed.
+- **The contest is resolved on the client holding the cast**, which by construction owns the caster. That is
+  what keeps it out of `rules/saves.ts` — that layer runs on the primary GM only, and a player's held spell
+  would need its verdict shipped back across a wire before the cast could be resumed. It is also why the
+  legendary resistance offer lands in the right place with no routing: the only creature that has one is an
+  NPC, and an NPC's cast was pressed by the GM. `savesSkip()` is the stand-aside; two layers settling one save
+  would race, and the visible symptom would be two resistance prompts for one counter.
+- **The clock never picks Counterspell.** `timeoutChoice` refuses the `casting` trigger outright rather than
+  leaving it to `depleting`, because that field is read off a sheet and a sheet can be wrong; a third-level
+  slot spent by a timer is unforgivable and there is no free version of this spell anywhere.
+- **In combat only, deliberately.** The reaction ledger is turn-stamped, so outside a fight there is nothing to
+  stop one creature countering every spell in a scene. A rule that cannot count the resource it spends should
+  not pretend to.
+- **At most two creatures are asked** (`MAX_ASKED`). RAW there is no limit, and the counter-the-counterspell
+  moment is one of the best in the game, but every ask costs the caster six seconds of staring at a button that
+  did nothing. Stated in the announcement rather than hidden.
+- **The cast is announced before anybody is asked.** Without it the caster's client does nothing for six
+  seconds, which reads as the button being broken — and "X begins casting Y" is also the fiction the rule
+  describes, so the honest fix and the good one are the same fix.
+- **A window that cannot be opened lets the spell through.** Every failure path — unreadable vision, a thrown
+  error, no replay wired — resumes or never holds. Losing a cast to our own bug is far worse than missing a
+  counterspell.
+- Diagnostics: `api.surveyCounterspell()`.
+
+### Two known imperfections, stated rather than discovered later
+
+- **The Counterspell card carries a Con save button nobody needs to press.** We roll that save ourselves so we
+  can read it and offer a legendary resistance against it; dnd5e's save activity also renders its own enricher
+  button. Pressing it produces a second, ignored roll. Gambit's has the same redundancy for the same reason
+  (its `syntheticSave`), and removing ours would mean waiting on a human press, which is the automation being
+  asked for.
+- **A cast held and then abandoned at the level dialog has still been announced.** The veto fires before that
+  dialog, so a player can press Fireball, be announced, wait, and then cancel. The Action was already lost in
+  that case before this feature existed — `police()` charges at `preUseActivity`, ahead of the dialog — so what
+  is new is the announcement rather than the cost.
 
 ### The legendary resistance, and the general lesson about automating around a pause
 

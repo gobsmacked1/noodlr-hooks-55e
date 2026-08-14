@@ -40,6 +40,7 @@ import { midiOwnsConcentration } from "../system/dnd5e-concentration";
 import { midiOwnsDying } from "../system/dnd5e-dying";
 import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { midiPromptsReactions } from "../system/dnd5e-reactions";
+import { gambitsOwnsCounterspell } from "../system/dnd5e-counterspell";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 
@@ -220,6 +221,21 @@ const AREAS: Area[] = [
               "and unlike most midi mechanics that one ships ON. We keep the departure trigger, which " +
               "midi declares and never fires, so opportunity attacks are still offered here. Set Do " +
               "Reactions and GM Do Reactions to None to hand the whole surface over.",
+          }
+        : null,
+  },
+  {
+    id: "counterspell",
+    setting: COMBAT_SETTINGS.counterspell,
+    contender: () =>
+      gambitsOwnsCounterspell()
+        ? {
+            by: "Gambit's Premades",
+            note:
+              "Its 2024 Counterspell automation is complete — 60 feet, enemies only, sight, the reaction, " +
+              "and the counter-a-counterspell chain — and it runs through Midi QoL, which is installed. " +
+              "Two windows on one cast would ask twice, so this stands aside. Note that it fires only for " +
+              "creatures carrying its own Counterspell item; ours reads whatever Counterspell is on the sheet.",
           }
         : null,
   },

@@ -39,6 +39,7 @@ import { lightExtraAttackCost } from "../../system/dnd5e-two-weapon";
 import { interceptHideActivity } from "../hide";
 import { interceptStabilizeActivity } from "../dying";
 import { interceptInfluenceActivity } from "../influence";
+import { holdForCounterspell, useReplay } from "../counterspell";
 import { check, lightSwings, slotFor, spend, takeDash, takeLightSwing, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
@@ -67,6 +68,11 @@ export function isAutomating(): boolean {
 }
 
 export function registerEconomyHooks(): void {
+  // Counterspell's window cancels a cast and resumes it if nobody counters, and the resumed cast must not be
+  // charged a second time. `cleared` is the only thing that can express that, and it lives here — so the
+  // replay is handed over rather than the set being exported for somebody else to write into.
+  useReplay(replayCleared);
+
   Hooks.on(
     "dnd5e.preUseActivity",
     (activity: any, usageConfig: any, dialogConfig: any, messageConfig: any) => {
@@ -230,6 +236,12 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
 
   if (verdict.allowed) {
     charge(actor, combat, combatant, slot, isAttack, activity);
+    // Counterspell's window, and the placement is the whole of its resource clause. The Action has just been
+    // charged, which is exactly what a countered caster loses; the veto that follows precedes dnd5e's
+    // consumption step, so the slot is never spent, which is exactly what 2024 says they keep. Held here
+    // rather than earlier so a cast that was never legal is refused outright instead of being offered up to
+    // be countered, and here rather than in a second `preUseActivity` listener for the reason above.
+    if (holdForCounterspell(activity, usageConfig, dialogConfig, messageConfig)) return false;
     return true;
   }
 
@@ -311,7 +323,22 @@ async function askThenRetry(
 
   charge(over.actor, over.combat, over.combatant, over.slot, over.isAttack, activity);
   await announce(over, activity, what);
+  await replayCleared(activity, usageConfig, dialogConfig, messageConfig);
+}
 
+/**
+ * Run a use that has already been paid for, so this layer waves it through.
+ *
+ * Shared by the over-budget approval and by Counterspell's window: both cancel a use, decide something about
+ * it, and then let the original happen. A second copy of the `cleared` bookkeeping is how the two would
+ * eventually disagree about whether the retry gets charged.
+ */
+async function replayCleared(
+  activity: any,
+  usageConfig: any,
+  dialogConfig: any,
+  messageConfig: any,
+): Promise<void> {
   const key = String(activity?.uuid ?? "");
   if (key) {
     cleared.add(key);

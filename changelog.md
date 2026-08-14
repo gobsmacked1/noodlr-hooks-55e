@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.3
+
+**Counterspell works.** It is the reaction spellcasters most expect to exist and the one that has never
+worked: catching a cast means noticing it in the half-second before the damage card appears, so in practice
+it is played by asking the table to rewind. A spell with Verbal, Somatic or Material components is now held
+open for a moment when an opposed creature within 60 feet can see it, is holding Counterspell, and still has
+its reaction. Everyone else's casts are untouched, and nothing is held at all when no such creature exists —
+which is nearly every cast, so an ordinary turn is exactly as fast as it was.
+
+The 2024 rules are what make this honest rather than a workaround. The caster makes a Constitution save
+against the counterspeller's spell save DC, and a countered spell **costs the action but not the slot** —
+which is precisely what happens when the cast is stopped before the system charges for it. On a success the
+spell goes off as cast, having lost nothing but a few seconds. A boss can spend a legendary resistance to
+push through, and is asked on the same clock as everywhere else.
+
+At most two creatures are asked, on the six-second clock, and **the clock never spends the slot for them** —
+a third-level slot taken by a timer is unforgivable, and there is no free version of this spell. A creature
+that cannot hear is not offered a cast that has nothing to see: verbal components and nothing else means the
+only way to notice it is to hear it. New switch, **Hold a cast open for Counterspell**, split by the
+*caster* rather than the counterspeller — what this costs is a pause on somebody's cast, so the side whose
+spells may be delayed is the side that governs it. Both start on. It stands aside for Gambit's Premades,
+which does this properly wherever Midi QoL is installed to carry it.
+
+Still not offered: **Silvery Barbs**. It needs a d20 somebody else already rolled to be taken back, and an
+offer that cannot be honoured spends the slot and changes nothing.
+
 ## 0.4.2
 
 Damage lands by itself now, saving throws settle what they are worth, and a reaction is offered to whoever

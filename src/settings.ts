@@ -161,6 +161,7 @@ export function registerCombatSettings(): void {
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
   split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
+  split(COMBAT_SETTINGS.counterspell, "Counterspell", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.legendaryResistance, "LegendaryResistance", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
@@ -480,6 +481,21 @@ export function isAutoSavesEnabled(): boolean {
  */
 export function isReactionPromptEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.reactionPrompts, subject);
+}
+
+/**
+ * Is a cast held open long enough for an opposed creature to counter it?
+ *
+ * The subject is the CASTER, which is the opposite of what the rule's name suggests and is the right way
+ * round: what this setting costs is a pause on somebody's cast while a dialog runs on another client, so the
+ * column that governs it is the one whose spells might be delayed. A GM who finds the pause intrusive during
+ * their own monsters' turns can switch the NPC side off and leave the party's casts counterable.
+ *
+ * Both start on. Counterspell is the reaction spellcasters most expect to exist, and it has never worked in
+ * any Foundry module without somebody noticing the cast by hand and pressing a button in time.
+ */
+export function isCounterspellEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.counterspell, subject);
 }
 
 /**

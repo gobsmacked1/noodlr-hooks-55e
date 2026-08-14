@@ -19,8 +19,9 @@
 // arrived in v0.4.2 and lives in `rules/damage.ts`, because it is a consequence of that layer rather than
 // of this one. This header used to say Shield could not be timed without midi's `preCheckHits`, and the
 // reason it gave was sound: dnd5e never compares an attack roll to an AC, so there was no moment to hook.
-// Recomputing the hit ourselves created one. Counterspell and Silvery Barbs are still absent, with reasons
-// in `rules/offer.ts`.
+// Recomputing the hit ourselves created one. A fourth — a spell is being cast — arrived in v0.4.3 and lives
+// in `rules/counterspell.ts`, because that one holds the trigger open rather than answering it afterwards.
+// Silvery Barbs is still absent, with the reason in `rules/offer.ts`.
 //
 // The bookkeeping is ours too. Whether a creature has spent its reaction is read from Noodlr's own
 // action-economy ledger rather than any module's flags, for exactly the same reason — and from the same

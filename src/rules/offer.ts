@@ -22,11 +22,11 @@
 // dialog per goblin per departure is the "long chain of approvals" the brief rules out. The offer is for
 // the creatures nobody is playing for you.
 //
-// WHAT IS DELIBERATELY NOT OFFERED. Counterspell and Silvery Barbs both trigger on something no hook
-// reports: "a creature is casting a spell" and "a d20 has been rolled and I want it rerolled". The first
-// needs dnd5e's activity-use hooks and a window that holds up somebody else's cast, the second needs to
-// substitute a roll we did not make. Both are real and neither is guessed at here — an offer that cannot
-// be resolved honestly is worse than no offer, because it spends the resource and changes nothing.
+// WHAT IS DELIBERATELY NOT OFFERED, revised in v0.4.3. Counterspell IS offered now, through the `casting`
+// trigger: `rules/counterspell.ts` holds the cast with a `preUseActivity` veto and resumes it if nobody
+// counters, which is the window the previous version of this note said did not exist. Silvery Barbs still is
+// not — it needs a d20 we did not roll to be rerolled after the fact, and an offer that cannot be resolved
+// honestly is worse than no offer, because it spends the resource and changes nothing.
 
 import { MODULE_ID, log } from "../constants";
 import { rollerForActor } from "../util/gm";
@@ -38,12 +38,13 @@ import { useActionAt } from "../tactics/execute";
 import { hasReaction, spend } from "./economy/ledger";
 import { isReactionPromptEnabled } from "../settings";
 import { acBoostOf, midiPromptsReactions } from "../system/dnd5e-reactions";
+import { counterspellReady, isCounterspell } from "../system/dnd5e-counterspell";
 import { readHp } from "../core/tracker";
 
 const QUERY = "reaction";
 
 /** Why the creature is being asked. Each one filters the options and words the sentence differently. */
-export type ReactionTrigger = "opportunity" | "hurt" | "incoming";
+export type ReactionTrigger = "opportunity" | "hurt" | "incoming" | "casting";
 
 export interface OfferRequest {
   actorUuid: string;
@@ -58,6 +59,8 @@ export interface OfferRequest {
    * when it would actually turn the hit into a miss, and the margin is the only way to know that.
    */
   margin?: number;
+  /** For `casting`: the spell being cast, so the sentence names what is worth interrupting. */
+  spell?: string;
 }
 
 export interface OfferAnswer {
@@ -66,6 +69,13 @@ export interface OfferAnswer {
   label?: string;
   /** Set when the thing taken raises AC, so the asking client can settle the attack again. */
   acBonus?: number;
+  /**
+   * For `casting`: the save DC the countered creature rolls against.
+   *
+   * Read on the client that owns the Counterspell, because that is where the spellcasting DC actually
+   * lives — the asking client's reading of somebody else's sheet is a copy, and this one decides a contest.
+   */
+  dc?: number;
 }
 
 /** Register the answering half. Must run on EVERY client: the addressee is whoever owns the creature. */
@@ -85,9 +95,10 @@ export function registerReactionOffers(): void {
  */
 export function offerable(actor: any, trigger: ReactionTrigger = "opportunity"): boolean {
   if (!isReactionPromptEnabled(actor)) return false;
-  // Midi prompts for "I was hit" and "I was damaged" at its stock settings, and never for a departure.
-  // Two dialogs for one hit is the double-ask this whole layer exists to avoid, so that half is its.
-  if (trigger !== "opportunity" && midiPromptsReactions()) return false;
+  // Midi prompts for "I was hit" and "I was damaged" at its stock settings, and never for a departure or a
+  // cast. Two dialogs for one hit is the double-ask this whole layer exists to avoid, so those halves are
+  // its; the two triggers it has never dispatched stay ours.
+  if (trigger !== "opportunity" && trigger !== "casting" && midiPromptsReactions()) return false;
   const owner = rollerForActor(actor);
   if (owner) return true;
   // Nobody owns it, so it is the GM's to answer — provided one is connected to answer with.
@@ -162,14 +173,19 @@ async function resolveHere(request: OfferRequest): Promise<OfferAnswer> {
   notifyMidi(actor);
 
   const boost = acBoostOf(chosen.item, actor);
+  // Read BEFORE the use, because using the spell spends the slot and a sheet mid-update is a bad place to
+  // read a derived number from. The DC decides the contest, so the asking client is told it explicitly
+  // rather than left to look it up on a sheet it does not own.
+  const dc =
+    request.trigger === "casting" ? (counterspellReady(actor)?.dc ?? undefined) : undefined;
   try {
     // A reaction that raises AC is cast on oneself; everything else is pointed at whatever provoked it.
     await useActionAt(chosen, boost ? token : (target ?? token), { asReaction: true });
   } catch (err) {
     log(`reaction offer: ${actor?.name} could not use ${chosen.name}:`, err);
-    return { taken: true, label: chosen.name, acBonus: boost?.bonus };
+    return { taken: true, label: chosen.name, acBonus: boost?.bonus, dc };
   }
-  return { taken: true, label: chosen.name, acBonus: boost?.bonus };
+  return { taken: true, label: chosen.name, acBonus: boost?.bonus, dc };
 }
 
 /**
@@ -184,6 +200,13 @@ const MAX_OPTIONS = 4;
 function optionsFor(actor: any, request: OfferRequest, target: any): CreatureAction[] {
   const all = readActions(actor).filter((action) => action.available);
   const gap = separation(request, target);
+
+  if (request.trigger === "casting") {
+    // Exactly one thing interrupts a cast, and offering anything else alongside it would invite spending a
+    // reaction on a swing that does not stop the spell. Range is checked by the asking client against the
+    // spell's own 60 feet, so it is not re-checked against a generic reach here.
+    return all.filter((action) => isCounterspell(action.item)).slice(0, MAX_OPTIONS);
+  }
 
   if (request.trigger === "incoming") {
     // Only things that would change the answer. A +5 offered against an attack that beat the AC by nine is
@@ -240,6 +263,11 @@ export function timeoutChoice(
   // An AC boost always costs something (a slot, a limited use) and is always the difference between being
   // hit and not, so it is exactly the case where the person has to answer. Never defaulted to either way.
   if (trigger === "incoming") return null;
+  // Counterspell is a third-level slot, every time, with no free version of itself anywhere. Refused
+  // explicitly rather than left to `depleting` below: that field is read off a sheet, and a sheet that
+  // reported it wrongly would have a clock spending somebody's slot — which is the one thing the whole
+  // default rule exists to prevent.
+  if (trigger === "casting") return null;
   return options.find((option) => !option.depleting) ?? null;
 }
 
@@ -259,10 +287,13 @@ function sentence(request: OfferRequest, token: any): string {
       ? "NOODLRHOOKS.Reaction.Offer.Leaving"
       : request.trigger === "incoming"
         ? "NOODLRHOOKS.Reaction.Offer.Incoming"
-        : "NOODLRHOOKS.Reaction.Offer.Hurt";
+        : request.trigger === "casting"
+          ? "NOODLRHOOKS.Reaction.Offer.Casting"
+          : "NOODLRHOOKS.Reaction.Offer.Hurt";
   return game.i18n.format(key, {
     name: String(token?.name ?? ""),
     target: request.targetName,
+    spell: String(request.spell ?? ""),
   });
 }
 

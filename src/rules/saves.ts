@@ -40,6 +40,7 @@ import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { canResist } from "../system/dnd5e-legendary";
 import { applyRolledDamage, type DamageEntry } from "./damage";
+import { savesSkip } from "./counterspell";
 import { considerResistance } from "./legendary";
 import {
   activityOf,
@@ -169,6 +170,11 @@ async function onUsage(message: any): Promise<void> {
   const item = itemOf(message);
   const activity = activityOf(message, item);
   if (String(activity?.type ?? "") !== "save") return;
+
+  // Counterspell is a save activity and is not this layer's to settle. The window in `rules/counterspell.ts`
+  // is holding a cast open waiting on that save's verdict, so it rolls and reads it there; settling it here
+  // as well would race, and the visible symptom would be two legendary resistance prompts for one counter.
+  if (savesSkip(item)) return;
 
   const usageId = String(message?.id ?? "");
   if (!usageId) return;

@@ -632,6 +632,16 @@ const REACTION_PROMPT_ROW: Row = {
   ownership: "reactionPrompts",
 };
 
+const COUNTERSPELL_ROW: Row = {
+  id: "counterspell",
+  label: "NOODLRHOOKS.Combat.Counterspell.Name",
+  hint: "NOODLRHOOKS.Combat.Counterspell.Hint",
+  state: "live",
+  setting: C.counterspell,
+  kind: "boolean",
+  ownership: "counterspell",
+};
+
 const ECONOMY_ROW: Row = {
   id: "economy",
   label: "NOODLRHOOKS.Combat.Economy.Name",
@@ -676,13 +686,21 @@ const PER_SIDE_STATE: Section = {
         CONCENTRATION_ROW,
         ECONOMY_ROW,
         REACTION_PROMPT_ROW,
+        COUNTERSPELL_ROW,
       ],
     },
     {
       audience: "pc",
       label: "NOODLRHOOKS.Rules.Audience.Pc",
       blurb: "Character sheets. The GM is never refused here, only ever asked.",
-      rows: [AUTO_DAMAGE_ROW, DYING_ROW, CONCENTRATION_ROW, ECONOMY_ROW, REACTION_PROMPT_ROW],
+      rows: [
+        AUTO_DAMAGE_ROW,
+        DYING_ROW,
+        CONCENTRATION_ROW,
+        ECONOMY_ROW,
+        REACTION_PROMPT_ROW,
+        COUNTERSPELL_ROW,
+      ],
     },
   ],
 };

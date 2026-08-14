@@ -40,6 +40,7 @@ import { hideSelected, surveyHide } from "./rules/hide";
 import { registerInvisibilityHooks } from "./rules/invisibility";
 import { registerReactionHooks } from "./rules/reactions";
 import { registerReactionOffers, surveyOffers } from "./rules/offer";
+import { surveyCounterspell } from "./rules/counterspell";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
@@ -112,6 +113,7 @@ export interface NoodlrHooksApi {
   surveyDamage(): unknown;
   surveyDamageSaves(): unknown;
   surveyOffers(): unknown;
+  surveyCounterspell(): unknown;
   surveyLegendary(): unknown;
   surveyConditions(): unknown;
   surveyDying(): unknown;
@@ -219,6 +221,7 @@ const api: NoodlrHooksApi = {
   surveyDamageSaves: () => surveyDamageSaves(),
   /** Which reactions the selected creature would be offered, who gets asked, and what costs something. */
   surveyOffers: () => surveyOffers(),
+  surveyCounterspell: () => surveyCounterspell(),
   /** What the selected creature has left to resist with, and how much damage would be worth asking about. */
   surveyLegendary: () => surveyLegendary(),
   /** What condition combat math would apply for the controlled token against its current target. */
