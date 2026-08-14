@@ -60,6 +60,8 @@
   "NOODLRHOOKS.Combat.AutoSaves.Name": "Let saving throws settle the damage",
   "NOODLRHOOKS.Combat.AutoSaves.Saved": "saved",
   "NOODLRHOOKS.Combat.AutoSaves.Why.NoActivation": "that damage was rolled without its usage card, so there is nothing to match the saves against",
+  "NOODLRHOOKS.Combat.ReactionPrompts.Hint": "A reaction is the one resource in the game that is lost by not noticing it, and nothing in the 5e system tells anybody theirs has come up: no prompt when a creature steps out of your reach, none when something hurts you off-turn, and no \"when you are hit\" moment at all, which is why Shield has never worked without Midi QoL. With this on, the creature's own reaction options are offered to whoever plays it — the player who owns the sheet, or you for a monster — on a six-second clock, once per round, and the thing chosen is rolled on that person's own client. What the clock is allowed to pick by itself is fixed and deliberately narrow: a free swing with the weapon already in hand, yes, because an unused reaction is gone at the end of the round anyway; a spell slot or a limited use, never, whatever the clock says. Creatures Noodlr is playing for you are not asked — they have a planner to decide — so this never becomes a queue of dialogs about goblins. Counterspell and Silvery Barbs are not offered: both trigger on something no hook reports, and an offer that cannot be honoured spends the slot and changes nothing.",
+  "NOODLRHOOKS.Combat.ReactionPrompts.Name": "Offer a reaction when one comes up",
   "NOODLRHOOKS.Combat.AutoEnd.Hint": "End the encounter automatically once no hostile creature is left standing, instead of handing out turns to an initiative order in which nobody has an enemy. The summary card is posted either way.",
   "NOODLRHOOKS.Combat.AutoEnd.Name": "Clear the tracker when the fight is won",
   "NOODLRHOOKS.Combat.AutoEngage.Failed": "Noodlr spotted the party for a hostile creature but could not start combat — see the console. Automatic engagement is paused for a minute.",
@@ -229,5 +231,16 @@
   "NOODLRHOOKS.Rules.Preset.Summary": "Start from a profile",
   "NOODLRHOOKS.Rules.Preset.Note": "A profile just writes these settings; nothing is locked afterwards and every switch stays yours to change. The ticked one, if any, is the profile your current settings happen to match.",
   "NOODLRHOOKS.Rules.Preset.Confirm": "Apply this profile?",
-  "NOODLRHOOKS.Rules.Preset.Applied": "Applied \"{name}\" — {count} setting(s) changed."
+  "NOODLRHOOKS.Rules.Preset.Applied": "Applied \"{name}\" — {count} setting(s) changed.",
+
+  "NOODLRHOOKS.Prompt.Countdown": "{seconds}s — then \"{choice}\".",
+  "NOODLRHOOKS.Reaction.Offer.Decline": "Do nothing",
+  "NOODLRHOOKS.Reaction.Offer.DeclineHint": "Keep the reaction for something better.",
+  "NOODLRHOOKS.Reaction.Offer.HintAc": "+{bonus} AC — enough to turn this hit into a miss.",
+  "NOODLRHOOKS.Reaction.Offer.HintCosts": "Spends something you will not get back this round.",
+  "NOODLRHOOKS.Reaction.Offer.HintFree": "Costs only the reaction, which is gone at the end of the round anyway.",
+  "NOODLRHOOKS.Reaction.Offer.Hurt": "{target} has just hurt {name}. Its reaction is still available.",
+  "NOODLRHOOKS.Reaction.Offer.Incoming": "{target} has hit {name} — narrowly. Its reaction is still available.",
+  "NOODLRHOOKS.Reaction.Offer.Leaving": "{target} is stepping out of {name}'s reach. Its reaction is still available.",
+  "NOODLRHOOKS.Reaction.Offer.Title": "{name} can react"
 }

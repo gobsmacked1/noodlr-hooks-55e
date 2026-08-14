@@ -39,6 +39,7 @@ import {
 import { midiOwnsConcentration } from "../system/dnd5e-concentration";
 import { midiOwnsDying } from "../system/dnd5e-dying";
 import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
+import { midiPromptsReactions } from "../system/dnd5e-reactions";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 
@@ -206,6 +207,21 @@ const AREAS: Area[] = [
                 "though it is not deciding the saves themselves.",
             }
           : null,
+  },
+  {
+    id: "reactionPrompts",
+    setting: COMBAT_SETTINGS.reactionPrompts,
+    contender: () =>
+      midiPromptsReactions()
+        ? {
+            by: MIDI_NAME,
+            note:
+              "Its Do Reactions is not None, so it already prompts when a creature is hit or damaged — " +
+              "and unlike most midi mechanics that one ships ON. We keep the departure trigger, which " +
+              "midi declares and never fires, so opportunity attacks are still offered here. Set Do " +
+              "Reactions and GM Do Reactions to None to hand the whole surface over.",
+          }
+        : null,
   },
   {
     id: "dying",

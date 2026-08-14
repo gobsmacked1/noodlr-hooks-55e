@@ -36,6 +36,7 @@
 // heard of.
 
 import { readFlag } from "../util/flags";
+import { midiConfig, midiOn } from "../util/modules";
 import { isDnd5e } from "./dnd5e-rewards";
 
 export interface OpportunityExemption {
@@ -109,6 +110,100 @@ const GRANTED: string[] = [
   "mauling-charge",
 ];
 
+/**
+ * A reaction that raises AC against an attack that has already been rolled.
+ *
+ * NEW IN v0.4.2, and only possible because of the damage layer. dnd5e never compares an attack roll to an
+ * AC — a person eyeballs it — so before this module started recomputing hits there was no "the attack has
+ * been rolled and has not yet landed" moment for Shield to occupy, which is exactly what the reaction
+ * layer's own header said was missing and would need midi's `preCheckHits`. It does not: we own the
+ * comparison, so we own the window.
+ *
+ * The bonus is a NUMBER we add to the recorded AC rather than an effect we wait for. Casting Shield does
+ * create an Active Effect worth +5, but the verdict is computed against the AC dnd5e wrote on the card at
+ * roll time, so waiting for the sheet to catch up would read the old value and decide the wrong way. The
+ * effect still lands — it has to, because it lasts a round — it is simply not what settles THIS attack.
+ */
+export interface AcReaction {
+  label: string;
+  bonus: number;
+}
+
+interface AcTrait {
+  identifiers: string[];
+  pattern: RegExp;
+  /** Flat bonus, or read from the sheet when the rule states one. */
+  bonus: number | ((actor: any) => number);
+}
+
+const AC_BOOSTS: AcTrait[] = [
+  {
+    // The spell, and the reason this exists. Cast as a reaction "when you are hit by an attack", +5 until
+    // the start of your next turn.
+    identifiers: ["shield"],
+    // Anchored, because "Shield" is also every suit of armour's shield. Matching loosely here would offer
+    // a fighter their buckler as a spell.
+    pattern: /^\s*shield\s*$/i,
+    bonus: 5,
+  },
+  {
+    // Defensive Duelist: +proficiency bonus, and the sheet states the number, so there is no table of
+    // levels to keep. An unreadable proficiency falls back to 2, the lowest it can ever be — under-
+    // promising, which is the safe direction for a bonus that decides a hit.
+    identifiers: ["defensive-duelist"],
+    pattern: /^\s*defensive duelist\s*$/i,
+    bonus: (actor: any) => {
+      const prof = Number(actor?.system?.attributes?.prof);
+      return Number.isFinite(prof) && prof > 0 ? prof : 2;
+    },
+  },
+];
+
+/**
+ * Does this item raise AC as a reaction? Returns the bonus, or null.
+ *
+ * `flags.<ns>.acReaction` is the escape hatch, holding the number: a homebrew Parry worth 3 needs no
+ * change here. Same shape and the same reasoning as `noOpportunity` above.
+ */
+export function acBoostOf(item: any, actor: any): AcReaction | null {
+  if (!isDnd5e() || !item) return null;
+
+  const hatch = readFlag(item, "acReaction");
+  if (typeof hatch === "number" && hatch > 0) {
+    return { label: String(item?.name ?? "a reaction"), bonus: hatch };
+  }
+
+  const identifier = identifierOf(item);
+  const name = String(item?.name ?? "");
+  for (const trait of AC_BOOSTS) {
+    const matched = identifier ? trait.identifiers.includes(identifier) : trait.pattern.test(name);
+    if (!matched) continue;
+    const bonus = typeof trait.bonus === "function" ? trait.bonus(actor) : trait.bonus;
+    return bonus > 0 ? { label: name || "a reaction", bonus } : null;
+  }
+  return null;
+}
+
+/**
+ * Is midi already putting a reaction prompt in front of somebody?
+ *
+ * `doReactions` and `gmDoReactions` both default to `"all"`, so unlike almost every other midi mechanic
+ * this one IS live on a stock install — which makes it the one place a second offer of ours would be an
+ * actual double prompt rather than a theoretical one.
+ *
+ * Covers the two triggers midi dispatches, "I was hit" and "I was damaged", and NOT the departure. Midi
+ * declares a `reactionmoved` / `isMoved` trigger type and dispatches it from none of its eleven
+ * `doReactions` call sites, so an opportunity attack has never been offered by it and standing aside from
+ * that half would leave the trigger unoffered by anybody. `rules/offer.ts` applies this per trigger for
+ * exactly that reason.
+ */
+export function midiPromptsReactions(): boolean {
+  if (!isDnd5e()) return false;
+  const settings = midiConfig();
+  if (!settings) return false;
+  return midiOn(settings.doReactions) || midiOn(settings.gmDoReactions);
+}
+
 function identifierOf(doc: any): string {
   return String(doc?.system?.identifier ?? "")
     .trim()
@@ -130,7 +225,11 @@ export function standingExemption(actor: any): OpportunityExemption | null {
   for (const item of actor?.items ?? []) {
     const identifier = identifierOf(item);
     for (const trait of STANDING) {
-      if (identifier ? trait.identifiers.includes(identifier) : trait.pattern.test(String(item?.name ?? ""))) {
+      if (
+        identifier
+          ? trait.identifiers.includes(identifier)
+          : trait.pattern.test(String(item?.name ?? ""))
+      ) {
         return { label: trait.label, requiresFlight: trait.requiresFlight };
       }
     }

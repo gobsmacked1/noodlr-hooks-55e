@@ -160,6 +160,7 @@ export function registerCombatSettings(): void {
   // the party to click) is the wrong way round.
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
+  split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.importantNpcSaves, "Dying.Important", Boolean, true);
@@ -458,6 +459,26 @@ export function isAutoDamageEnabled(subject: unknown): boolean {
  */
 export function isAutoSavesEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoSaves));
+}
+
+/**
+ * Is a triggered reaction offered to whoever plays this creature?
+ *
+ * The gap this closes was invisible: the reaction layer detected its triggers correctly and then only ever
+ * acted for a creature the GM had handed to the planner, so a player with a halberd, a Hellish Rebuke or
+ * War Caster was never told their reaction had come up. No swing, no prompt, no line in the log.
+ *
+ * Per audience because the two columns mean genuinely different things. The PC side is a reminder to
+ * somebody who wants one — the brief's "players like agency, and do not enjoy crunching arithmetic" —
+ * while the NPC side is a question the GM will be answering, which is the "long chain of approvals" a GM
+ * most wants to be able to turn down. Both start on, because a reaction nobody is offered is a rule the
+ * table has silently stopped playing.
+ *
+ * A creature the planner is playing is never asked whatever this says: it has something deciding for it,
+ * and a dialog per goblin per departure is the thing the brief rules out.
+ */
+export function isReactionPromptEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.reactionPrompts, subject);
 }
 
 /**

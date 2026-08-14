@@ -57,6 +57,44 @@ export function gmIsListening(): boolean {
 }
 
 /**
+ * Put a question to ONE named user and wait for the answer. Null when they did not answer.
+ *
+ * The same contract as `askGm` and the same reason for it, addressed differently: a reaction belongs to
+ * whoever owns the creature, not to whoever is running the game. When the addressee is us the handler runs
+ * in-process, which is not merely an optimisation — at a solo table the GM is the addressee for everything,
+ * and a query to yourself is a round trip to nowhere.
+ */
+export async function askUser<T>(
+  userId: string,
+  name: string,
+  data: Record<string, unknown>,
+  options: { timeout?: number } = {},
+): Promise<T | null> {
+  const local = handlers.get(name);
+  if (!userId || userId === String(game.user?.id ?? "")) {
+    if (!local) return null;
+    try {
+      return (await local(data)) as T;
+    } catch (err) {
+      log(`queries: "${name}" failed locally:`, err);
+      return null;
+    }
+  }
+
+  const user: any = (game.users as any)?.get?.(userId);
+  if (!user?.active) {
+    log(`queries: ${String(user?.name ?? userId)} is not connected, so "${name}" cannot be asked`);
+    return null;
+  }
+  try {
+    return (await user.query(qualify(name), data, { timeout: options.timeout ?? 120000 })) as T;
+  } catch (err) {
+    log(`queries: ${String(user?.name ?? userId)} did not answer "${name}":`, err);
+    return null;
+  }
+}
+
+/**
  * Put a question to the GM and wait for the answer. Null when nobody answered.
  *
  * Null is a real outcome and every caller has to treat it as one: an offline GM, a closed dialog and a

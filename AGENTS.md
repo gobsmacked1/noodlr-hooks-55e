@@ -1972,6 +1972,142 @@ block nothing, which is the single most common misreading of why line of sight "
   rules have ruled unnoticed is still visible on screen. That is a real gap, stated here rather than
   discovered again. Neither of them, and nothing else on the disable list, ever provided Fog of War.
 
+## Nobody presses the button either (v0.4.2, 2026-08-14)
+
+Reported from the same smoke test as the Hide bugs and it is the largest gap this module has had: a player hit
+a hostile, and the GM got a chat card with an **Apply** button on it. The user's brief in reply is the standing
+specification for this whole area and is worth keeping verbatim in spirit — **automate the mundane for the
+players (hit points, resources, a concentration reminder, a reaction reminder) and more than that for the GM;
+surface only narratively consequential decisions, and put a six-second clock on those.** Everything below is
+that brief implemented, and the parts refused are refused explicitly.
+
+### The finding, which is the fifth instance of a shape this file already documents
+
+dnd5e decides whether an attack hit **inside its chat card's renderer** and stores the answer nowhere. So the
+system has no basis on which to apply anything, and what it ships instead is the damage tray: a button per
+target, pressed by a human. Same for saves — it rolls against the right DC and compares the result to nothing.
+Both are deliberate (hit determination and "Range, reach, & cover" are unshipped roadmap items) and **midi-qol
+is the module that has always filled the gap.** With midi permanently gone (user, 2026-08-14) every hit at the
+table cost a click and a subtraction.
+
+**What it unblocks is larger than itself, and that is the argument for having built it first.** Death saves,
+instant death, Unconscious at zero and the concentration save all hang off dnd5e's own `damageActor` hook,
+which fires only when somebody applies damage. Every one of those rules was already built here and **none of
+them could fire on a table where the tray went unpressed.** A quarter of this module was inert for want of a
+button press.
+
+### Applying the damage — `rules/cards.ts`, `rules/damage.ts`, `rules/saves.ts`
+
+- **`readHits` is the single answer to "did this connect", and `rules/forced.ts` was rewritten to consume it.**
+  Forced movement had its own reconstruction of the same arithmetic, which is the two-implementations bug the
+  v0.4.1 vision fix is about, caught before it could diverge.
+- **It diverges from dnd5e's renderer on a null AC, on purpose.** The system's formula scores an unreadable AC
+  as a HIT, because `total < null` coerces to `total < 0`. That is fine for a label a human reads and wrong for
+  something that subtracts hit points, so a null AC is `unresolved`.
+- **`margin` was added in the same release for Shield** (see below) and is recorded for hits and misses alike,
+  and **absent for a critical or a fumble** — those are decided by the die, so no AC bonus reaches either.
+- **Where it stands down is the shape the user asked for**: no readable AC, no recorded target, two identical
+  tokens the target record cannot tell apart, a roll from no item, a sheet with no hit points. It applies
+  nothing, **leaves the button exactly where it is**, and whispers why. A wrong subtraction is worse than a
+  click and silence is worse than either.
+- **Primary GM only.** A damage roll's message arrives on every client and two clients both calling
+  `applyDamage` subtract twice. It also means the GM's permissions do the writing, so a player's hit points
+  move without granting anybody rights they should not have.
+- **The undo snapshots hit points before touching them**, same discipline as the mercy forfeiture: a wrong
+  application mid-session has to be one click to reverse, not a reconstruction from memory.
+- **Saves route by ownership rather than by a setting**, and the asymmetry people expect is therefore already
+  there without one: a creature nobody but the GM can roll for has its save rolled automatically, and a
+  character with a player owner does not, because that player came to the table to roll it. Same election as
+  concentration (`rollerForActor`), deliberately not a second one.
+- **What a failed save INFLICTS is not applied.** Restrained, Prone and the rest are prose on the item, which
+  is the compiler's problem. Guessing at them would start an argument at the table.
+
+### The prompt primitive — `util/prompt.ts`
+
+- **THE ONE RULE ABOUT DEFAULTS, and it is a rule rather than a preference: A TIMEOUT MAY SPEND A RENEWING
+  RESOURCE AND NEVER A DEPLETING ONE.** An unused reaction is gone at the end of the round, so a free
+  opportunity attack taken by the clock costs nobody anything they were saving; a fourth-level slot spent
+  because somebody was refilling their drink is unrecoverable and unforgivable. `CreatureAction.depleting` is
+  computed where the sheet is read (`tactics/actions.ts`) rather than guessed at in the prompt, and it errs
+  towards `true` — a needless question is cheap, a spent slot is not. `timeoutChoice()` is the whole rule in
+  four lines and is exported **only** so `test/reactions.test.ts` can pin it.
+- **Built on a constructed `DialogV2`, not `DialogV2.wait`**, because the clock has to be able to close it and
+  `wait` hands back only a promise. Everything goes through `settle`, which resolves exactly once: somebody
+  pressing a button on the last tick of the countdown is a race that happens in practice, and resolving twice
+  takes the reaction twice.
+- **Local by design.** It draws on the client it is called from and nothing else; routing is `rules/offer.ts`.
+  A dialog rather than a chat card with buttons because a card cannot be addressed to one person without a
+  whisper, a whisper scrolls away under the next roll, and neither can expire.
+
+### The reaction surface — `rules/offer.ts`, and `askUser` in `util/queries.ts`
+
+- **The gap was invisible and it was in the gate.** `rules/reactions.ts` has detected its two triggers
+  correctly since v0.4.31 and then ran every candidate through `shouldAutomate`, which **refuses player
+  characters in every mode** and refuses any monster nobody opted in. So an opportunity attack was automatic
+  for an automated goblin and *did not exist for anybody else*: no swing, no prompt, no line in the log.
+  `watchersOf` now tags rather than filters and the caller decides whether to swing or to ask.
+- **`active()` in `reactions.ts` no longer gates on combat automation**, and that conflation was half the bug:
+  "do not play my monsters for me" is not "do not remind me my reaction is up". `shouldAutomate` still decides
+  who gets *played* for, which is where that setting belongs.
+- **Asked on the owner's client, and everything follows from that.** The question, the dice and the resource
+  belong to the same person, so the far client reads the options, draws the prompt, spends the reaction and
+  uses the item — a player's Shield is cast by the player's client and signed with their name. `askUser` is
+  `askGm` addressed to one user id, over `CONFIG.queries` for the reasons Influence already documents (a
+  promise, a timeout and a correlation id that all already exist).
+- **The request is UUIDs, never objects**, because it crosses a wire, and everything is re-resolved and
+  re-checked on arrival: the asking client's view of what is still available is a moment old by the time the
+  answer matters, and the answering client is the one that writes.
+- **The reaction is spent BEFORE the use, not after.** `useActionAt` can take seconds (a targeting
+  confirmation, a roll dialog) and a second trigger arriving in that window would otherwise find the reaction
+  unspent and offer it again. The ledger is turn-stamped, so an over-spend cannot leak into the next round.
+- **Options are capped at four and sorted before capping.** A wizard has a dozen reaction items and a dialog
+  listing all of them in six seconds is not a decision, it is a wall of text.
+- **Offers are awaited in sequence, not fired in parallel.** Two dialogs at once on one client is a stack of
+  windows, and a player answering the second has to be able to trust the first one's swing already resolved.
+- **`offerable(actor, trigger)` takes the trigger for one reason: midi's stand-aside is PER TRIGGER.**
+  `doReactions` and `gmDoReactions` both default to `"all"`, so unlike almost every other midi mechanic this
+  one **is live on a stock install** — making it the one place a second offer of ours is a real double prompt.
+  Midi covers "I was hit" and "I was damaged"; it declares `reactionmoved`/`isMoved` and **dispatches it from
+  none of its eleven `doReactions` call sites**, so the departure has never been offered by it. Standing aside
+  wholesale would leave opportunity attacks unoffered by anybody. Reported in `ownership()` with a note that
+  says which half we kept, because the badge can only name one owner.
+
+### Shield, and the moment dnd5e never had
+
+- **Reading hits is what created it.** Shield triggers "when you are hit by an attack" and there was no such
+  event: the system rolled a number and rendered a colour. Now that one answer to "did this connect" exists,
+  the window falls out of it — read the verdict, ask the creature that was hit, and if the bonus arrives move
+  it out of `hits` before anything is applied.
+- **Only offered where it could change the answer.** A +5 against an attack that beat the AC by nine is a slot
+  spent to be hit anyway, and **a player under a six-second clock reads an offer as a recommendation.** Hence
+  `margin` on `HitReading`.
+- **The window is registered synchronously, before anybody is asked**, and the damage path awaits it. In
+  practice dnd5e posts attack and damage as two separate presses so there is a human gap; "in practice" is not
+  a guarantee, and a Shield answered a moment late is a slot spent on damage that had already landed.
+- **`incoming` is never answered by the clock.** Every AC boost costs something and every one of them decides
+  a hit, so it is exactly the decision a person has to make. `timeoutChoice` returns null for it outright
+  rather than looking at `depleting`.
+- **`acBoostOf`'s Shield pattern is ANCHORED (`/^\s*shield\s*$/i`)** because "Shield" is also every buckler in
+  the game; matching loosely offers a fighter their armour as a spell and then tries to cast it. Defensive
+  Duelist reads proficiency off the sheet and floors at 2 — under-promising, the safe direction for a bonus
+  that decides a hit. `flags.<ns>.acReaction` holds a number as the escape hatch.
+
+### Refused explicitly, because a half-built offer is worse than none
+
+**Counterspell** and **Silvery Barbs** are both in the user's list and neither is offered. One triggers on "a
+creature is casting a spell" and needs a window that holds up somebody else's cast; the other needs to
+substitute a d20 we did not roll. Both are real features and neither is guessed at: an offer that cannot be
+honoured spends the resource and changes nothing, which is the worst outcome available. Counterspell is the
+more tractable of the two — dnd5e's activity-use hooks do report a cast — and is the next thing to build here.
+
+### Still outstanding from the brief
+
+The resource half of item 2 is only partly done. Actions, bonus actions, reactions, movement and Dash are all
+tracked (`rules/economy/`); **ammunition, spell slots, and per-day / per-rest / recharge / legendary counters
+are not** — dnd5e's `consumption` handles most of them when an activity is used through the sheet, which is why
+this has not bitten yet, and `noteRest()` in `capability/uses.ts` still has no callers. Legendary resistances
+are nobody's. Check what the system already spends before building any of it.
+
 ## What the finished corpus caught (v0.4.0, 2026-08-13)
 
 The first complete `noodlr-rules-corpus` run — 77,039 atoms over nine books — was read against this

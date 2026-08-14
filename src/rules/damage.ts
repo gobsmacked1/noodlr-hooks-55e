@@ -35,6 +35,7 @@ import {
   snapshotHp,
   type HpSnapshot,
 } from "../system/dnd5e-damage";
+import { offerReaction } from "./offer";
 import {
   activityOf,
   damageParts,
@@ -68,6 +69,17 @@ const VERDICT_LIMIT = 64;
 
 /** Messages already acted on, so our own flag write cannot re-enter through `updateChatMessage`. */
 const handled = new Set<string>();
+
+/**
+ * Reaction windows still open, keyed the same way as `verdicts`.
+ *
+ * The damage roll must not be applied while somebody is still deciding whether they were hit. dnd5e posts
+ * the attack and the damage as two separate presses, so in practice there is a human gap — but "in practice"
+ * is not a guarantee, and a Shield answered a moment too late would be a spell slot spent on damage that had
+ * already landed. So the window is registered synchronously before anybody is asked, and the damage path
+ * awaits it.
+ */
+const windows = new Map<string, Promise<void>>();
 
 /** What we took off each creature, for the undo control. Keyed by the card that reported it. */
 const undoable = new Map<string, HpSnapshot[]>();
@@ -104,10 +116,7 @@ export function registerDamageApplication(): void {
  */
 function active(): boolean {
   return (
-    isPrimaryGM() &&
-    isDnd5e() &&
-    enabledForEither(COMBAT_SETTINGS.autoDamage) &&
-    !midiOwnsDamage()
+    isPrimaryGM() && isDnd5e() && enabledForEither(COMBAT_SETTINGS.autoDamage) && !midiOwnsDamage()
   );
 }
 
@@ -119,12 +128,21 @@ async function consider(message: any, flags: any): Promise<void> {
   // Midi's own verdict, when it left one. Token uuids, and the real answer rather than a reconstruction.
   const fromMidi = midiHits(flags);
   if (fromMidi.length > 0) {
-    remember(message, { hits: fromMidi, missed: [], unresolved: [] });
+    // No margins: midi records the verdict and not the arithmetic behind it, which costs nothing here
+    // because midi runs its own reaction window and this one stands aside whenever midi is applying damage.
+    remember(message, { hits: fromMidi, missed: [], unresolved: [], margin: {} });
   }
 
   const kind = rollType(message);
   if (kind === "attack") {
-    remember(message, readHits(message));
+    const reading = readHits(message);
+    remember(message, reading);
+    // Registered before anything is awaited, so a damage roll arriving in the same tick still finds it.
+    const window = shieldWindow(message, reading).finally(() => {
+      for (const key of keysOf(message)) if (windows.get(key) === window) windows.delete(key);
+    });
+    for (const key of keysOf(message)) windows.set(key, window);
+    await window;
     return;
   }
   if (kind !== "damage" && kind !== "healing") return;
@@ -132,6 +150,12 @@ async function consider(message: any, flags: any): Promise<void> {
   const parts = damageParts(message);
   if (parts.length === 0) return;
   if (message?.getFlag?.(MODULE_ID, APPLIED)) return;
+
+  // Anybody still deciding whether they were hit gets to finish first.
+  for (const key of keysOf(message)) {
+    const open = windows.get(key);
+    if (open) await open;
+  }
 
   const resolved = resolveTargets(message);
   if (resolved.silent) return;
@@ -166,14 +190,66 @@ async function consider(message: any, flags: any): Promise<void> {
  */
 function remember(message: any, reading: HitReading): void {
   if (reading.hits.length === 0 && reading.unresolved.length === 0) return;
-  for (const key of [String(message?.id ?? ""), originatingId(message)]) {
-    if (key) verdicts.set(key, reading);
-  }
+  for (const key of keysOf(message)) verdicts.set(key, reading);
   while (verdicts.size > VERDICT_LIMIT) {
     const oldest = verdicts.keys().next().value;
     if (oldest === undefined) break;
     verdicts.delete(oldest);
   }
+}
+
+/** Every id a later roll from the same use might quote. See `remember`. */
+function keysOf(message: any): string[] {
+  return [String(message?.id ?? ""), originatingId(message)].filter(Boolean) as string[];
+}
+
+/**
+ * The moment dnd5e never had: an attack has been rolled, and has not yet been resolved.
+ *
+ * This is the whole reason the hit-determination layer was worth building first. Shield is a reaction "when
+ * you are hit by an attack", and on a table without midi there is no such event — the system rolls a number,
+ * renders a colour, and stores nothing — so a wizard's most-used spell was unplayable except by a human
+ * noticing and the GM agreeing to walk the attack back. Now that one answer to "did this connect" exists,
+ * and lives here, the window falls out of it: read the verdict, ask the creature that was hit, and if the
+ * bonus arrives, move it out of `hits` before anything is applied.
+ *
+ * Only offered where it could actually matter. A hit that landed by nine is not saved by a +5, and offering
+ * it there is worse than useless: a player under a six-second clock reads an offer as a recommendation.
+ */
+async function shieldWindow(message: any, reading: HitReading): Promise<void> {
+  if (reading.hits.length === 0) return;
+  const attacker = tokenFor(message);
+
+  for (const doc of [...reading.hits]) {
+    const margin = reading.margin[String(doc?.id ?? "")];
+    if (!Number.isFinite(margin)) continue; // A crit. No AC bonus reaches it.
+    const answer = await offerReaction(doc?.actor, {
+      actorUuid: String(doc?.actor?.uuid ?? ""),
+      tokenUuid: String(doc?.uuid ?? ""),
+      targetUuid: String(attacker?.uuid ?? ""),
+      targetName: String(attacker?.name ?? "the attacker"),
+      trigger: "incoming",
+      margin: Number(margin),
+    });
+    if (!answer.taken || !answer.acBonus) continue;
+    if (Number(margin) >= Number(answer.acBonus)) continue; // Taken anyway, but it does not turn the hit.
+
+    const at = reading.hits.indexOf(doc);
+    if (at >= 0) reading.hits.splice(at, 1);
+    reading.missed.push(doc);
+    log(`shield: ${doc?.name}'s ${answer.label} turns a hit by ${margin} into a miss`);
+    await (globalThis as any).ChatMessage?.create?.({
+      speaker: narrator(),
+      content: `<p><strong>${answer.label}</strong> — ${doc?.name}'s AC rises by ${answer.acBonus} and the attack misses.</p>`,
+    });
+  }
+}
+
+/** The token that rolled a card, for naming the thing a reaction is being taken against. */
+function tokenFor(message: any): any {
+  const speaker = message?.speaker;
+  const scene = (game as any).scenes?.get?.(String(speaker?.scene ?? ""));
+  return scene?.tokens?.get?.(String(speaker?.token ?? "")) ?? null;
 }
 
 interface Resolution {

@@ -47,6 +47,14 @@ export interface HitReading {
   hits: any[];
   missed: any[];
   unresolved: Array<{ name: string; why: string }>;
+  /**
+   * Token id -> how much the roll beat that target's AC by, negative on a miss.
+   *
+   * Present only where a comparison actually decided the outcome, so a critical and a fumble are absent
+   * rather than zero. The consumer is the Shield window in `rules/damage.ts`: a +5 is worth offering
+   * against a hit that landed by four and is a slot thrown away against one that landed by nine.
+   */
+  margin: Record<string, number>;
 }
 
 /** One rolled damage or healing part, in the shape `Actor5e#applyDamage` expects. */
@@ -198,14 +206,17 @@ export function targetsOf(message: any): CardTarget[] {
  * display that a human is reading; it is not fine for something that subtracts hit points.
  */
 export function readHits(message: any): HitReading {
-  const reading: HitReading = { hits: [], missed: [], unresolved: [] };
+  const reading: HitReading = { hits: [], missed: [], unresolved: [], margin: {} };
   const roll: any = message?.rolls?.[0];
   const total = Number(roll?.total);
   if (!roll || !Number.isFinite(total)) return reading;
 
   for (const target of targetsOf(message)) {
     if (target.ac === null) {
-      reading.unresolved.push({ name: target.name, why: "no readable AC (total cover, or the sheet)" });
+      reading.unresolved.push({
+        name: target.name,
+        why: "no readable AC (total cover, or the sheet)",
+      });
       continue;
     }
     const doc = tokenFromActorUuid(target.uuid);
@@ -216,6 +227,11 @@ export function readHits(message: any): HitReading {
     const missed = !roll.isCritical && (total < target.ac || roll.isFumble);
     if (missed) reading.missed.push(doc);
     else reading.hits.push(doc);
+    // Recorded for every target, hit or missed, and only where a real comparison happened: a critical or a
+    // fumble is decided by the die and not by the number, so raising the AC cannot change either.
+    if (!roll.isCritical && !roll.isFumble) {
+      reading.margin[String(doc?.id ?? "")] = total - target.ac;
+    }
   }
   return reading;
 }
@@ -280,13 +296,17 @@ export function saveMultiplier(onSave: string): number {
 /** Midi's own verdict, when it left one: token uuids of everything it decided was hit. */
 export function midiHits(flags: any): any[] {
   const uuids = flags?.["midi-qol"]?.hitTargetUuids;
-  return (Array.isArray(uuids) ? uuids : []).map((u) => tokenFromTokenUuid(String(u))).filter(Boolean);
+  return (Array.isArray(uuids) ? uuids : [])
+    .map((u) => tokenFromTokenUuid(String(u)))
+    .filter(Boolean);
 }
 
 /** Midi's own verdict on saves: token uuids of everything that failed one. */
 export function midiFailedSaves(flags: any): any[] {
   const uuids = flags?.["midi-qol"]?.failedSaveUuids;
-  return (Array.isArray(uuids) ? uuids : []).map((u) => tokenFromTokenUuid(String(u))).filter(Boolean);
+  return (Array.isArray(uuids) ? uuids : [])
+    .map((u) => tokenFromTokenUuid(String(u)))
+    .filter(Boolean);
 }
 
 /**

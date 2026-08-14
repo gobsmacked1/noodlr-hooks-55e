@@ -547,9 +547,9 @@ const SHARED_ROLLS: Section = {
       label: "Roll attacks automatically",
       hint:
         "dnd5e never compares an attack roll to an AC — a person eyeballs it — so hit and miss are " +
-        "recomputed here from the AC recorded on the card, which is what applying damage hangs on. " +
-        "What is missing is rolling the attack in the first place, and the 'about to hit' moment Shield " +
-        "would need.",
+        "recomputed here from the AC recorded on the card, which is what applying damage hangs on, and " +
+        "what gives Shield the 'when you are hit' moment the system has never had. What is missing is " +
+        "rolling the attack in the first place.",
       state: "planned",
       today: "Midi QoL, and it is the main reason tables install it. Hits are read either way.",
     },
@@ -606,6 +606,16 @@ const AUTO_DAMAGE_ROW: Row = {
   ownership: "autoDamage",
 };
 
+const REACTION_PROMPT_ROW: Row = {
+  id: "reactionPrompts",
+  label: "NOODLRHOOKS.Combat.ReactionPrompts.Name",
+  hint: "NOODLRHOOKS.Combat.ReactionPrompts.Hint",
+  state: "live",
+  setting: C.reactionPrompts,
+  kind: "boolean",
+  ownership: "reactionPrompts",
+};
+
 const ECONOMY_ROW: Row = {
   id: "economy",
   label: "NOODLRHOOKS.Combat.Economy.Name",
@@ -649,13 +659,14 @@ const PER_SIDE_STATE: Section = {
         },
         CONCENTRATION_ROW,
         ECONOMY_ROW,
+        REACTION_PROMPT_ROW,
       ],
     },
     {
       audience: "pc",
       label: "NOODLRHOOKS.Rules.Audience.Pc",
       blurb: "Character sheets. The GM is never refused here, only ever asked.",
-      rows: [AUTO_DAMAGE_ROW, DYING_ROW, CONCENTRATION_ROW, ECONOMY_ROW],
+      rows: [AUTO_DAMAGE_ROW, DYING_ROW, CONCENTRATION_ROW, ECONOMY_ROW, REACTION_PROMPT_ROW],
     },
   ],
 };
@@ -736,10 +747,12 @@ const PER_SIDE_TURN: Section = {
           id: "reactionTimeout",
           label: "Reaction prompt time-out",
           hint:
-            "How long a player has to answer a reaction prompt before it passes. We do not prompt for " +
-            "reactions at all yet — a player's opportunity attack is theirs to declare.",
-          state: "planned",
-          today: "Midi QoL prompts and has a time-out; its enforcement of reactions ships off.",
+            "Six seconds, and not configurable. A prompt that waits indefinitely stops the table, and one " +
+            "long enough to deliberate in is the chain of approvals nobody wants; six is one round. What " +
+            "the clock is allowed to pick is the part that matters, and it is fixed: a free swing, yes, " +
+            "and never a spell slot or a limited use. Turn the prompts themselves off in the section above.",
+          state: "live",
+          ownership: "reactionPrompts",
         },
       ],
     },

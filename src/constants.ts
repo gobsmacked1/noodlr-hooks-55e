@@ -53,6 +53,8 @@ export const COMBAT_SETTINGS = {
   autoDamage: "combat.autoDamage",
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */
   autoSaves: "combat.autoSaves",
+  /** Per audience. Whether a triggered reaction is offered to whoever plays the creature, on a clock. */
+  reactionPrompts: "combat.reactionPrompts",
   /** Whether condition combat math (adv/disadv, auto-fail, crit-on-hit, incapacitated) is applied. */
   conditions: "combat.conditions",
   /** Per audience. Whether dropping to 0 HP applies Unconscious/Dead and damage-at-0 death failures. */
@@ -81,6 +83,7 @@ export const SPLIT_COMBAT_SETTINGS = [
   COMBAT_SETTINGS.concentration,
   COMBAT_SETTINGS.economy,
   COMBAT_SETTINGS.autoDamage,
+  COMBAT_SETTINGS.reactionPrompts,
 ] as const;
 
 /** The registered key for one side of a split setting. */

@@ -123,6 +123,18 @@ export interface CreatureAction {
   range: number;
   /** False when charges, ammunition, spell slots, or quantity say it is spent. */
   available: boolean;
+  /**
+   * True when using this spends something that does not come back at the start of the next turn.
+   *
+   * Read here because this is the one place that knows where a system keeps its counters, and computed
+   * beside `available` so the two cannot come to disagree about what a resource is. The consumer is the
+   * reaction prompt's countdown: a timeout may spend a RENEWING resource and never a DEPLETING one, so a
+   * free opportunity attack can be taken by default and a fourth-level slot never can.
+   *
+   * Errs towards true. A swing that is offered and declined costs a swing; a slot spent by a clock nobody
+   * was watching cannot be given back.
+   */
+  depleting: boolean;
 }
 
 function gridDistance(): number {
@@ -244,6 +256,71 @@ function activityAvailable(activity: any, item: any): boolean {
   // actor's consumables to the right subtype and marks the empty ones `disabled`.
   if (outOfAmmunition(item)) return false;
   return true;
+}
+
+/**
+ * Would using this spend something that does not come back at the start of the next turn?
+ *
+ * The mirror of `itemAvailable` and `activityAvailable`: those ask whether a counter has anything left,
+ * this asks whether there is a counter at all. Kept beside them so the two readings of "what is a
+ * resource" are one reading, and reached through the same `systemPaths` table rather than a second set of
+ * literal paths.
+ *
+ * Deliberately biased towards true. It gates whether a six-second countdown is allowed to take an action
+ * on somebody's behalf, and the two errors are not comparable: calling a free swing depleting costs a
+ * prompt somebody has to answer, while calling a spell slot free spends it for them.
+ */
+function depletes(item: any, activity: any, P: SystemPaths): boolean {
+  // A limited-use feature, at either level, and a recharge feature — which is a counter whose refill is
+  // a die roll between fights rather than a turn boundary.
+  if (Number(activity?.uses?.max) > 0) return true;
+  const itemMax = pickNumber(item, P.itemUsesMax);
+  if (itemMax !== null && itemMax > 0) return true;
+  if (pickString(item, P.itemRechargeValue)) return true;
+
+  // Anything the system will consume on use. The six types are activityUses, itemUses, material, hitDice,
+  // spellSlots and attribute (`DND5E.activityConsumptionTypes`), and every one of them is a resource
+  // somebody is husbanding — so the list is not filtered, it is simply asked whether it is empty.
+  const targets = activity?.consumption?.targets;
+  if (Array.isArray(targets) ? targets.length > 0 : Boolean(targets?.size)) return true;
+  if (activity?.consumption?.spellSlot) {
+    // Only meaningful on something that has a level to spend. `consumption.spellSlot: true` appears on
+    // plain weapon attacks (measured in the 2026-08-07 census), where it means nothing at all.
+    if (Number(item?.system?.level ?? 0) > 0) return true;
+  }
+
+  // A cantrip is free; anything levelled cast by a method that draws on slots is not. `spellSlotAvailable`
+  // already encodes which methods those are, by asking the system's own table.
+  if (item?.type === "spell" && Number(item?.system?.level ?? 0) > 0) {
+    const method = String(
+      item?.system?.method ?? item?._source?.system?.preparation?.mode ?? "",
+    ).toLowerCase();
+    const table: any = (globalThis as any).CONFIG?.DND5E?.spellcasting;
+    const model = table
+      ? Object.entries(table).find(([key]) => key.toLowerCase() === method)?.[1]
+      : undefined;
+    if (
+      model
+        ? Boolean((model as any).slots)
+        : !(method.includes("atwill") || method.includes("innate"))
+    ) {
+      return true;
+    }
+  }
+
+  const quantity = pickNumber(item, P.itemQuantity);
+  if (quantity !== null && quantity > 0 && item?.system?.uses?.autoDestroy) return true;
+
+  // A weapon that eats arrows. Cheap to replace out of combat, and gone from the quiver now.
+  return outOfAmmunition(item) === false && needsAmmunition(item);
+}
+
+/** Does this weapon draw on ammunition at all, spent or not? */
+function needsAmmunition(item: any): boolean {
+  const properties = item?.system?.properties;
+  return typeof properties?.has === "function"
+    ? Boolean(properties.has("amm"))
+    : Boolean(properties?.amm);
 }
 
 /** A weapon that needs ammunition and has none left in the pack. */
@@ -454,6 +531,9 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
       ranged,
       range,
       available: baseAvailable && activityAvailable(activity, item),
+      // Asked of the item being INVOKED, which for a "1/day each: fireball" feat is the feat: the cloned
+      // spell it points at carries no uses of its own, so reading the spell would report free.
+      depleting: depletes(item, activity, P),
     });
   }
   return out;
@@ -495,7 +575,18 @@ function fromActionType(item: any, actor: any, P: SystemPaths): CreatureAction |
     if (quantity !== null && quantity <= 0) available = false;
   }
 
-  return { item, name: String(item?.name ?? "?"), kind, economy, melee, ranged, range, available };
+  return {
+    item,
+    name: String(item?.name ?? "?"),
+    kind,
+    economy,
+    melee,
+    ranged,
+    range,
+    available,
+    // On the legacy shape a consume target is the ammunition link, so its presence is the counter.
+    depleting: depletes(item, null, P) || Boolean(ammoId),
+  };
 }
 
 /**

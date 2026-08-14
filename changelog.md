@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.4.2
+
+Damage lands by itself now, saving throws settle what they are worth, and a reaction is offered to whoever
+plays the creature. All three were reported from the same smoke test: a player hit a hostile with a ranged
+weapon, the fight started and the monsters rolled initiative on their own — and then the GM got a chat card
+with an Apply button on it.
+
+**Rolled damage is applied, and the whole chain behind it switches on.** The 5e system works out whether an
+attack hit inside the chat card it draws and then stores the answer nowhere, so it has nothing to act on; what
+it gives you instead is a button, once per target, for every hit at the table. That button is now pressed for
+you. Resistance, vulnerability, immunity, damage properties and temporary hit points are all resolved by the
+system itself — none of that arithmetic is redone here — and a whispered receipt says what moved, with a "Put
+it back" control on it. This is also what turns on every rule that was already built and could never fire:
+death saves, dropping to Unconscious at zero, instant death, and the concentration check all hang off the
+system's damage hook, which only fires when somebody's hit points actually change.
+
+Where the answer is genuinely unclear it applies nothing, leaves the button exactly where it was, and says
+why: no readable AC (total cover, or a sheet it cannot read), two copies of a creature the target record
+cannot tell apart, a roll that came from no item, or a sheet with no hit points. A wrong subtraction is worse
+than a click, and silence is worse than either.
+
+**Saving throws are joined back to the spell that asked for them.** The system rolls a save against the right
+DC and then compares it to nothing, so the result is a number in chat and a person works out half of 24. A
+save now settles the damage — half, none, or the full amount, whichever that spell says a success is worth.
+Creatures nobody but you can roll for roll their own saves the moment the spell is used, so a fireball on five
+goblins costs you no presses at all; characters with a player owner are left alone, because that player came
+to the table to roll their own dice. What a failed save *inflicts* beyond damage is not applied — that is
+written as prose on the item, and guessing at it would start an argument.
+
+**A reaction is offered when one comes up, on a six-second clock.** A reaction is the one resource in the game
+that is lost by not noticing it, and nothing in the stack tells anybody theirs has come up. The creature's own
+options are now put in front of whoever plays it — the player who owns the sheet, or you for a monster — once
+per round, and whatever they choose is rolled on that person's own client.
+
+What the clock is allowed to pick by itself is deliberately narrow, and it is the rule this feature lives or
+dies by: a free swing with the weapon already in hand, yes, because an unused reaction is gone at the end of
+the round anyway. A spell slot or a limited use, never, whatever the clock says. Creatures this module is
+playing for you are not asked at all — they have a planner to decide — so this never becomes a queue of
+dialogs about goblins.
+
+**Shield works, which it never has without Midi QoL.** It triggers "when you are hit by an attack", and until
+now there was no such moment: the system rolled a number and rendered a colour. Reading hits created the
+moment, so the spell is offered to the creature that was hit — and only when it would actually change the
+answer. A +5 against an attack that beat your AC by nine is a slot spent to be hit anyway, and an offer under
+a clock reads as a recommendation.
+
+Not offered, and honestly rather than quietly: **Counterspell** and **Silvery Barbs**. One triggers on a
+creature beginning to cast and the other on a d20 somebody else rolled, and neither event is reported by
+anything we can listen to. An offer that cannot be honoured spends the resource and changes nothing.
+
+New switches, both per side and both on: **Apply rolled damage without the button** and **Offer a reaction
+when one comes up**, plus **Let saving throws settle the damage** for the table as a whole. Everything stands
+aside where Midi QoL is doing the same job — including its reaction prompts, which unlike most of its
+mechanics ship switched on, so if you run midi you keep its prompt for hits and damage and this module's for
+opportunity attacks. The rules windows say who owns which.
+
 ## 0.4.1
 
 Three bugs in one chat card, all reported from the first few seconds of playing as a player, and all in the

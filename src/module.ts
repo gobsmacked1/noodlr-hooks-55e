@@ -39,6 +39,7 @@ import { registerStealthWatch } from "./rules/stealth";
 import { hideSelected, surveyHide } from "./rules/hide";
 import { registerInvisibilityHooks } from "./rules/invisibility";
 import { registerReactionHooks } from "./rules/reactions";
+import { registerReactionOffers, surveyOffers } from "./rules/offer";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
@@ -109,6 +110,7 @@ export interface NoodlrHooksApi {
   surveyForced(): unknown;
   surveyDamage(): unknown;
   surveyDamageSaves(): unknown;
+  surveyOffers(): unknown;
   surveyConditions(): unknown;
   surveyDying(): unknown;
   surveyConcentration(): unknown;
@@ -213,6 +215,8 @@ const api: NoodlrHooksApi = {
   surveyDamage: () => surveyDamage(),
   /** Which saving throws are outstanding, who is rolling them, and what they will settle. */
   surveyDamageSaves: () => surveyDamageSaves(),
+  /** Which reactions the selected creature would be offered, who gets asked, and what costs something. */
+  surveyOffers: () => surveyOffers(),
   /** What condition combat math would apply for the controlled token against its current target. */
   surveyConditions: () => surveyConditions(),
   /** Who is dying, who is dead, and what the last drop to zero did. */
@@ -341,6 +345,10 @@ Hooks.once("ready", () => {
   // Influence needs the GM's ruling and writes a flag on an NPC the asking player cannot touch. The
   // handlers are registered everywhere because core resolves a query on the RECEIVING client.
   registerInfluenceQueries();
+  // A reaction is offered to whoever plays the creature, which for a character is the player. Same rule
+  // as Influence: the GM detects the trigger, and the client that owns the sheet draws the prompt, spends
+  // the reaction and rolls it.
+  registerReactionOffers();
   // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is
   // only computable from `updateActor` (which fires everywhere) while the damage TYPES arrive on the
   // applying client. A GM-only ledger would be blind to damage a player applied.
@@ -371,8 +379,8 @@ Hooks.once("ready", () => {
     // Rolled damage landing on whoever was hit, which is also what switches on every rule that hangs
     // off dnd5e's damage hook: death saves, Unconscious at zero, instant death, concentration.
     registerDamageApplication();
-  // A saving throw joined back to the spell that asked for it, so half of 24 is nobody's arithmetic.
-  registerSaveResolution();
+    // A saving throw joined back to the spell that asked for it, so half of 24 is nobody's arithmetic.
+    registerSaveResolution();
     // Watches whether the party is still swinging, which is what mercy hangs on.
     registerEncounterTracking();
     // A Capabilities button on every creature sheet. GM-only: it is the veto over what a model read,

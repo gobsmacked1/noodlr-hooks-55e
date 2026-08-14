@@ -15,26 +15,31 @@
 //   2. I WAS HURT AND IT IS NOT MY TURN — a hit-point decrease on the actor. This is as system-agnostic
 //      as anything gets: every system tracks hit points, and none of them hide a decrease.
 //
-// Triggers deliberately NOT here yet: reacting to an attack roll before it resolves (Shield, Parry) and
-// to a spell being cast (Counterspell). Without midi, dnd5e never compares an attack roll to an AC at
-// all — a human eyeballs it — so there is no "about to hit" moment to hook, and Shield cannot be timed.
-// The honest shape for those is an optional adapter that lights up when midi is present (its
-// `preCheckHits` is the last point at which an AC change is still read) plus a native Counterspell via
-// dnd5e's own activity-use hooks. Planned, specified in AGENTS.md, not guessed at here.
+// A third trigger — an attack that has been rolled and has not yet landed, which is Shield's moment —
+// arrived in v0.4.2 and lives in `rules/damage.ts`, because it is a consequence of that layer rather than
+// of this one. This header used to say Shield could not be timed without midi's `preCheckHits`, and the
+// reason it gave was sound: dnd5e never compares an attack roll to an AC, so there was no moment to hook.
+// Recomputing the hit ourselves created one. Counterspell and Silvery Barbs are still absent, with reasons
+// in `rules/offer.ts`.
 //
 // The bookkeeping is ours too. Whether a creature has spent its reaction is read from Noodlr's own
 // action-economy ledger rather than any module's flags, for exactly the same reason — and from the same
 // ledger a player's reaction is drawn against, so automation and the table cannot disagree about it.
+//
+// WHO GETS PLAYED FOR AND WHO GETS ASKED (v0.4.2). Every candidate used to go through `shouldAutomate`,
+// which refuses player characters in every mode and refuses any monster nobody opted in — so the whole
+// feature existed only for automated NPCs, and a player with a halberd was never told their reaction had
+// come up. Now the trigger is detected once and the creature is either played for (automated: the planner
+// decides, no dialog, which is what stops this becoming a chain of approvals) or offered its options on a
+// six-second clock (`rules/offer.ts`). The detection is unchanged; only who hears about it is new.
 
 import { log } from "../constants";
 import { hasReaction, spend } from "./economy/ledger";
 import { isPrimaryGM } from "../util/gm";
-import { moduleActive, moduleSetting } from "../util/modules";
 import { narrator } from "../util/speaker";
 import { readActions, type CreatureAction } from "../tactics/actions";
 import { readHp } from "../core/tracker";
 import { pickNumber, systemPaths } from "../system/profiles";
-import { getCombatAutomation } from "../settings";
 import { shouldAutomate } from "../tactics/registry";
 import { useActionAt } from "../tactics/execute";
 import { can, mentalScore, tierForScore, tierProfile } from "../tactics/tiers";
@@ -42,6 +47,7 @@ import { turnRandom } from "../core/random";
 import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
 import { standingExemption } from "../system/dnd5e-reactions";
+import { alive, canReact, notifyMidi, offerReaction, offerable, opportunityTaken } from "./offer";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -57,6 +63,8 @@ interface Watcher {
   token: any;
   action: CreatureAction;
   reach: number;
+  /** False when nobody is playing this creature for us, so it is asked instead of swung. */
+  automated: boolean;
 }
 
 export function registerReactionHooks(): void {
@@ -114,10 +122,19 @@ export function registerReactionHooks(): void {
   });
 }
 
-/** Is the reaction layer switched on and is there a fight for it to matter in? */
+/**
+ * Is there a fight for a reaction to matter in, and are we the client that watches for one?
+ *
+ * The primary GM detects every trigger, however owns the creature: one detector means one offer, and every
+ * client watching `moveToken` would put the same dialog up several times over. Where the ANSWER belongs is
+ * a separate question, settled per creature by `rules/offer.ts`.
+ *
+ * No longer gated on combat automation being on (v0.4.2). It used to be, and that was the bug: "do not play
+ * my monsters for me" is not "do not remind me my reaction is up", and the two had been conflated into one
+ * switch. `shouldAutomate` still decides who gets played for, which is where that setting belongs.
+ */
 function active(): boolean {
   if (!isPrimaryGM()) return false;
-  if (getCombatAutomation() === "off") return false;
   return Boolean((game.combat as any)?.started);
 }
 
@@ -142,44 +159,6 @@ function combatantFor(token: any): any {
 
 function tokenFor(combatant: any): any {
   return combatant?.token?.object ?? combatant?.token ?? null;
-}
-
-function alive(actor: any): boolean {
-  const hp = readHp(actor);
-  return !hp || hp.value === null || hp.value > 0;
-}
-
-/** Conditions that take a creature's reaction away entirely. */
-const CANNOT_REACT = ["incapacitated", "paralyzed", "stunned", "unconscious", "petrified", "dead"];
-
-/**
- * Is this creature in a state where a reaction is legal?
- *
- * A paralysed ogre does not swing at anybody, and letting one do so is the sort of rules break that
- * makes the whole feature untrustworthy. Read from status ids, which every system registers, rather than
- * from a helper belonging to some module.
- */
-function canReact(actor: any): boolean {
-  try {
-    const statuses: any = actor?.statuses;
-    for (const status of CANNOT_REACT) if (statuses?.has?.(status)) return false;
-  } catch {
-    /* an unreadable status set is not evidence of incapacity */
-  }
-  return true;
-}
-
-/**
- * Has another module claimed opportunity attacks?
- *
- * Gambit's Premades implements them properly, and two modules both reacting means the party is hit
- * twice for one departure. It is the only current implementation I know of, and this is a name check
- * rather than a dependency: if it is absent, nothing here changes.
- */
-function opportunityTaken(): boolean {
-  if (!moduleActive("gambits-premades")) return false;
-  // Unreadable (undefined) defers, because two attacks per departure is worse than none.
-  return moduleSetting("gambits-premades", "Opportunity Attack") !== false;
 }
 
 function distance(a: any, b: any): number {
@@ -210,23 +189,9 @@ function profileFor(actor: any): ReturnType<typeof tierProfile> {
 
 function spendReaction(combatant: any): void {
   const actor = combatant?.actor;
-  if (actor) spend(actor, game.combat, combatant, "reaction", false);
-
-  // Tell midi as well, when it is there. Not for our own bookkeeping — the ledger is authoritative
-  // and works alone — but because midi skips any reaction activity whose owner has spent their reaction,
-  // which makes its own prompt suppress itself instead of asking the GM to react a second time.
-  // Silently inert unless the table set midi's "Enforce Reactions" to All or Display Only (its default
-  // is "none", verified in midi 14.0.11 source); harmless either way.
-  const midi: any = (globalThis as any).MidiQOL;
-  if (!actor || typeof midi?.setReactionUsed !== "function") return;
-  try {
-    if (typeof midi.hasUsedReaction === "function" && midi.hasUsedReaction(actor)) return;
-    void Promise.resolve(midi.setReactionUsed(actor)).catch(() => {
-      /* best effort; our ledger has already recorded it */
-    });
-  } catch {
-    /* ditto */
-  }
+  if (!actor) return;
+  spend(actor, game.combat, combatant, "reaction", false);
+  notifyMidi(actor);
 }
 
 /**
@@ -234,6 +199,10 @@ function spendReaction(combatant: any): void {
  *
  * Captured BEFORE the move, because afterwards there is no way to know who had it. Hostility is read
  * from token disposition: a creature does not snap at its own side walking past.
+ *
+ * Includes creatures nobody automated, which is the v0.4.2 change and the whole of it: they used to be
+ * dropped here, silently, so the feature did not exist for player characters. They are tagged rather than
+ * filtered, and the caller decides whether to swing or to ask.
  */
 function watchersOf(moverDoc: any): Watcher[] {
   const combat: any = game.combat;
@@ -249,7 +218,8 @@ function watchersOf(moverDoc: any): Watcher[] {
     if (String(combatant?.id ?? "") === moverCombatantId) continue;
     // Its own turn is not when it stands watching: an opportunity attack is an off-turn thing.
     if (String(combatant?.id ?? "") === currentId) continue;
-    if (!shouldAutomate(combatant)) continue;
+    const automated = shouldAutomate(combatant);
+    if (!automated && !offerable(combatant?.actor)) continue;
     if (combatant?.isDefeated || !alive(combatant?.actor)) continue;
     if (!hasReaction(combatant) || !canReact(combatant.actor)) continue;
 
@@ -269,7 +239,7 @@ function watchersOf(moverDoc: any): Watcher[] {
     if (!best) continue;
     // No proximity check here: whether the mover was ever inside this reach is decided by walking the
     // route, and by the time this runs the token has already arrived somewhere else.
-    out.push({ combatant, token, action: best, reach: best.range });
+    out.push({ combatant, token, action: best, reach: best.range, automated });
   }
   return out;
 }
@@ -320,9 +290,44 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
       log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
       continue;
     }
+
+    if (!watcher.automated) {
+      await ask(watcher.combatant, watcher.token, mover, "opportunity");
+      continue;
+    }
     if (withholds(watcher.combatant)) continue;
 
     await strike(watcher, mover, "as it slips away");
+  }
+}
+
+/**
+ * Hand the decision to whoever plays this creature.
+ *
+ * Awaited in sequence with the other watchers rather than fired off in parallel, deliberately: two dialogs
+ * at once on one client is a stack of windows, and a player answering the second before the first has to be
+ * able to trust that the first one's swing has already resolved. The clock is six seconds, so a queue of
+ * three is over inside a round.
+ */
+async function ask(
+  combatant: any,
+  token: any,
+  target: any,
+  trigger: "opportunity" | "hurt",
+): Promise<void> {
+  const actor = combatant?.actor;
+  const tokenUuid = String(token?.document?.uuid ?? token?.uuid ?? "");
+  if (!actor || !tokenUuid) return;
+
+  const answer = await offerReaction(actor, {
+    actorUuid: String(actor.uuid ?? ""),
+    tokenUuid,
+    targetUuid: String(target?.document?.uuid ?? target?.uuid ?? "") || undefined,
+    targetName: String(target?.name ?? ""),
+    trigger,
+  });
+  if (answer.taken) {
+    log(`reaction: ${combatant?.name} answered with ${answer.label}`);
   }
 }
 
@@ -394,7 +399,9 @@ function withholds(combatant: any): boolean {
 async function retaliate(actor: any, amount: number): Promise<void> {
   const combat: any = game.combat;
   const combatant = (combat?.combatants ?? []).find?.((c: any) => c?.actor?.id === actor?.id);
-  if (!combatant || !shouldAutomate(combatant) || !hasReaction(combatant)) return;
+  if (!combatant || !hasReaction(combatant)) return;
+  const automated = shouldAutomate(combatant);
+  if (!automated && !offerable(actor, "hurt")) return;
   if (!canReact(actor) || !alive(actor)) return;
   // Its own turn is not off-turn, and a creature does not react to its own action.
   if (String(combatant.id ?? "") === String(combat?.combatant?.id ?? "")) return;
@@ -407,6 +414,14 @@ async function retaliate(actor: any, amount: number): Promise<void> {
   }
 
   const gap = distance(self, culprit);
+  if (!automated) {
+    // Nothing is chosen here: the options are read on the owner's client, which is also the only one that
+    // can honestly say what is still available on that sheet.
+    log(`reaction: ${combatant.name} took ${amount} damage off-turn; offering an answer`);
+    await ask(combatant, self, culprit, "hurt");
+    return;
+  }
+
   let best: CreatureAction | undefined;
   for (const action of readActions(combatant.actor)) {
     if (!action.available || action.economy !== "reaction") continue;
@@ -419,7 +434,11 @@ async function retaliate(actor: any, amount: number): Promise<void> {
   log(
     `reaction: ${combatant.name} took ${amount} damage off-turn; assuming ${culprit?.name} caused it`,
   );
-  await strike({ combatant, token: self, action: best, reach: best.range }, culprit, "in answer");
+  await strike(
+    { combatant, token: self, action: best, reach: best.range, automated },
+    culprit,
+    "in answer",
+  );
 }
 
 /** Announce it, spend the reaction, and let the system roll. */
