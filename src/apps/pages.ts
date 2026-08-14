@@ -563,11 +563,27 @@ const SHARED_ROLLS: Section = {
       ownership: "autoSaves",
     },
     {
+      id: "legendaryResistance",
+      label: "NOODLRHOOKS.Combat.LegendaryResistance.Name",
+      hint: "NOODLRHOOKS.Combat.LegendaryResistance.Hint",
+      state: "live",
+      setting: C.legendaryResistance,
+      kind: "boolean",
+    },
+    {
       id: "targeting",
       label: "Targeting: automatic from a template, manual, or with cover applied",
       hint: "Selecting who a template caught, and whether cover modifies them.",
       state: "planned",
       today: "Midi QoL.",
+    },
+    {
+      id: "recharge",
+      label: "Recharge abilities rolled at the start of a monster's turn",
+      hint: "A breath weapon on Recharge 5-6 rolls for itself instead of waiting to be remembered.",
+      state: "system",
+      today:
+        "dnd5e ships this and it ships OFF: Combat Settings, Monsters, Auto-recharge. Turn it on.",
     },
   ],
 };

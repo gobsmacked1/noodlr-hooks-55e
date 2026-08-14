@@ -50,11 +50,31 @@ Not offered, and honestly rather than quietly: **Counterspell** and **Silvery Ba
 creature beginning to cast and the other on a d20 somebody else rolled, and neither event is reported by
 anything we can listen to. An offer that cannot be honoured spends the resource and changes nothing.
 
-New switches, both per side and both on: **Apply rolled damage without the button** and **Offer a reaction
-when one comes up**, plus **Let saving throws settle the damage** for the table as a whole. Everything stands
-aside where Midi QoL is doing the same job — including its reaction prompts, which unlike most of its
-mechanics ship switched on, so if you run midi you keep its prompt for hits and damage and this module's for
-opportunity attacks. The rules windows say who owns which.
+**A legendary resistance is offered before the damage lands.** This one is a regression the three features
+above would have introduced, so it ships with them. The system already draws a "Resist" button on a failed
+monster save and waits for someone to notice it — which worked fine while you were also applying the damage by
+hand, because the same pause served both. A save that now rolls itself and settles its own damage in one
+breath leaves that button sitting on a card whose consequences have already happened. So you are asked
+instead, on the same six-second clock, before anything is applied; and if you press the system's own button
+during the pause, that is now read and honoured rather than ignored.
+
+You are only asked where it changes something worth changing: a failure that does anything other than damage,
+or damage worth a real share of what the creature has left. A lich is not asked about a Firebolt — a prompt on
+every failed save teaches you to dismiss prompts, and then the one that mattered gets dismissed too. If the
+clock runs out the creature takes it, because three resistances a day is the most depleting resource in the
+game and no timer should spend one for you.
+
+New switches: **Apply rolled damage without the button** and **Offer a reaction when one comes up**, both per
+side and both on; **Let saving throws settle the damage** and **Offer a legendary resistance on a failed save**
+for the table as a whole. Everything stands aside where Midi QoL is doing the same job — including its reaction
+prompts, which unlike most of its mechanics ship switched on, so if you run midi you keep its prompt for hits
+and damage and this module's for opportunity attacks. The rules windows say who owns which.
+
+**One thing the system ships switched off, now said out loud.** dnd5e can roll a monster's Recharge 5-6 at the
+start of its turn and defaults to not doing it, in a setting that is not in Foundry's settings list at all
+(Configure Settings → dnd5e → Combat → Monsters → Auto-recharge). Nothing here does it instead, so a spent
+breath weapon stays spent until somebody remembers. The rules windows now say so rather than leaving you to
+notice.
 
 ## 0.4.1
 

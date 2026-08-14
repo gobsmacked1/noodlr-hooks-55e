@@ -143,7 +143,9 @@ const STATED_RUNNING_LONG = /running start[^.]{0,80}?long jump up to (\d+)\s*(?:
 
 function proseOf(item: any): string {
   const raw =
-    String(item?.system?.description?.value ?? "") + " " + String(item?.system?.description?.chat ?? "");
+    String(item?.system?.description?.value ?? "") +
+    " " +
+    String(item?.system?.description?.chat ?? "");
   return raw.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
 }
 
@@ -232,10 +234,7 @@ export function jumpProfile(actor: any): JumpProfile {
 
     const runningLong = STATED_RUNNING_LONG.exec(prose);
     if (runningLong) {
-      profile.fixedRunningLong = Math.max(
-        profile.fixedRunningLong ?? 0,
-        Number(runningLong[1]),
-      );
+      profile.fixedRunningLong = Math.max(profile.fixedRunningLong ?? 0, Number(runningLong[1]));
       profile.sources.push(nameOf(item) || "a stated running jump");
     }
   }

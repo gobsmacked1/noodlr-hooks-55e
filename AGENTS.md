@@ -2097,16 +2097,84 @@ button press.
 **Counterspell** and **Silvery Barbs** are both in the user's list and neither is offered. One triggers on "a
 creature is casting a spell" and needs a window that holds up somebody else's cast; the other needs to
 substitute a d20 we did not roll. Both are real features and neither is guessed at: an offer that cannot be
-honoured spends the resource and changes nothing, which is the worst outcome available. Counterspell is the
-more tractable of the two — dnd5e's activity-use hooks do report a cast — and is the next thing to build here.
+honoured spends the resource and changes nothing, which is the worst outcome available.
 
-### Still outstanding from the brief
+**Counterspell is the more tractable of the two and is still not simply a matter of finding the hook.**
+`dnd5e.preUseActivity` does report a cast, but `Hooks.call` is synchronous and the veto is its return value, so
+there is no awaiting a six-second prompt and then cancelling — the same wall `noodlrHooks.preRuling` hit, and
+the reason `noodlr` deliberately does not listen to that. Building it means either vetoing first and asking
+afterwards (wrong: it cancels casts nobody countered) or holding the cast in a way core does not provide.
+**Silvery Barbs is now the closer of the two**, which is the opposite of the 2026-08-04 assessment: it triggers
+after a d20 succeeds, and we now own both moments (`readHits` for an attack, `readSave` for a save) and already
+hold the damage back through a window. What it needs is a reroll substituted into a verdict we have read, not a
+hook that does not exist.
 
-The resource half of item 2 is only partly done. Actions, bonus actions, reactions, movement and Dash are all
-tracked (`rules/economy/`); **ammunition, spell slots, and per-day / per-rest / recharge / legendary counters
-are not** — dnd5e's `consumption` handles most of them when an activity is used through the sheet, which is why
-this has not bitten yet, and `noteRest()` in `capability/uses.ts` still has no callers. Legendary resistances
-are nobody's. Check what the system already spends before building any of it.
+### The legendary resistance, and the general lesson about automating around a pause
+
+`rules/legendary.ts` + `system/dnd5e-legendary.ts`. **This is a regression the three features above would have
+introduced, which is why it shipped with them rather than after them**, and the shape generalises well beyond
+this rule: **automation that closes a window the system left open is a bug however correct each of its pieces
+is.** Nothing in the damage or save layers was wrong; together they deleted a pause somebody was using.
+
+dnd5e models this mechanic almost completely and — unusually for the findings in this file — even draws the
+button. `resources.legres` is a real NPC schema field with `max` and `spent` (`data/actor/npc.mjs:113`, value
+derived at `:446`, both refilled on a long rest at `:477`); `NPCData#resistSave` (`:557-563`) spends one and
+stamps the save; and `_enrichSaveTooltip` (`documents/chat-message.mjs:637-670`) renders **Resist** on any
+failed NPC save where one remains and the reader owns the creature. What it waits for is a human. That was
+harmless while a human was also applying the damage by hand, because the same pause served both.
+
+- **`forceSuccess` is read by the RENDERER and by nothing else.** `BasicRoll#isSuccess` is still the
+ arithmetic against the DC, so a layer that asks the roll whether it succeeded is blind to a resistance a GM
+ spent by hand — and would apply full damage on the one roll of the evening they had intervened in, beside a
+ card reading "Resisted". `readSave` reads the flag, and reads it as authoritative even when the DC is
+ unreadable, because somebody paid for that success explicitly.
+- **A resistance pressed by hand arrives as an `updateChatMessage`, not a new message.** The button stamps the
+ existing save. Hence the second hook in `registerSaveResolution`, narrowly gated on the flag.
+- **The offer has to be RARE to be read.** A prompt on every failed save teaches a GM to dismiss prompts, and
+ then the one that mattered is dismissed too. `worthAsking()` is the judgement and is exported precisely
+ because it is a judgement: a fifth of what the creature has left, or anything lethal, or any failure whose
+ consequence is not damage at all. That last case is the important one and is why `Activation.deals` exists —
+ a Banishment has no damage roll coming, so waiting for one to price the stake would mean never asking about
+ the failures a legendary creature actually spends resistances on.
+- **`onSave: "full"` is priced as UNKNOWN, not as zero.** A save that changes nothing about the damage does not
+ make the resistance pointless; it makes its value unreadable, because whatever else the failure inflicts is
+ prose on the item. Scoring it zero would have silently never asked.
+- **The default is to decline**, which is the prompt layer's one rule (a timeout may spend a renewing resource
+ and never a depleting one) applied to the most depleting resource in the game. It is also what already
+ happens on every table where nobody notices the button.
+- **The window is the same shape as the shield window and for the same reason**: `Activation.asking` is
+ registered before anybody is asked and `settle` awaits it, so an answer cannot arrive after the damage has
+ landed. `offered` is set *before* the await, which is what makes a re-entrant `settle` raise one dialog
+ rather than two.
+- Asked locally on the primary GM rather than routed through `askUser`, because `active()` already restricts
+ this layer to that client and legendary creatures are GM-run by definition. If a player-owned legendary
+ creature ever matters, route it the way `offer.ts` does.
+- Not split by audience, deliberately: `legres` is on the NPC data model, so a PC column could never fire and
+ a setting with an inert half reads as a broken setting.
+
+### The resource inventory, measured rather than assumed (2026-08-14)
+
+Item 2 of the brief listed twelve resources. Checked against dnd5e 5.3.3 source, most of them are the system's
+and already work; **do not build any of these without checking what it already spends.**
+
+- **The system's, and working:** ammunition (consumed on the attack roll itself, `documents/activity/attack.mjs:210`,
+ with the consumed item's data stashed on the message so a miss can put it back), spell slots and every other
+ `consumption` target, per-day / per-short-rest / per-long-rest uses via `uses.recovery`, and **legendary
+ actions** — `resources.legact` is the one pool `activityActivationTypes` declares a `consume` for, and
+ `NPCData#recoverCombatUses` (`:544-549`) zeroes `spent` at the end of the creature's turn or the start of the
+ encounter.
+- **Ours, and built:** actions, bonus actions, reactions, movement, Dash, the light-weapon swing
+ (`rules/economy/`), and now legendary resistances.
+- **The system's, and shipped OFF:** recharge. `game.settings.register("dnd5e", "autoRecharge")` defaults
+ `"no"` and is `config: false` (`settings.mjs:356-368`), so it is not in Foundry's settings list at all — it
+ lives only in dnd5e's own Combat Settings submenu, Monsters tab. When enabled it rolls at `turnStart` for
+ NPCs only (`data/item/templates/activities.mjs:334`), and `"silent"` does it without a chat card. **We
+ deliberately do not set it**: writing another module's settings is what makes two modules impossible to
+ reason about, and the yes/silent choice is a real preference. `systemSettingAdvisories()` reports it, and the
+ Combat page carries a `system`-state row saying where it is. Note the interaction with our own code — a spent
+ recharge feature is correctly *not offered* as a turn option, so with this off a breath weapon disappears
+ from the planner's options for the rest of the fight and looks like the planner having forgotten it.
+- `noteRest()` in `capability/uses.ts` still has no callers, and does not need any while the system owns rests.
 
 ## What the finished corpus caught (v0.4.0, 2026-08-13)
 

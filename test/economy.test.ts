@@ -154,7 +154,9 @@ test("a Pact of the Blade warlock's Extra Attack is an invocation, and still cou
   // Thirsting Blade carries no `extra-attack` identifier — it is an Eldritch Invocation granting the
   // feature for the pact weapon only — so a warlock read as having one attack and was refused a legal
   // second swing every turn.
-  const warlock = actor([item({ name: "Thirsting Blade", type: "feat", identifier: "thirsting-blade" })]);
+  const warlock = actor([
+    item({ name: "Thirsting Blade", type: "feat", identifier: "thirsting-blade" }),
+  ]);
   assert.equal(explainAttacksPerAction(warlock).value, 2);
 });
 
@@ -206,7 +208,10 @@ test("Nick makes it free, but only for a wielder entitled to the mastery", () =>
 
 test("a heavy weapon, a ranged attack and a spell offer nothing", () => {
   const hero = actor();
-  const heavy = { ...lightWeapon(), system: { ...lightWeapon().system, properties: new Set(["hvy"]) } };
+  const heavy = {
+    ...lightWeapon(),
+    system: { ...lightWeapon().system, properties: new Set(["hvy"]) },
+  };
   assert.equal(lightExtraAttackCost(hero, heavy, swing), null);
   assert.equal(
     lightExtraAttackCost(hero, lightWeapon(), {

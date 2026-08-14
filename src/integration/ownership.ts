@@ -491,8 +491,42 @@ export function advisories(): Advisory[] {
     });
   }
 
+  out.push(...systemSettingAdvisories());
   out.push(...sceneAdvisories());
 
+  return out;
+}
+
+/**
+ * Automation dnd5e already ships, switched off in its own settings.
+ *
+ * Worth reporting for the same reason the ownership badges exist: a GM comparing this module against what
+ * they had before will find recharge abilities no longer rolling and reasonably blame whatever changed. The
+ * cause is a system setting they have never seen — `autoRecharge` is registered `config: false`, so it is
+ * not in Foundry's settings list at all and lives only inside dnd5e's Combat Settings submenu.
+ *
+ * We deliberately do NOT set it. Writing another module's settings is what makes two modules impossible to
+ * reason about, and this one is a genuine preference: "silent" and "yes" differ by a chat card per recharge.
+ */
+function systemSettingAdvisories(): Advisory[] {
+  const out: Advisory[] = [];
+  let recharge: unknown;
+  try {
+    recharge = game.settings.get("dnd5e", "autoRecharge");
+  } catch {
+    return out; // A version without the setting. Nothing to advise.
+  }
+  if (String(recharge) === "no") {
+    out.push({
+      level: "info",
+      title: "Recharge abilities are not rolling themselves",
+      detail:
+        "dnd5e can roll a monster's Recharge 5-6 at the start of its turn, and ships with it off " +
+        '("Auto-recharge" = No). Nothing here does it instead: a spent breath weapon is correctly not ' +
+        "offered as an option, and it stays spent until somebody rolls the recharge by hand. Turn it on " +
+        'in Configure Settings, dnd5e, Combat, Monsters — "Silent" applies it with no chat card.',
+    });
+  }
   return out;
 }
 

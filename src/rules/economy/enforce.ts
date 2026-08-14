@@ -39,15 +39,7 @@ import { lightExtraAttackCost } from "../../system/dnd5e-two-weapon";
 import { interceptHideActivity } from "../hide";
 import { interceptStabilizeActivity } from "../dying";
 import { interceptInfluenceActivity } from "../influence";
-import {
-  check,
-  lightSwings,
-  slotFor,
-  spend,
-  takeDash,
-  takeLightSwing,
-  type Slot,
-} from "./ledger";
+import { check, lightSwings, slotFor, spend, takeDash, takeLightSwing, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
 const cleared = new Set<string>();

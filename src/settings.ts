@@ -161,6 +161,7 @@ export function registerCombatSettings(): void {
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
   split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
+  world(COMBAT_SETTINGS.legendaryResistance, "LegendaryResistance", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.importantNpcSaves, "Dying.Important", Boolean, true);

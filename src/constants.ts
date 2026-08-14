@@ -55,6 +55,14 @@ export const COMBAT_SETTINGS = {
   autoSaves: "combat.autoSaves",
   /** Per audience. Whether a triggered reaction is offered to whoever plays the creature, on a clock. */
   reactionPrompts: "combat.reactionPrompts",
+  /**
+   * Whether a failed NPC save offers the legendary resistance dnd5e draws a button for.
+   *
+   * Deliberately NOT split by audience: `resources.legres` is a field on the NPC data model, so a player
+   * character has nothing to spend and a PC column could never fire. A setting with an inert half reads as
+   * a broken setting.
+   */
+  legendaryResistance: "combat.legendaryResistance",
   /** Whether condition combat math (adv/disadv, auto-fail, crit-on-hit, incapacitated) is applied. */
   conditions: "combat.conditions",
   /** Per audience. Whether dropping to 0 HP applies Unconscious/Dead and damage-at-0 death failures. */

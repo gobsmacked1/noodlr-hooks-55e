@@ -43,6 +43,7 @@ import { registerReactionOffers, surveyOffers } from "./rules/offer";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
+import { surveyLegendary } from "./rules/legendary";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
 import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
@@ -111,6 +112,7 @@ export interface NoodlrHooksApi {
   surveyDamage(): unknown;
   surveyDamageSaves(): unknown;
   surveyOffers(): unknown;
+  surveyLegendary(): unknown;
   surveyConditions(): unknown;
   surveyDying(): unknown;
   surveyConcentration(): unknown;
@@ -217,6 +219,8 @@ const api: NoodlrHooksApi = {
   surveyDamageSaves: () => surveyDamageSaves(),
   /** Which reactions the selected creature would be offered, who gets asked, and what costs something. */
   surveyOffers: () => surveyOffers(),
+  /** What the selected creature has left to resist with, and how much damage would be worth asking about. */
+  surveyLegendary: () => surveyLegendary(),
   /** What condition combat math would apply for the controlled token against its current target. */
   surveyConditions: () => surveyConditions(),
   /** Who is dying, who is dead, and what the last drop to zero did. */

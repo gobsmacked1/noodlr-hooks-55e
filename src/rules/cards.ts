@@ -242,6 +242,8 @@ export interface SaveReading {
   dc: number | null;
   total: number;
   success: boolean | null;
+  /** True when the success was bought rather than rolled — a legendary resistance. */
+  forced: boolean;
 }
 
 /**
@@ -252,17 +254,26 @@ export interface SaveReading {
  * read from `BasicRoll#isSuccess` for the same reason `readHits` does its own arithmetic: those getters
  * return `false` — not `undefined` — when there is no DC, so a save with no target reads as a failure,
  * and this layer must be able to tell "failed" from "cannot say". A null success means the latter.
+ *
+ * `forceSuccess` OUTRANKS THE ARITHMETIC, and reading it is not an optional nicety. It is the flag dnd5e's
+ * own Resist button writes (`NPCData#resistSave`), it is consumed by the renderer and by nothing else, and
+ * `isSuccess` knows nothing about it — so without this a GM who spent a legendary resistance by hand would
+ * watch us apply the full damage anyway, on the one roll of the evening they had intervened in.
  */
 export function readSave(message: any): SaveReading {
   const roll: any = message?.rolls?.[0];
   const total = Number(roll?.total);
   const target = Number(roll?.options?.target);
   const dc = Number.isFinite(target) ? target : null;
+  const forced = message?.flags?.dnd5e?.roll?.forceSuccess === true;
+  const rolled = dc === null || !Number.isFinite(total) ? null : total >= dc;
   return {
     ability: String(message?.flags?.dnd5e?.roll?.ability ?? ""),
     dc,
     total: Number.isFinite(total) ? total : NaN,
-    success: dc === null || !Number.isFinite(total) ? null : total >= dc,
+    // A bought success is a success even when the DC is unreadable: somebody paid for it explicitly.
+    success: forced ? true : rolled,
+    forced,
   };
 }
 

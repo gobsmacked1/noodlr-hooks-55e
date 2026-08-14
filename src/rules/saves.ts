@@ -38,7 +38,9 @@ import { narrator } from "../util/speaker";
 import { isAutoSavesEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
+import { canResist } from "../system/dnd5e-legendary";
 import { applyRolledDamage, type DamageEntry } from "./damage";
+import { considerResistance } from "./legendary";
 import {
   activityOf,
   damageOnSave,
@@ -69,6 +71,10 @@ interface TargetState {
   /** True while our own roll is in flight, so a second event cannot roll it twice. */
   rolling: boolean;
   applied: boolean;
+  /** The failed save's message, which is what a legendary resistance is stamped on. */
+  saveMessage: any;
+  /** Set once a resistance has been offered for this failure, so it is offered exactly once. */
+  offered: boolean;
 }
 
 /** One use of a save activity, and everything still outstanding about it. */
@@ -79,6 +85,18 @@ interface Activation {
   damage: { message: any; parts: DamagePart[] } | null;
   /** The abilities and DC the activity asks for, when we could read them off the item. */
   ask: { abilities: string[]; dc: number | null } | null;
+  /**
+   * Does this activity deal damage at all? Null while unknown.
+   *
+   * It decides WHEN a legendary resistance can be offered, which is the only reason it is recorded. A
+   * damaging spell's stake is a number, so the offer waits for the damage roll; a Hold Monster has no
+   * damage roll coming, so waiting for one would mean never asking about the failures that matter most.
+   */
+  deals: boolean | null;
+  /** What demanded the save, for the resistance prompt. */
+  source: string;
+  /** An open resistance prompt. Damage must not land under it. */
+  asking: Promise<void> | null;
   targets: Map<string, TargetState>;
   at: number;
 }
@@ -90,6 +108,16 @@ export function registerSaveResolution(): void {
 
   Hooks.on("createChatMessage", (message: any) => {
     if (!active()) return;
+    void route(message);
+  });
+
+  // A legendary resistance spent by hand is an UPDATE to a save we have already read: dnd5e's own button
+  // stamps `roll.forceSuccess` on the existing message rather than posting anything. Without this, a GM who
+  // pressed it during the pause before the damage roll would still watch the full amount land — which is the
+  // worst version of this bug, because they had intervened and been ignored.
+  Hooks.on("updateChatMessage", (message: any, changed: any) => {
+    if (!active()) return;
+    if (changed?.flags?.dnd5e?.roll?.forceSuccess !== true) return;
     void route(message);
   });
 
@@ -146,6 +174,8 @@ async function onUsage(message: any): Promise<void> {
   if (!usageId) return;
 
   const act = activation(usageId);
+  act.deals = Number(activity?.damage?.parts?.length ?? 0) > 0;
+  act.source = String(item?.name ?? activity?.name ?? "");
   act.ask = {
     // `save.ability` is a Set of ability ids: 2024 statblocks offer a choice ("Dexterity or
     // Constitution"), and the rule is that the creature picks. The first is taken, which is a choice made
@@ -185,7 +215,10 @@ async function onSave(message: any): Promise<void> {
     success: null,
     rolling: false,
     applied: false,
+    saveMessage: null,
+    offered: false,
   };
+  state.saveMessage = message;
   // A creature that rolls a save against this card IS a target, whatever the caster happened to have
   // selected when they rolled. The target list is a snapshot of `game.user.targets`, and a table that
   // plays by clicking tokens rather than by targeting them would otherwise be invisible here.
@@ -224,6 +257,9 @@ function activation(usageId: string): Activation {
     onSave: "half",
     damage: null,
     ask: null,
+    deals: null,
+    source: "",
+    asking: null,
     targets: new Map(),
     at: Date.now(),
   };
@@ -255,6 +291,8 @@ function noteTargets(act: Activation, message: any): void {
       success: null,
       rolling: false,
       applied: false,
+      saveMessage: null,
+      offered: false,
     });
   }
 }
@@ -268,6 +306,17 @@ function noteTargets(act: Activation, message: any): void {
  */
 async function settle(act: Activation): Promise<void> {
   await rollMissing(act);
+
+  // Anybody still deciding whether to spend a legendary resistance gets to finish first. Same shape as the
+  // damage layer's reaction window and for the same reason: an answer that arrives after the damage has
+  // landed has cost a resource and changed nothing.
+  if (act.asking) await act.asking;
+  const asking = offerResistances(act).finally(() => {
+    if (act.asking === asking) act.asking = null;
+  });
+  act.asking = asking;
+  await asking;
+
   if (!act.damage) return;
 
   const entries: DamageEntry[] = [];
@@ -281,12 +330,57 @@ async function settle(act: Activation): Promise<void> {
       doc: state.doc,
       multiplier,
       note: game.i18n.localize(
-        state.success ? "NOODLRHOOKS.Combat.AutoSaves.Saved" : "NOODLRHOOKS.Combat.AutoSaves.Failed",
+        state.success
+          ? "NOODLRHOOKS.Combat.AutoSaves.Saved"
+          : "NOODLRHOOKS.Combat.AutoSaves.Failed",
       ),
     });
   }
   if (!entries.length) return;
   await applyRolledDamage(act.damage.message, entries, act.damage.parts);
+}
+
+/**
+ * Ask about a legendary resistance for every failure that could still be overturned.
+ *
+ * Sequential rather than concurrent, deliberately: two prompts at once is two dialogs stacked on one
+ * screen with two clocks running, and the case that produces them — an area spell catching two legendary
+ * creatures — is rare enough that answering them one at a time costs nothing.
+ *
+ * `offered` is set BEFORE the await, which is what makes a re-entrant `settle` safe: the second pass sees
+ * the flag and skips, rather than raising a second dialog about the same save.
+ */
+async function offerResistances(act: Activation): Promise<void> {
+  for (const state of act.targets.values()) {
+    if (state.applied || state.offered || state.success !== false) continue;
+    if (!canResist(state.doc?.actor)) continue;
+
+    // What a resistance would be worth, or null when the failure is not a number. A damaging spell whose
+    // damage has not been rolled yet is neither: it is simply too early, so leave it for the next pass.
+    let avoided: number | null;
+    if (act.damage) {
+      const kept = saveMultiplier(act.onSave);
+      const rolled = act.damage.parts.reduce((sum, part) => sum + part.value, 0);
+      // A save that changes nothing about the damage ("full") does not make the resistance pointless — it
+      // makes its value unreadable, because whatever else the spell does on a failure is prose on the item.
+      // Treated as the unknown-stake case rather than as zero, which would silently never ask.
+      avoided = kept >= 1 ? null : Math.abs(rolled) * (1 - kept);
+    } else if (act.deals === false) {
+      avoided = null;
+    } else {
+      continue;
+    }
+
+    state.offered = true;
+    const resisted = await considerResistance({
+      actor: state.doc.actor,
+      message: state.saveMessage,
+      name: state.name,
+      spell: act.source,
+      avoided,
+    });
+    if (resisted) state.success = true;
+  }
 }
 
 /**

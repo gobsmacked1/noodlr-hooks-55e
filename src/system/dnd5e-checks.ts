@@ -158,7 +158,14 @@ export function jumpDistances(actor: any, options: JumpOptions = {}): JumpDistan
     highStanding = Math.max(highStanding, highRunning);
   }
 
-  return { longRunning, longStanding, highRunning, highStanding, unreadable: false, modifiers: profile.sources };
+  return {
+    longRunning,
+    longStanding,
+    highRunning,
+    highStanding,
+    unreadable: false,
+    modifiers: profile.sources,
+  };
 }
 
 /**
