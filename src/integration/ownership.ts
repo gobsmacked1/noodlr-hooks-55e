@@ -41,6 +41,7 @@ import { midiOwnsDying } from "../system/dnd5e-dying";
 import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { midiPromptsReactions } from "../system/dnd5e-reactions";
 import { gambitsOwnsCounterspell } from "../system/dnd5e-counterspell";
+import { gambitsOwnsBarbs } from "../system/dnd5e-barbs";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 
@@ -236,6 +237,21 @@ const AREAS: Area[] = [
               "and the counter-a-counterspell chain — and it runs through Midi QoL, which is installed. " +
               "Two windows on one cast would ask twice, so this stands aside. Note that it fires only for " +
               "creatures carrying its own Counterspell item; ours reads whatever Counterspell is on the sheet.",
+          }
+        : null,
+  },
+  {
+    id: "barbs",
+    setting: COMBAT_SETTINGS.barbs,
+    contender: () =>
+      gambitsOwnsBarbs()
+        ? {
+            by: "Gambit's Premades",
+            note:
+              "Its Silvery Barbs automation covers both halves of the spell — the reroll and the ally who " +
+              "gains Advantage — and it runs through Midi QoL, which is installed. Two windows on one " +
+              "success would ask twice and could reroll twice. Ours automates the reroll only; the " +
+              "Advantage half is whatever your copy of the spell carries as an effect.",
           }
         : null,
   },

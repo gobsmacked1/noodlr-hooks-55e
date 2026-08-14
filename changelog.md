@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0
+
+**The Ready action, with a trigger you write yourself.** Everybody knows this rule and almost nobody uses
+it, because a held action is a promise nothing at the table keeps track of: you tell the GM what you are
+waiting for, six things happen, and either you remember or you do not. Pressing Ready now asks what you
+are waiting for, spends your Action, and then watches the round for you — movement, damage, a creature
+going down, a spell being cast, an attack, a condition landing, something coming into view, a door, the
+end of a turn, and anything the GM narrates. When it happens you are asked to confirm on the usual
+six-second clock, and **this is the one prompt the clock says yes to**, because you already said this is
+what you wanted. Letting it go is the deliberate choice and costs you the Action and nothing else.
+
+Releasing spends your Reaction, so a readied Attack is one attack — Extra Attack wants the Attack action
+on your own turn. If nothing triggers it before your next turn it is lost, and being knocked out loses it
+too. You can hold movement instead of an action. Held spells diverge from the letter of the rules in the
+generous direction: the slot is spent when the spell goes off rather than when it is readied, so a
+readied spell that never fires costs the Action and keeps the slot.
+
+**If Noodlr's AI game master module is installed you can write the trigger in your own words** — "if a
+goblin I can see approaches an ally, I shoot it", "if I hear the sound of weapons being drawn behind that
+door, I hide" — and you are shown how it was read before anything is spent. Without it, a list of the
+common triggers is offered instead, which is what monsters use in any case: a creature clever enough to
+lie in wait gets the picker, and the rest are not asked. That AI reading is only paid for where words are
+genuinely needed; everything that can be answered by measuring a distance or reading a condition is
+answered here, for nothing.
+
+**Silvery Barbs works, along with anything else that spoils a roll after it lands.** The spell is famously
+hard to run because the die is on screen and the consequence follows immediately, so playing it means
+asking the whole table to hold on. A made saving throw and a landing attack are now held for a moment
+when an opposed creature within 60 feet can see the roller, is holding the spell and still has its
+reaction; the d20 is rerolled and the lower result kept, shown on the card the way any roll made with
+disadvantage is shown. Only the reroll is automated — the ally who gains Advantage is whatever your copy
+of the spell carries, because that is a promise about a roll nobody has made yet. **The clock never casts
+it for anybody:** the fresh die may be higher and the roll stands anyway, which makes it a slot spent on
+a gamble. Ability checks are not offered, since nothing here holds a check's verdict open.
+
+Two new switches, both on: **Hold a success open for Silvery Barbs** and **Hold an action for a trigger
+you name**. Barbs stands aside for Gambit's Premades wherever Midi QoL is installed to carry it.
+
 ## 0.4.3
 
 **Counterspell works.** It is the reaction spellcasters most expect to exist and the one that has never

@@ -63,6 +63,21 @@ export const COMBAT_SETTINGS = {
    */
   counterspell: "combat.counterspell",
   /**
+   * Per audience. Whether a creature may hold an action for a trigger it names itself.
+   *
+   * Split by the READIER, which is the creature the whole rule is about. Both sides start on: nothing
+   * happens until somebody presses Ready, and the alternative is a PHB action item that spends an Action
+   * and produces a chat card saying nothing.
+   */
+  ready: "combat.ready",
+  /**
+   * Per audience. Whether a d20 test that succeeded is held open for an opposed creature to spoil.
+   *
+   * Split by the creature that SUCCEEDED, matching Counterspell's split for the same reason: the cost of the
+   * rule is a pause on somebody's roll, so the audience whose rolls may be delayed owns the column.
+   */
+  barbs: "combat.barbs",
+  /**
    * Whether a failed NPC save offers the legendary resistance dnd5e draws a button for.
    *
    * Deliberately NOT split by audience: `resources.legres` is a field on the NPC data model, so a player
@@ -100,6 +115,8 @@ export const SPLIT_COMBAT_SETTINGS = [
   COMBAT_SETTINGS.autoDamage,
   COMBAT_SETTINGS.reactionPrompts,
   COMBAT_SETTINGS.counterspell,
+  COMBAT_SETTINGS.ready,
+  COMBAT_SETTINGS.barbs,
 ] as const;
 
 /** The registered key for one side of a split setting. */

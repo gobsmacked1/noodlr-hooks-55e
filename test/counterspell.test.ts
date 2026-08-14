@@ -6,8 +6,8 @@ import {
   counterspellReady,
   gambitsOwnsCounterspell,
   isCounterspell,
-  slotAvailable,
 } from "../src/system/dnd5e-counterspell";
+import { slotAvailable } from "../src/system/dnd5e-spells";
 
 // What is pinned here is the READING, which is the half that can be wrong without anybody noticing. The
 // window itself fails loudly — a held cast that never resumes is the first thing reported — but a component

@@ -36,6 +36,7 @@ import {
   type HpSnapshot,
 } from "../system/dnd5e-damage";
 import { offerReaction } from "./offer";
+import { considerBarbs } from "./barbs";
 import {
   activityOf,
   damageParts,
@@ -138,7 +139,7 @@ async function consider(message: any, flags: any): Promise<void> {
     const reading = readHits(message);
     remember(message, reading);
     // Registered before anything is awaited, so a damage roll arriving in the same tick still finds it.
-    const window = shieldWindow(message, reading).finally(() => {
+    const window = reactionWindow(message, reading).finally(() => {
       for (const key of keysOf(message)) if (windows.get(key) === window) windows.delete(key);
     });
     for (const key of keysOf(message)) windows.set(key, window);
@@ -213,12 +214,18 @@ function keysOf(message: any): string[] {
  * and lives here, the window falls out of it: read the verdict, ask the creature that was hit, and if the
  * bonus arrives, move it out of `hits` before anything is applied.
  *
- * Only offered where it could actually matter. A hit that landed by nine is not saved by a +5, and offering
- * it there is worse than useless: a player under a six-second clock reads an offer as a recommendation.
+ * TWO REACTIONS SHARE ONE WINDOW, and the ORDER IS THE DESIGN. Silvery Barbs is offered first and Shield
+ * second, because Barbs attacks the die and Shield attacks the number: a spoiled roll may miss everything,
+ * in which case nobody should be invited to spend a slot defending against an attack that no longer lands.
+ * The other order would routinely cost the party two slots where one would have done. Both are cast by the
+ * defending side, so nothing about this gives the attacker a say in the sequence.
  */
-async function shieldWindow(message: any, reading: HitReading): Promise<void> {
+async function reactionWindow(message: any, reading: HitReading): Promise<void> {
   if (reading.hits.length === 0) return;
   const attacker = tokenFor(message);
+
+  await barbsWindow(message, reading, attacker);
+  if (reading.hits.length === 0) return;
 
   for (const doc of [...reading.hits]) {
     const margin = reading.margin[String(doc?.id ?? "")];
@@ -243,6 +250,47 @@ async function shieldWindow(message: any, reading: HitReading): Promise<void> {
       content: `<p><strong>${answer.label}</strong> — ${doc?.name}'s AC rises by ${answer.acBonus} and the attack misses.</p>`,
     });
   }
+}
+
+/**
+ * Offer Silvery Barbs against the attack roll, and re-read the card if the die moved.
+ *
+ * ASKED ONCE PER ROLL, NOT ONCE PER TARGET, because the spell is cast on the creature that rolled rather
+ * than on any of the creatures it was aimed at. An attack against three targets is one d20 and therefore one
+ * question; asking per target would invite three slots spent on one die.
+ *
+ * THE VERDICT IS RE-READ RATHER THAN RECOMPUTED. `rerollLower` rewrites the message, so asking `readHits` for
+ * a fresh answer is both shorter and the only version that cannot drift from the original reading — the same
+ * one-question-one-implementation rule that the Hide line-of-sight bug and the forced-movement layer's
+ * private copy of "did that connect" both taught. It also gets crit and fumble right for free, because a
+ * discarded 19 is no longer what the die sums.
+ *
+ * Mutated in place, because `verdicts` and the damage path are holding this object.
+ */
+async function barbsWindow(message: any, reading: HitReading, attacker: any): Promise<void> {
+  // The best case for the barber is the target it beat by least, since that is the one a spoiled roll is
+  // likeliest to save. It is also the honest number to show them: a reroll has to find at least this much.
+  const margins = reading.hits
+    .map((doc) => reading.margin[String(doc?.id ?? "")])
+    .filter((value) => Number.isFinite(value)) as number[];
+  if (margins.length === 0) return; // Every hit was a critical, and no reroll of a kept 20 can be worse.
+
+  const outcome = await considerBarbs({
+    kind: "attack",
+    message,
+    roller: attacker,
+    against: Number(message?.rolls?.[0]?.total) - Math.min(...margins),
+    source: String(itemOf(message)?.name ?? ""),
+    victim: reading.hits[0],
+  });
+  if (!outcome.taken) return;
+
+  const fresh = readHits(message);
+  reading.hits.splice(0, reading.hits.length, ...fresh.hits);
+  reading.missed.splice(0, reading.missed.length, ...fresh.missed);
+  reading.unresolved.splice(0, reading.unresolved.length, ...fresh.unresolved);
+  for (const key of Object.keys(reading.margin)) delete reading.margin[key];
+  Object.assign(reading.margin, fresh.margin);
 }
 
 /** The token that rolled a card, for naming the thing a reaction is being taken against. */

@@ -642,6 +642,25 @@ const COUNTERSPELL_ROW: Row = {
   ownership: "counterspell",
 };
 
+const BARBS_ROW: Row = {
+  id: "barbs",
+  label: "NOODLRHOOKS.Combat.Barbs.Name",
+  hint: "NOODLRHOOKS.Combat.Barbs.Hint",
+  state: "live",
+  setting: C.barbs,
+  kind: "boolean",
+  ownership: "barbs",
+};
+
+const READY_ROW: Row = {
+  id: "ready",
+  label: "NOODLRHOOKS.Combat.Ready.Name",
+  hint: "NOODLRHOOKS.Combat.Ready.Hint",
+  state: "live",
+  setting: C.ready,
+  kind: "boolean",
+};
+
 const ECONOMY_ROW: Row = {
   id: "economy",
   label: "NOODLRHOOKS.Combat.Economy.Name",
@@ -687,6 +706,8 @@ const PER_SIDE_STATE: Section = {
         ECONOMY_ROW,
         REACTION_PROMPT_ROW,
         COUNTERSPELL_ROW,
+        BARBS_ROW,
+        READY_ROW,
       ],
     },
     {
@@ -700,6 +721,8 @@ const PER_SIDE_STATE: Section = {
         ECONOMY_ROW,
         REACTION_PROMPT_ROW,
         COUNTERSPELL_ROW,
+        BARBS_ROW,
+        READY_ROW,
       ],
     },
   ],

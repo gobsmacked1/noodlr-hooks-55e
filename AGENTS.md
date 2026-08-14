@@ -2115,13 +2115,13 @@ button press.
 
 ### Refused explicitly, because a half-built offer is worse than none
 
-**Counterspell** and **Silvery Barbs** were both refused in v0.4.2. **Counterspell shipped in v0.4.3 — see the
-next section, and note that the reasoning recorded here for refusing it was half wrong.** Silvery Barbs is
-still refused: it needs a d20 somebody else already rolled to be taken back, and an offer that cannot be
-honoured spends the resource and changes nothing, which is the worst outcome available. It is the closer of the
-two now, which is the opposite of the 2026-08-04 assessment — it triggers after a d20 succeeds, we own both of
-those moments (`readHits` for an attack, `readSave` for a save) and already hold the damage back through a
-window. What it needs is a reroll substituted into a verdict we have read, not a hook that does not exist.
+**Counterspell** and **Silvery Barbs** were both refused in v0.4.2, and **both shipped within a day** — one in
+v0.4.3 and the other in v0.5.0. Kept here rather than deleted, because the pair is the clearest evidence in
+this file that a refusal note ages badly: each said truthfully that a primitive was missing, and in each case
+the primitive either already existed three files away (Counterspell's veto-and-replay) or arrived as a
+side-effect of unrelated work a release later (Barbs' held verdict). **A refusal has to name what it searched
+and what would change its mind**, or it reads as a permanent verdict on the feature. See the two sections
+below.
 
 ## Counterspell, and the note that talked itself out of a buildable feature (v0.4.3, 2026-08-14)
 
@@ -2299,6 +2299,155 @@ and already work; **do not build any of these without checking what it already s
 - **Corrected the same day:** this note originally said `noteRest()` needed no callers "while the system owns
  rests", which confused two different ledgers and left compiled per-day uses permanently spent. It is wired
  to `dnd5e.restCompleted` now — see the rest-scoped-use note under the wired-triggers section.
+
+## The Ready action, and the first rule whose trigger is written at the table (v0.5.0, 2026-08-14)
+
+`rules/ready.ts`, `rules/ready-events.ts`, `system/dnd5e-ready.ts`, `integration/watch.ts`. The user's own
+framing is the specification: every module that has attempted this offered a dropdown of half a dozen canned
+conditions, and **the reason nobody used it is that the interesting readied actions are exactly the ones the
+dropdown does not contain.** "If the Cutpurse flees, I Dash after them" is not a distance and not a status; it
+is a reading of what a movement meant. So the trigger is a SENTENCE, 140 characters, in the player's own words,
+and the module that reads sentences reads it.
+
+**This is the same trade `noodlrHooks.compile` makes, arriving from the other direction.** There the rules
+module knows the game and noodlr holds the key; here the rules module knows what happened and noodlr reads what
+it meant. `integration/watch.ts` is the contract: protocol 1, two verbs (`compile` a sentence into a
+descriptor, `judge` one event against it), the vocabulary on the request, `validateWatch()` as the gate.
+**Nothing in it knows D&D** — the events are Foundry's, the sides are dispositions — for the same reason
+`src/capability/` does not, and a `noodlr-hooks-pf2e` would reuse it unchanged.
+
+- **The economy is the half people get wrong, and getting it right fixed a bug that was already here.**
+ Readying costs the ACTION on your own turn at declaration; releasing costs the REACTION on somebody else's.
+ Two slots in two turns for one effect, which is also why a readied Attack is ONE attack — Extra Attack says
+ "when you take the Attack action on your turn", and a release is neither. Before this, a readied swing reached
+ the ledger claiming an Action and was checked against the tally from *the turn the creature spent readying*,
+ so the player was asked to confirm going over budget for something paid for a turn earlier. `clearNextUse()`
+ in `enforce.ts` waves the release through and the Reaction is billed in `ready.ts` instead.
+- **THE CLOCK IS ALLOWED TO FIRE IT, and this is the one place the prompt layer's rule bends.** That rule is
+ that a timeout may spend a renewing resource and never a depleting one, and a readied Fireball is a spell
+ slot. It fires anyway, because **the declaration IS the answer**: the player said in writing, on their own
+ turn, that this is what they wanted to happen. Defaulting the other way would cost them the Action *and* the
+ effect for being slow to click. Aborting is the deliberate act, and it loses the Action and nothing else —
+ the user's wording.
+- **Held spells diverge from RAW deliberately, in the generous direction.** RAW spends the slot at declaration
+ and wastes it if concentration breaks. Foundry cannot represent that: `activity.use()` resolves the whole
+ spell, so charging at declaration means placing Fireball's template a turn before it goes off, and there is
+ no supported way to spend a slot without resolving the activity that spends it. So the slot is spent on
+ release and a trigger that never comes costs the Action only. **Stated in the announcement**, because a
+ divergence nobody is told about is a rules argument waiting to happen.
+- **Expiry is the action ledger's trick and needs no cleanup.** The record carries the turn it belongs to and
+ `live()` reads a stamp from another turn as absent, so every client computes the same answer with no write and
+ no race. The sweep on `updateCombat` exists purely for legibility — a declaration that silently stops
+ existing is indistinguishable from one that never fired, and **the player will report the second when they saw
+ the first.** Out of combat there is no next turn to lose it at, so it stands until released, the scene
+ changes, or a fight starts: `combatStart` clears every stampless record, because carrying one into initiative
+ would hand its owner a free reaction before round one.
+- **Detection is on the primary GM; release is routed to the owner.** The same split as damage and saves:
+ notice centrally, act where the resources are. Without it every client independently decides a trigger fired
+ and every client asks the owner about it — N dialogs for one goblin's step.
+- **The event vocabulary is closed at the point where Foundry stops telling us things.** Each member of
+ `WATCH_EVENTS` is something a hook we already listen to reports, so a compiled trigger is expressed in terms
+ of things that will genuinely be noticed, and a sentence about something outside it compiles to no events and
+ is **reported as unwatchable at declaration time** rather than silently never firing.
+- **`narration` is the escape hatch and the reason the AI module earns its place.** "If I hear shouting ahead"
+ has no mechanical signal whatsoever; the only thing at the table that knows it happened is whoever described
+ it. So a GM's chat message — or an AI game master's narration — is an event, and it is the one event kind that
+ is ALWAYS judged, because there is no predicate that can read prose.
+- **Predicates first, judge second, human third, and that ordering is what makes it affordable.** A
+ `judge: false` descriptor costs nothing at all. Where a clause cannot be EVALUATED it passes rather than
+ fails, because a wrong fire is caught by the judge or the release prompt while a silent refusal is invisible.
+ `JUDGE_BUDGET` (12 per declaration) stops a badly compiled trigger billing somebody for a session; running out
+ falls through to asking the human, which is the same escalation an unanswered judge takes.
+- **A null verdict is NOT a no.** An unanswered judge means nobody was listening, and reading that as "the
+ trigger did not fire" costs the player their Action for nothing. It falls through to the release prompt.
+- **The readied action is chosen FROM THE SHEET, not from a picker.** The sheet is the only thing that knows
+ which of a creature's forty activities are prepared, in range and off cooldown; reproducing that judgement in
+ a dropdown is how a picker ends up offering a spell nobody has prepared. So the Ready button is intercepted
+ (`interceptReadyActivity`, the fifth member of the intercepted set — `test/economy.test.ts` asserts it) and
+ **whatever the player presses next is captured and cancelled** (`captureReadied`, called from the very top of
+ `police()`, before the rider and Incapacitated rules, because none of those are about to happen).
+- **A bonus action pressed during capture is cancelled and refused rather than let through.** The player is
+ picking, and letting it resolve for real would spend it for nothing.
+- **The tier gate is the user's own pseudocode**, `(INT + WIS) / 2 > READY_MENTAL_MIN` with the constant at 5.
+ Player characters are never gated. An unreadable sheet is ALLOWED, the same direction the planner errs in: a
+ missing number should not turn a lich into a beetle.
+- **The prose field is offered only when something is listening.** A field whose contents nothing can read is
+ worse than no field, because the player writes a careful trigger and gets a shrug. Same doctrine as greying
+ "Behavioral automation". With no listener the canned list is the whole feature and works.
+- **Player clients do not call the model.** `requestWatchCompile` relays through `askGm` when the caller is not
+ a GM (`registerWatchRelay`), and noodlr's own listener declines off the GM client — otherwise a player
+ pressing Ready spends the world's credit from their own browser. `watchAvailable()` still answers correctly
+ everywhere, because the hook is registered on every client.
+- **The planner does not choose to Ready.** Readying is offered to a GM driving an NPC by hand, gated by the
+ tier check; teaching the utility scorer to value a conditional future action is a separate problem and
+ nothing here depends on it.
+- Diagnostics: `api.surveyReady()`.
+
+## Silvery Barbs, and what changed to make the third answer yes (v0.5.0, 2026-08-14)
+
+`rules/barbs.ts`, `system/dnd5e-barbs.ts`, `system/dnd5e-reroll.ts`. Refused twice, and **both refusals named
+the same missing thing**: it needs a d20 we did not roll to be taken back after the fact, and an offer that
+cannot be honoured spends a slot and changes nothing. Neither half is missing any more, and **neither was
+built for this spell** — which is the argument for having built the boring infrastructure first.
+
+1. **The verdict is held.** `readHits` answers "did that connect" and `readSave` answers "did that save", and
+ both answers are now held open through a window while somebody is asked about a reaction. A reaction that
+ changes a verdict needs somewhere to stand between the roll and its consequences; the Shield window and the
+ legendary-resistance window are exactly that.
+2. **The die can be made worse honestly.** `dnd5e-reroll.ts` appends a second result and strikes out the loser,
+ which is **the shape dnd5e already draws for disadvantage** — so a reader recognises it without being taught
+ anything, and every downstream reading comes right for free. `D20Roll#isCritical` asks the DIE's total, which
+ sums its ACTIVE results, so discarding a 19 in favour of a 3 stops the roll being a critical with nothing
+ here saying so.
+
+- **Patched through `toJSON`, never on the live roll.** `Roll#total` is a cached `_total` recomputed only by
+ evaluation, and re-evaluating an evaluated roll is not a supported operation — it would either throw or reroll
+ every die in the formula including the ones nobody touched. `toJSON` carries `total` and `evaluated` and
+ `fromData` restores both. `active` is the only field that has to be exactly right; the rest is presentation.
+- **The loser is marked `discarded`, not deleted**, and anything already struck out stays struck out. A
+ struck-through 19 beside a live 3 says what happened; a bare 3 says a wizard rolled badly.
+- **Crit thresholds are read off the die's own options, not assumed to be 20 and 1.** A Champion crits on 19.
+ A non-numeric threshold is `null`, which is what `D20Die` reads as "this roll has no critical", and that must
+ stay distinguishable from "did not reach it".
+- **A failed message update is a logged line, not an abandoned reaction.** The arithmetic is still right and
+ the caller can still act on it; what is lost is the card telling the truth. The slot has already been spent by
+ then.
+- **`MAX_ASKED` is 1, tighter than Counterspell's 2.** Barbs fires on every hit and every made save, the
+ busiest pair of events in a fight, and unlike a counter-the-counterspell chain there is nothing a second ask
+ could win: the die has been rerolled and RAW a second Barbs on the same test does nothing.
+- **`victim` is for keying the guard and is NOT the creature the spell is aimed at.** That is `roller`, and
+ pointing Barbs at the victim is the natural mistake here — it would offer the reaction to the attacker's own
+ allies, who have no interest in spoiling their side's hit.
+- **Two of the three d20 tests, said out loud.** Attack rolls and saves are offered; ability checks are not,
+ because nothing here holds a check's verdict open — a check produces information a GM interprets, with no
+ pending consequence for a window to stand in front of. A player whose Barbs never fires on a Stealth check is
+ owed the reason.
+- **The reroll is automated; the Advantage half is not.** "One creature you can see gains Advantage on its next
+ attack roll, ability check, or saving throw" is a promise about a roll nobody has made, which is the same
+ thing that keeps the Help action unbuilt. Where the table's copy of the spell carries an Active Effect for it,
+ the ordinary activity pipeline applies it exactly as the sheet says.
+- **In combat only, and the reaction ledger is why**, exactly as with Counterspell. Outside a fight nothing
+ stops one creature spoiling every roll in a scene, and a rule that cannot count the resource it spends should
+ not pretend to.
+- **Two orderings, and both are rules interactions rather than preferences.** In the damage window Barbs is
+ offered before Shield, because Barbs attacks the die and Shield attacks the number: a spoiled roll may miss
+ everything, and asking for a slot to raise an AC against an attack that is about to vanish is a slot wasted.
+ In the save pass successes are spoiled before failures are resisted, because **the two sets are disjoint at
+ any instant but not across the pass** — a save spoiled by Barbs becomes a failure, and a legendary creature is
+ then entitled to buy it back. Asking about resistances first would deny it that silently, on exactly the
+ creatures where the interaction comes up.
+- **A bought success is not spoilable.** A legendary resistance says the creature succeeds full stop, so the
+ die is no longer what decided it and rerolling would spend a slot to change a number nobody reads.
+- **The verdict is RE-READ after a reroll, never inferred from the reroll's own arithmetic.** The card has been
+ rewritten, so `readHits`/`readSave` are the authority on what it now says — the same discipline the damage
+ layer already uses, and the thing that keeps one answer to "did that connect".
+- **Stands aside for Gambit's Premades, and only when midi is also active** (`gambitsOwnsBarbs`), because
+ Gambit's implementation is carried by midi and does nothing without it. Same shape and same reasoning as the
+ Counterspell stand-aside.
+- `dnd5e-spells.ts` holds `spendsSlot` and `slotAvailable`, and `rules/candidates.ts` holds `reactorsAgainst` —
+ both extracted from Counterspell rather than copied, because two implementations of "who could react to this"
+ is the divergence the v0.4.1 vision bug was about.
+- Diagnostics: `api.surveyBarbs()`.
 
 ## What the finished corpus caught (v0.4.0, 2026-08-13)
 

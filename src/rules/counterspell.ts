@@ -44,12 +44,13 @@ import {
   gambitsOwnsCounterspell,
   isCounterspell,
   type CounterableCast,
+  type CounterspellReady,
 } from "../system/dnd5e-counterspell";
 import { canResist } from "../system/dnd5e-legendary";
 import { considerResistance } from "./legendary";
-import { alive, canReact, offerReaction, offerable } from "./offer";
+import { offerReaction } from "./offer";
 import { hasReaction } from "./economy/ledger";
-import { observersWhoSee } from "./perception";
+import { combatantFor, reactorsAgainst, tokenOf, type Reactor } from "./candidates";
 
 /**
  * How many creatures are asked before the spell is let through.
@@ -144,23 +145,15 @@ export function holdForCounterspell(
 }
 
 /** One creature that could counter, and what it would counter with. */
-interface Candidate {
-  actor: any;
-  token: any;
-  dc: number;
-}
+type Candidate = Reactor<CounterspellReady>;
 
 /**
  * Who could counter this cast?
  *
- * Four requirements, each of which removes far more candidates than it looks like it should, which is what
- * keeps an ordinary cast from ever being delayed: opposed to the caster, in range, holding Counterspell with
- * a slot for it, and able to both react and see.
- *
- * ONLY CREATURES OPPOSED TO THE CASTER ARE ASKED, and that is a deliberate narrowing rather than the rule.
- * RAW a wizard may counter their own party's spell, and occasionally should. But offering the whole table a
- * dialog every time a friend casts something is the "long chain of approvals" the brief rules out, and the
- * cost of the narrowing is one rare play the sheet can still perform by hand.
+ * The seven questions — opposed side, alive, able to react, reaction unspent, somebody home to ask, in range,
+ * and able to SEE ("when you see a creature casting") — are `reactorsAgainst`, shared with Silvery Barbs. What
+ * is specific to this rule is the two lines below it: holding Counterspell with a slot for it, and not being
+ * Deafened when the cast has nothing to look at.
  */
 function counterspellers(
   casterToken: any,
@@ -168,52 +161,18 @@ function counterspellers(
   combat: any,
   cast: CounterableCast,
 ): Candidate[] {
-  const casterSide = Number(casterToken?.document?.disposition ?? casterToken?.disposition ?? 0);
-  const found: Candidate[] = [];
-  const tokens: any[] = [];
-
-  for (const combatant of combat?.combatants ?? []) {
-    const token: any = combatant?.token?.object ?? combatant?.token;
-    const actor: any = combatant?.actor;
-    if (!token || !actor) continue;
-    if (actor === casterActor) continue;
-
-    const side = Number(token?.document?.disposition ?? token?.disposition ?? 0);
-    if (side === casterSide) continue;
-
-    if (!alive(actor) || !canReact(actor)) continue;
-    if (!hasReaction(combatant)) continue;
-    if (!offerable(actor, "casting")) continue;
-
+  return reactorsAgainst({
+    subjectToken: casterToken,
+    subjectActor: casterActor,
+    combat,
+    trigger: "casting",
+    label: "counterspell",
+    max: MAX_ASKED,
+    ready: (actor) => counterspellReady(actor),
+    range: (ready) => ready.range,
     // A cast with nothing to see can only be heard, so a Deafened creature does not notice it.
-    if (cast.vocalOnly && deafened(token)) continue;
-
-    const ready = counterspellReady(actor);
-    if (!ready) continue;
-
-    if (!within(token, casterToken, ready.range)) continue;
-
-    tokens.push(token);
-    found.push({ actor, token, dc: ready.dc });
-  }
-
-  if (!found.length) return found;
-
-  // "When you SEE a creature casting". Asked with the same machinery that decides whether a fight starts,
-  // for the reason v0.4.1 records: two answers to "can X see Y" is a bug whichever of them is right.
-  let sees: Set<string>;
-  try {
-    sees = observersWhoSee(tokens, casterToken);
-  } catch (err) {
-    // Unreadable vision offers the counterspell rather than withholding it: the alternative is a caster
-    // silently immune to being countered, which nothing at the table would explain.
-    log(
-      "counterspell: could not work out who can see the caster, so all of them are offered:",
-      err,
-    );
-    return found.slice(0, MAX_ASKED);
-  }
-  return found.filter((c) => sees.has(String(c.token?.id ?? ""))).slice(0, MAX_ASKED);
+    also: (token) => !(cast.vocalOnly && deafened(token)),
+  });
 }
 
 /** Everything slow. Runs after the veto has already been returned. */
@@ -242,7 +201,7 @@ async function run(
 
     // The DC the far client actually read off its own Counterspell, which may differ from what we saw if
     // something changed in between. Ours is the fallback rather than the answer.
-    const dc = Number.isFinite(Number(answer.dc)) ? Number(answer.dc) : candidate.dc;
+    const dc = Number.isFinite(Number(answer.dc)) ? Number(answer.dc) : candidate.ready.dc;
     const countered = await contest(actor, casterToken, dc, cast);
     if (countered) {
       await announceOutcome(casterToken, cast, candidate, true);
@@ -421,29 +380,6 @@ function deafened(token: any): boolean {
   }
 }
 
-function tokenOf(actor: any): any {
-  const active = actor?.getActiveTokens?.(true, false)?.[0];
-  if (active) return active;
-  const doc = actor?.token;
-  return doc?.object ?? doc ?? null;
-}
-
-/** Straight-line separation in scene units, elevation included, as every measurement here does it. */
-function within(from: any, to: any, feet: number): boolean {
-  const a = from?.center ?? from?.object?.center;
-  const b = to?.center ?? to?.object?.center;
-  if (!a || !b) return true;
-  try {
-    const measured: any = (canvas as any)?.grid?.measurePath?.([a, b]);
-    if (measured?.distance !== undefined) return Number(measured.distance) <= feet;
-  } catch {
-    /* gridless and older grid shapes fall through to the pixel reading */
-  }
-  const scale = Number((canvas as any)?.dimensions?.distance ?? 5);
-  const size = Number((canvas as any)?.dimensions?.size ?? 100);
-  return (Math.hypot(b.x - a.x, b.y - a.y) / size) * scale <= feet;
-}
-
 /**
  * Should `rules/saves.ts` leave a Counterspell alone?
  *
@@ -472,11 +408,4 @@ export function surveyCounterspell(): unknown {
         }
       : "select a token",
   };
-}
-
-function combatantFor(combat: any, token: any): any {
-  const id = String(token?.id ?? token?.document?.id ?? "");
-  return (combat?.combatants ?? []).find?.(
-    (c: any) => String(c?.tokenId ?? c?.token?.id ?? "") === id,
-  );
 }

@@ -42,6 +42,7 @@ import { canResist } from "../system/dnd5e-legendary";
 import { applyRolledDamage, type DamageEntry } from "./damage";
 import { savesSkip } from "./counterspell";
 import { considerResistance } from "./legendary";
+import { considerBarbs } from "./barbs";
 import {
   activityOf,
   damageOnSave,
@@ -76,6 +77,8 @@ interface TargetState {
   saveMessage: any;
   /** Set once a resistance has been offered for this failure, so it is offered exactly once. */
   offered: boolean;
+  /** Set once Silvery Barbs has been offered against this success, for the same reason. */
+  barbed: boolean;
 }
 
 /** One use of a save activity, and everything still outstanding about it. */
@@ -223,6 +226,7 @@ async function onSave(message: any): Promise<void> {
     applied: false,
     saveMessage: null,
     offered: false,
+    barbed: false,
   };
   state.saveMessage = message;
   // A creature that rolls a save against this card IS a target, whatever the caster happened to have
@@ -299,6 +303,7 @@ function noteTargets(act: Activation, message: any): void {
       applied: false,
       saveMessage: null,
       offered: false,
+      barbed: false,
     });
   }
 }
@@ -313,11 +318,11 @@ function noteTargets(act: Activation, message: any): void {
 async function settle(act: Activation): Promise<void> {
   await rollMissing(act);
 
-  // Anybody still deciding whether to spend a legendary resistance gets to finish first. Same shape as the
-  // damage layer's reaction window and for the same reason: an answer that arrives after the damage has
-  // landed has cost a resource and changed nothing.
+  // Anybody still deciding whether to spend a resource gets to finish first. Same shape as the damage
+  // layer's reaction window and for the same reason: an answer that arrives after the damage has landed has
+  // cost somebody a resource and changed nothing.
   if (act.asking) await act.asking;
-  const asking = offerResistances(act).finally(() => {
+  const asking = spoilAndResist(act).finally(() => {
     if (act.asking === asking) act.asking = null;
   });
   act.asking = asking;
@@ -344,6 +349,59 @@ async function settle(act: Activation): Promise<void> {
   }
   if (!entries.length) return;
   await applyRolledDamage(act.damage.message, entries, act.damage.parts);
+}
+
+/**
+ * Successes first, failures second — and that order is a rules interaction rather than a preference.
+ *
+ * Silvery Barbs answers a made save and a legendary resistance answers a failed one, so the two sets are
+ * disjoint at any instant but NOT across the pass: a save spoiled by Barbs becomes a failure, and a
+ * legendary creature is then entitled to buy it back. Asking about resistances first would deny it that,
+ * silently, on exactly the creatures where the interaction is most likely to come up.
+ */
+async function spoilAndResist(act: Activation): Promise<void> {
+  await spoilSuccesses(act);
+  await offerResistances(act);
+}
+
+/**
+ * Offer Silvery Barbs against every save that has just been made.
+ *
+ * ONE PER SAVE, because each creature rolls its own d20 — unlike an attack, where three targets share one
+ * roll. An area spell that five goblins all save against is five separate successes and five separate
+ * questions, which is why the offer is capped at one candidate: five prompts is already a lot, and five
+ * prompts each offering two casters would be unusable.
+ *
+ * A BOUGHT SUCCESS IS NOT SPOILABLE. A legendary resistance says the creature succeeds, full stop; the die
+ * is no longer what decided it, so rerolling would spend a slot to change a number nobody is reading.
+ *
+ * `barbed` is set BEFORE the await, same as `offered`, so a re-entrant `settle` cannot raise a second dialog
+ * about one save.
+ */
+async function spoilSuccesses(act: Activation): Promise<void> {
+  for (const state of act.targets.values()) {
+    if (state.applied || state.barbed || state.success !== true) continue;
+    if (!state.saveMessage) continue;
+
+    const before = readSave(state.saveMessage);
+    if (before.forced) continue;
+    if (before.dc === null) continue;
+
+    state.barbed = true;
+    const outcome = await considerBarbs({
+      kind: "save",
+      message: state.saveMessage,
+      roller: state.doc,
+      against: before.dc,
+      source: act.source,
+    });
+    if (!outcome.taken) continue;
+
+    // Re-read rather than trust the reroll's own arithmetic, for the same reason the damage layer re-reads
+    // the attack: the card has been rewritten, so `readSave` is now the authority on what it says.
+    const after = readSave(state.saveMessage);
+    if (after.success === false) state.success = false;
+  }
 }
 
 /**
@@ -467,6 +525,8 @@ export function surveyDamageSaves(): unknown {
         saved: state.success,
         rolling: state.rolling,
         applied: state.applied,
+        barbsOffered: state.barbed,
+        resistanceOffered: state.offered,
         rolledBy: state.doc?.actor ? (rollerForActor(state.doc.actor) ?? "us") : "?",
       })),
     })),

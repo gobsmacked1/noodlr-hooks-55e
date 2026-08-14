@@ -22,11 +22,12 @@
 // dialog per goblin per departure is the "long chain of approvals" the brief rules out. The offer is for
 // the creatures nobody is playing for you.
 //
-// WHAT IS DELIBERATELY NOT OFFERED, revised in v0.4.3. Counterspell IS offered now, through the `casting`
-// trigger: `rules/counterspell.ts` holds the cast with a `preUseActivity` veto and resumes it if nobody
-// counters, which is the window the previous version of this note said did not exist. Silvery Barbs still is
-// not — it needs a d20 we did not roll to be rerolled after the fact, and an offer that cannot be resolved
-// honestly is worse than no offer, because it spends the resource and changes nothing.
+// WHAT IS DELIBERATELY NOT OFFERED — a list that is now empty of the two spells it used to name. Counterspell
+// arrived in v0.4.3 through the `casting` trigger, and Silvery Barbs in v0.4.4 through `success`; both of the
+// old refusals were about a window that did not exist yet, and both windows exist because the damage and save
+// layers hold their verdicts open for the Shield and legendary-resistance questions. What is still unoffered is
+// a reaction to an ABILITY CHECK, and that one is honest: nothing here holds a check's verdict open, because a
+// check produces information a GM reads rather than a consequence somebody applies.
 
 import { MODULE_ID, log } from "../constants";
 import { rollerForActor } from "../util/gm";
@@ -39,12 +40,13 @@ import { hasReaction, spend } from "./economy/ledger";
 import { isReactionPromptEnabled } from "../settings";
 import { acBoostOf, midiPromptsReactions } from "../system/dnd5e-reactions";
 import { counterspellReady, isCounterspell } from "../system/dnd5e-counterspell";
+import { isSilveryBarbs } from "../system/dnd5e-barbs";
 import { readHp } from "../core/tracker";
 
 const QUERY = "reaction";
 
 /** Why the creature is being asked. Each one filters the options and words the sentence differently. */
-export type ReactionTrigger = "opportunity" | "hurt" | "incoming" | "casting";
+export type ReactionTrigger = "opportunity" | "hurt" | "incoming" | "casting" | "success";
 
 export interface OfferRequest {
   actorUuid: string;
@@ -57,9 +59,16 @@ export interface OfferRequest {
   /**
    * For `incoming`: how much the attack roll beat the recorded AC by. An AC bonus is only worth offering
    * when it would actually turn the hit into a miss, and the margin is the only way to know that.
+   *
+   * For `success`: the same number, and it does NOT filter anything — a d20 can move by nineteen, so no
+   * margin makes a reroll pointless. It is shown, because "beat it by 1" and "beat it by 12" are the
+   * difference between a slot well spent and a slot thrown away, and only the person can weigh that.
    */
   margin?: number;
-  /** For `casting`: the spell being cast, so the sentence names what is worth interrupting. */
+  /**
+   * For `casting`: the spell being cast, so the sentence names what is worth interrupting.
+   * For `success`: what the roll was for, which serves the same purpose.
+   */
   spell?: string;
 }
 
@@ -95,10 +104,16 @@ export function registerReactionOffers(): void {
  */
 export function offerable(actor: any, trigger: ReactionTrigger = "opportunity"): boolean {
   if (!isReactionPromptEnabled(actor)) return false;
-  // Midi prompts for "I was hit" and "I was damaged" at its stock settings, and never for a departure or a
-  // cast. Two dialogs for one hit is the double-ask this whole layer exists to avoid, so those halves are
-  // its; the two triggers it has never dispatched stay ours.
-  if (trigger !== "opportunity" && trigger !== "casting" && midiPromptsReactions()) return false;
+  // Midi prompts for "I was hit" and "I was damaged" at its stock settings, and for nothing else — not a
+  // departure, not a cast, not somebody else's good roll. Two dialogs for one hit is the double-ask this
+  // whole layer exists to avoid, so those two halves are its; the triggers it never dispatches stay ours.
+  if (
+    trigger !== "opportunity" &&
+    trigger !== "casting" &&
+    trigger !== "success" &&
+    midiPromptsReactions()
+  )
+    return false;
   const owner = rollerForActor(actor);
   if (owner) return true;
   // Nobody owns it, so it is the GM's to answer — provided one is connected to answer with.
@@ -208,6 +223,12 @@ function optionsFor(actor: any, request: OfferRequest, target: any): CreatureAct
     return all.filter((action) => isCounterspell(action.item)).slice(0, MAX_OPTIONS);
   }
 
+  if (request.trigger === "success") {
+    // One spell spoils a roll, and offering a swing beside it would invite spending a reaction on something
+    // that does not touch the die. Range is the spell's own 60 feet, checked by the asking client.
+    return all.filter((action) => isSilveryBarbs(action.item)).slice(0, MAX_OPTIONS);
+  }
+
   if (request.trigger === "incoming") {
     // Only things that would change the answer. A +5 offered against an attack that beat the AC by nine is
     // a spell slot spent to be hit anyway, and offering it invites exactly that mistake.
@@ -268,6 +289,10 @@ export function timeoutChoice(
   // reported it wrongly would have a clock spending somebody's slot — which is the one thing the whole
   // default rule exists to prevent.
   if (trigger === "casting") return null;
+  // Silvery Barbs is a slot spent on a gamble — the fresh die may be higher and the success stands anyway —
+  // which makes it the least defensible thing a clock could ever spend for somebody. Same explicit refusal as
+  // Counterspell's, and for the same reason: not left to `depleting`, which is read off a sheet.
+  if (trigger === "success") return null;
   return options.find((option) => !option.depleting) ?? null;
 }
 
@@ -275,6 +300,12 @@ function hintFor(option: CreatureAction, request: OfferRequest): string {
   const boost = acBoostOf(option.item, null);
   if (boost && request.trigger === "incoming") {
     return game.i18n.format("NOODLRHOOKS.Reaction.Offer.HintAc", { bonus: String(boost.bonus) });
+  }
+  if (request.trigger === "success" && Number.isFinite(Number(request.margin))) {
+    // The number that decides whether this is worth a slot: a reroll has to find this much to spoil the roll.
+    return game.i18n.format("NOODLRHOOKS.Reaction.Offer.HintMargin", {
+      margin: String(Number(request.margin)),
+    });
   }
   return option.depleting
     ? game.i18n.localize("NOODLRHOOKS.Reaction.Offer.HintCosts")
@@ -289,7 +320,9 @@ function sentence(request: OfferRequest, token: any): string {
         ? "NOODLRHOOKS.Reaction.Offer.Incoming"
         : request.trigger === "casting"
           ? "NOODLRHOOKS.Reaction.Offer.Casting"
-          : "NOODLRHOOKS.Reaction.Offer.Hurt";
+          : request.trigger === "success"
+            ? "NOODLRHOOKS.Reaction.Offer.Success"
+            : "NOODLRHOOKS.Reaction.Offer.Hurt";
   return game.i18n.format(key, {
     name: String(token?.name ?? ""),
     target: request.targetName,

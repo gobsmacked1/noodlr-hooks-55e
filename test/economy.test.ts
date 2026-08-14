@@ -321,10 +321,11 @@ test("the action inventory answers what pressing a button does", () => {
     null,
   );
 
-  // Every one of the thirteen states how it is handled, and the four that resolve themselves are the
-  // four `enforce.ts` hands over. If a fifth appears here it needs a hand-over too.
+  // Every one of the thirteen states how it is handled, and the ones that resolve themselves are exactly
+  // the ones `enforce.ts` hands over. If another appears here it needs a hand-over too, or the button will
+  // spend an Action and do nothing — which is how Hide shipped broken for two months.
   const intercepted = PHB_ACTIONS.filter((a) => a.handling === "intercepted").map((a) => a.spec.id);
-  assert.deepEqual(intercepted.sort(), ["dash", "hide", "influence", "stabilize"]);
+  assert.deepEqual(intercepted.sort(), ["dash", "hide", "influence", "ready", "stabilize"]);
 });
 
 /* -------------------------------------------- */

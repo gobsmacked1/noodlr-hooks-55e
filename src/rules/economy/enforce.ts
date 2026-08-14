@@ -40,10 +40,27 @@ import { interceptHideActivity } from "../hide";
 import { interceptStabilizeActivity } from "../dying";
 import { interceptInfluenceActivity } from "../influence";
 import { holdForCounterspell, useReplay } from "../counterspell";
+import { captureReadied, interceptReadyActivity } from "../ready";
 import { check, lightSwings, slotFor, spend, takeDash, takeLightSwing, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
 const cleared = new Set<string>();
+
+/**
+ * Let one use through untouched.
+ *
+ * The Ready action's release is the caller: the Reaction was billed when the trigger fired, and the held
+ * activity still claims whatever its sheet says it claims — usually an Action, which on somebody else's
+ * turn would be checked against the tally from the turn the creature spent readying and refused as over
+ * budget. Same `cleared` bookkeeping as the over-budget approval and Counterspell's replay, exposed
+ * rather than duplicated for the reason stated on `replayCleared`.
+ */
+export function clearNextUse(activity: any): void {
+  const key = String(activity?.uuid ?? "");
+  if (!key) return;
+  cleared.add(key);
+  setTimeout(() => cleared.delete(key), 10000);
+}
 
 /** Depth counter rather than a boolean: reactions can fire while an automated turn is mid-flight. */
 let automating = 0;
@@ -130,6 +147,12 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   const actor = activity?.actor;
   if (!actor) return true;
 
+  // A Ready declaration is waiting for its second half: the player has been asked what they are holding,
+  // and the next thing they press from the sheet is the answer rather than a use. Checked before every
+  // other rule here, including the rider and Incapacitated ones, because none of them are about to
+  // happen — the activity is being NAMED, not used.
+  if (captureReadied(activity)) return false;
+
   // Extra damage on a hit that has already happened is not a second action. Checked before everything
   // else, including the Incapacitated refusal: a rider is never used on its own, so if the attack it
   // rides on was legal then so is it, and there is nothing here worth having an opinion about.
@@ -178,6 +201,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   if (interceptHideActivity(activity)) return false;
   if (interceptStabilizeActivity(activity)) return false;
   if (interceptInfluenceActivity(activity)) return false;
+  if (interceptReadyActivity(activity)) return false;
 
   const slot = slotFor(activity?.activation?.type);
   if (!slot) return true;

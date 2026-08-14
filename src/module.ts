@@ -41,6 +41,10 @@ import { registerInvisibilityHooks } from "./rules/invisibility";
 import { registerReactionHooks } from "./rules/reactions";
 import { registerReactionOffers, surveyOffers } from "./rules/offer";
 import { surveyCounterspell } from "./rules/counterspell";
+import { surveyBarbs } from "./rules/barbs";
+import { registerReady, registerReadyExpiry, surveyReady } from "./rules/ready";
+import { registerReadyWatch } from "./rules/ready-events";
+import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
@@ -114,6 +118,8 @@ export interface NoodlrHooksApi {
   surveyDamageSaves(): unknown;
   surveyOffers(): unknown;
   surveyCounterspell(): unknown;
+  surveyBarbs(): unknown;
+  surveyReady(): unknown;
   surveyLegendary(): unknown;
   surveyConditions(): unknown;
   surveyDying(): unknown;
@@ -222,6 +228,10 @@ const api: NoodlrHooksApi = {
   /** Which reactions the selected creature would be offered, who gets asked, and what costs something. */
   surveyOffers: () => surveyOffers(),
   surveyCounterspell: () => surveyCounterspell(),
+  /** Who could spoil the selected creature's next good roll, and whether anything is holding one open. */
+  surveyBarbs: () => surveyBarbs(),
+  /** What the selected creature is holding, for what trigger, and whether a compiler is listening. */
+  surveyReady: () => surveyReady(),
   /** What the selected creature has left to resist with, and how much damage would be worth asking about. */
   surveyLegendary: () => surveyLegendary(),
   /** What condition combat math would apply for the controlled token against its current target. */
@@ -356,6 +366,12 @@ Hooks.once("ready", () => {
   // as Influence: the GM detects the trigger, and the client that owns the sheet draws the prompt, spends
   // the reaction and rolls it.
   registerReactionOffers();
+  // A readied action is released by whoever owns the creature, for the same reason. Registered on every
+  // client because the addressee is decided by who is playing, not by who noticed the trigger.
+  registerReady();
+  // And the compiler is asked from wherever Ready was pressed, which for a character is a player's
+  // client. Routed to the GM so a player's browser never spends the world's credit.
+  registerWatchRelay();
   // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is
   // only computable from `updateActor` (which fires everywhere) while the damage TYPES arrive on the
   // applying client. A GM-only ledger would be blind to damage a player applied.
@@ -388,6 +404,10 @@ Hooks.once("ready", () => {
     registerDamageApplication();
     // A saving throw joined back to the spell that asked for it, so half of 24 is nobody's arithmetic.
     registerSaveResolution();
+    // Noticing that somebody's readied trigger happened. One client watches, or every client asks the
+    // same player about the same goblin's step.
+    registerReadyWatch();
+    registerReadyExpiry();
     // Watches whether the party is still swinging, which is what mercy hangs on.
     registerEncounterTracking();
     // A Capabilities button on every creature sheet. GM-only: it is the veto over what a model read,

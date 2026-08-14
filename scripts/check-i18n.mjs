@@ -56,6 +56,20 @@ const families = {
   ],
   // The same, for the save layer.
   "NOODLRHOOKS.Combat.AutoSaves.Why": ["NoActivation"],
+  // Why a readied action woke up. Built from a variable in ready-events.ts, and shown to the player in
+  // the release prompt — a missing one reads as the trigger having fired for no reason.
+  "NOODLRHOOKS.Ready.Why": [
+    "Appeared",
+    "Attacked",
+    "Cast",
+    "Condition",
+    "DoorOpen",
+    "DoorShut",
+    "Dropped",
+    "Hurt",
+    "Moved",
+    "TurnEnded",
+  ],
 };
 for (const [prefix, members] of Object.entries(families))
   for (const member of members) used.set(`${prefix}.${member}`, `${prefix}.* (runtime)`);

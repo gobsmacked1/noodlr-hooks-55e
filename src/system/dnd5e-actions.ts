@@ -203,8 +203,8 @@ export const PHB_ACTIONS: readonly PhbAction[] = [
   },
   {
     spec: READY_ACTION,
-    handling: "unbuilt",
-    note: "a trigger written in prose and a reaction spent later; the reaction is charged as an Action",
+    handling: "intercepted",
+    note: "the trigger is compiled from the player's own sentence; rules/ready.ts bills the Action now and the Reaction on release",
   },
   {
     spec: SEARCH_ACTION,

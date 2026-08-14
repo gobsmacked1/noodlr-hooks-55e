@@ -162,6 +162,8 @@ export function registerCombatSettings(): void {
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
   split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.counterspell, "Counterspell", Boolean, { npc: true, pc: true });
+  split(COMBAT_SETTINGS.ready, "Ready", Boolean, { npc: true, pc: true });
+  split(COMBAT_SETTINGS.barbs, "Barbs", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.legendaryResistance, "LegendaryResistance", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
@@ -496,6 +498,32 @@ export function isReactionPromptEnabled(subject: unknown): boolean {
  */
 export function isCounterspellEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.counterspell, subject);
+}
+
+/**
+ * Is the Ready action live for this creature?
+ *
+ * Split by the readier, which is the creature the rule is about. Off means the sheet's Ready item goes
+ * back to what it does everywhere else — spending an Action to post a card that changes nothing — so the
+ * default is on for both sides.
+ */
+export function isReadyEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.ready, subject);
+}
+
+/**
+ * Is Silvery Barbs live against this creature's successes?
+ *
+ * The subject is the creature that ROLLED WELL, which is the same choice Counterspell's setting makes and for
+ * the same reason: what the setting costs is a pause between a success and its consequences, so the column
+ * that governs it is the one whose rolls might be held up. A GM who finds the pause intrusive when the party
+ * hits can switch the PC side off and leave their monsters spoilable.
+ *
+ * Both start on, and the spell not being in any compendium is not a reason to ship it off: a table that does
+ * not have the spell will never see a prompt, because nobody will be holding it.
+ */
+export function isBarbsEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.barbs, subject);
 }
 
 /**
