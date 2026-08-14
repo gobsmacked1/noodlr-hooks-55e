@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1
+
+**Monsters lie in wait.** The Ready action shipped last release for the party and for a GM driving a
+creature by hand; nothing chose it on its own. A monster clever enough to ready one — the same
+intelligence gate as before, so beasts and oozes are not asked — will now sometimes hold an attack for
+something to happen instead of spending its turn walking towards you. An archer with nobody in range is
+the case it gets right most often: waiting costs it nothing and buys a shot the moment you come round the
+corner, before you have acted. A creature with only a blade holds a corridor now and then and closes the
+rest of the time, which is roughly how an ambusher plays.
+
+What it is waiting for is picked from the same short list of common triggers the party sees, paired with
+an attack that can actually answer it: something in reach for a melee weapon, something arriving at a
+distance for a bow or a spell. **It never holds anything it cannot get back** — no breath weapons, no
+limited-use abilities, no spell slots — because the release prompt runs on a clock and a dragon should not
+spend its breath on the first goblin through the door. The declaration is whispered to you rather than
+announced, so what the creature is waiting for stays yours to know; the party sees only that it is
+waiting.
+
 ## 0.5.0
 
 **The Ready action, with a trigger you write yourself.** Everybody knows this rule and almost nobody uses

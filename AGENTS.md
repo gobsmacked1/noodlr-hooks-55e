@@ -2378,10 +2378,51 @@ descriptor, `judge` one event against it), the vocabulary on the request, `valid
  a GM (`registerWatchRelay`), and noodlr's own listener declines off the GM client — otherwise a player
  pressing Ready spends the world's credit from their own browser. `watchAvailable()` still answers correctly
  everywhere, because the hook is registered on every client.
-- **The planner does not choose to Ready.** Readying is offered to a GM driving an NPC by hand, gated by the
- tier check; teaching the utility scorer to value a conditional future action is a separate problem and
- nothing here depends on it.
 - Diagnostics: `api.surveyReady()`.
+
+### The planner chooses it too, at random, and random is only safe because of the pairing rule (v0.5.1)
+
+The note here used to say the planner does not Ready and that teaching the utility scorer to value a
+conditional future action was a separate problem. Half right: **scoring the CONDITION is the hard problem
+and scoring the SHAPE is not.** "There is nothing in range and I have a bow" is a board fact the planner
+already computes for `advance`, and it is the case where waiting is strictly better than walking — the turn
+ends where it started and buys a shot as the enemy arrives, before the enemy has acted. So the strategic
+judgement was never needed for the common case, and the user's own framing was the way in: pick at random
+and let the pairing rule keep it sane. `src/tactics/ready-plan.ts`.
+
+- **THE PAIRING RULE IS THE WHOLE THING.** A random choice reads as a bug the moment a scimitar is held for
+ "an enemy comes into view", because the trigger fires ninety feet away and the held action cannot answer
+ it. Melee waits for `reach`; ranged waits for `appears`, `near` or `casts`. Every workable pairing is
+ built and **one** draw is taken from the lot, rather than drawing an action and then a trigger — two draws
+ make the outcome depend on the order the sheet happens to be in. `test/ready.test.ts` asserts that every
+ id `triggersFor` returns is a real canned trigger and that its `inReach` matches the weapon.
+- **`leaves` is deliberately in neither list.** The opportunity-attack layer already answers a departure for
+ free, so readying for one spends an Action to buy a reaction the creature had anyway.
+- **`depleting` is excluded, and that is a rule rather than caution.** The release prompt fires on a
+ six-second clock, so a dragon that readied its breath weapon spends it on the first goblin through the
+ door. It is `util/prompt.ts`'s rule from the other end — a clock may spend a renewing resource and never a
+ depleting one — and the asymmetry with a player is the point: a player readying a slot said so in writing,
+ and a random choice has said nothing.
+- **Its own random stream (`turnRandom(id, "ready")`).** Sharing the tactics stream would mean switching
+ readying off shifts every subsequent number and silently changes what creatures *do*. Same reason banter
+ has one.
+- Scores, and each is a claim about the board rather than a tuning knob: **1.15** with nothing in range and
+ something to shoot with (above `advance`); **0.7** with nothing in reach and only a blade (below
+ `advance`, so it happens sometimes and reads as an ambusher when it does); **0.55** with a target already
+ in reach, and only at `holdResources` (tier 7), whose own description is holding an action for a predicted
+ opening. At tier 7's sharpness that is a couple of per cent.
+- **`declareReadied()` is the entry point rather than the planner writing the flag**, because a declaration
+ is a payment plus a write plus an announcement and a second copy of that sequence would eventually
+ disagree about who is billed. It re-checks the gate and the budget rather than trusting the caller, for the
+ same reason `offer.ts` re-resolves everything on arrival: by the time the turn executes the creature may
+ have spent its Action elsewhere.
+- **The declaration is whispered and the public line names nothing.** What a creature is waiting for is
+ exactly what the party is meant to discover by walking into it. `commit`'s `Announce` parameter carries
+ that (`public` | `gm` | `none`), and the expiry sweep whispers too for anything not player-owned — a
+ monster's readied action coming to nothing is still GM information.
+- **`execute.ts` reports no `used` for this plan**, deliberately: nothing resolves now, and reporting a
+ swing would put a hit in the log that never happened. `MOVING_PLANS` excludes it, so the
+ did-not-move check cannot flag a turn that was never meant to move.
 
 ## Silvery Barbs, and what changed to make the third answer yes (v0.5.0, 2026-08-14)
 

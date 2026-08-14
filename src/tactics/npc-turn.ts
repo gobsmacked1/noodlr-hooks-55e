@@ -87,6 +87,11 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} ${travel.close} ${o.spot?.travel ?? 0} ${units} ${o.spot?.bearing ?? "clear"} to get out of ${o.reasons[0]?.replace(/^standing in /, "") ?? "danger"}.`;
     case "call":
       return `${me} calls out for help.`;
+    // Deliberately does not name the trigger. What a creature is waiting for is exactly what the party is
+    // meant to discover by walking into it, so the public line says only that it is waiting and the
+    // declaration itself is whispered to GMs.
+    case "ready":
+      return `${me} holds ${o.itemName ?? "its ground"} and waits.`;
     default:
       return `${me} hesitates.`;
   }

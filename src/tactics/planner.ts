@@ -26,6 +26,8 @@ import { findConcealment, type Spot } from "../core/positioning";
 import { findWayOut, hazardsUnder } from "../core/hazards";
 import { turnRandom } from "../core/random";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
+import { readyOptions } from "./ready-plan";
+import type { WatchDescriptor } from "../integration/watch";
 
 /** Below this fraction of maximum hit points a creature considers itself in trouble. */
 const BLOODIED = 0.5;
@@ -45,7 +47,8 @@ export type PlanKind =
   | "help"
   | "surrender"
   | "mercy"
-  | "escape";
+  | "escape"
+  | "ready";
 
 export interface PlanOption {
   kind: PlanKind;
@@ -68,6 +71,12 @@ export interface PlanOption {
   spot?: Spot;
   /** Whose eyes the spot was chosen against. */
   observer?: string;
+  /**
+   * For `ready`: the trigger being held for, already compiled. Carried on the option rather than looked
+   * up again at execution time because the choice was random — re-drawing it would announce one trigger
+   * and store another.
+   */
+  ready?: { prose: string; watch: WatchDescriptor };
   score: number;
   /** Why this scored what it did — surfaced to the GM, and the reason the tuning is debuggable. */
   reasons: string[];
@@ -647,11 +656,15 @@ export function planTurn(combatant: any): TurnPlan | null {
   const threat = (enemy: BoardActor) => threatOf(enemy, P, threatCache);
 
   const rand = turnRandom(String(combatant?.id ?? ""), "tactics");
+  // Its own stream, so switching readying off cannot shift every other number the planner draws — the
+  // same rule banter follows, and for the same reason (see `core/random.ts`).
+  const readyRand = turnRandom(String(combatant?.id ?? ""), "ready");
 
   const offensive = attackOptions(board, kit, profile, threat);
   const options = [
     ...offensive,
     ...advanceOptions(board, kit, offensive.length > 0),
+    ...readyOptions(board, kit, profile, offensive.length > 0, readyRand),
     ...healingOptions(board, kit, profile),
     ...controlOptions(board, kit, profile),
     ...kiteOptions(board, kit, profile, threat),

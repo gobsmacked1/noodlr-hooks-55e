@@ -394,21 +394,77 @@ async function confirmSummary(summary: string): Promise<boolean> {
   }
 }
 
-/** Charge the Action, store the declaration, and tell the table. */
-async function commit(actor: any, record: ReadyRecord): Promise<void> {
+/**
+ * Who is told about a declaration.
+ *
+ * A player's readied action is public: the table watched them announce it, and the trigger is theirs to
+ * share. **A monster's is not.** "The archer is waiting for somebody to step into the doorway" is exactly
+ * the sort of thing the party is supposed to find out by stepping into the doorway, so an NPC declaration
+ * is whispered to GMs and the public card says only that the creature holds its ground — the same split
+ * the planner already makes between its announcement and its GM-only reasoning.
+ */
+type Announce = "public" | "gm" | "none";
+
+/** Charge the Action, store the declaration, and tell whoever is entitled to know. */
+async function commit(
+  actor: any,
+  record: ReadyRecord,
+  announce: Announce = "public",
+): Promise<void> {
   payBill(turnBill(actor, "action"));
   await write(actor, record);
 
-  const note = record.spell && record.concentration ? "NOODLRHOOKS.Ready.SpellNote" : "";
-  await post(
-    actor,
-    game.i18n.format("NOODLRHOOKS.Ready.Declared", {
-      name: String(actor?.name ?? ""),
-      action: record.label,
-      trigger: record.prose,
-    }) + (note ? ` <em>${game.i18n.localize(note)}</em>` : ""),
-  );
+  if (announce !== "none") {
+    const note = record.spell && record.concentration ? "NOODLRHOOKS.Ready.SpellNote" : "";
+    await post(
+      actor,
+      game.i18n.format("NOODLRHOOKS.Ready.Declared", {
+        name: String(actor?.name ?? ""),
+        action: record.label,
+        trigger: record.prose,
+      }) + (note ? ` <em>${game.i18n.localize(note)}</em>` : ""),
+      announce === "gm",
+    );
+  }
   log(`ready: ${actor?.name} is holding ${record.label} for "${record.prose}"`);
+}
+
+/**
+ * Declare a readied action without going through the dialogs. True when it was stored.
+ *
+ * The entry point the planner uses, and the reason it exists rather than the planner reaching in: a
+ * declaration is a payment plus a write plus an announcement, and the alternative is a second copy of that
+ * sequence which will eventually disagree with this one about who is billed and when.
+ *
+ * It re-checks the gate and the budget rather than trusting the caller, for the same reason `offer.ts`
+ * re-resolves everything on arrival: the planner's view of the board is a moment old by the time the turn
+ * executes, and by then the creature may have spent its Action on something else.
+ */
+export async function declareReadied(
+  actor: any,
+  trigger: { prose: string; watch: WatchDescriptor },
+  action: { item: any; activity: any } | null,
+  options: { announce?: Announce } = {},
+): Promise<boolean> {
+  if (!actor || !isReadyEnabled(actor) || !allowedToReady(actor)) return false;
+  if (!affordable(turnBill(actor, "action"))) return false;
+
+  const record: ReadyRecord = {
+    prose: trigger.prose,
+    watch: trigger.watch,
+    itemId: action ? String(action.item?.id ?? "") || null : null,
+    activityId: action ? String(action.activity?.id ?? "") || null : null,
+    label: action
+      ? String(action.item?.name ?? action.activity?.name ?? "")
+      : game.i18n.localize("NOODLRHOOKS.Ready.Move"),
+    move: !action,
+    spell: action ? isSpellItem(action.item) : false,
+    concentration: action ? requiresConcentration(action.item, action.activity) : false,
+    stamp: stampNow(),
+    judges: trigger.watch.judge ? JUDGE_BUDGET : 0,
+  };
+  await commit(actor, record, options.announce ?? "public");
+  return true;
 }
 
 /**
@@ -621,6 +677,9 @@ export function registerReadyExpiry(): void {
           name: String(actor?.name ?? ""),
           action: stored.label,
         }),
+        // Whispered for a monster, for the reason `Announce` gives: what a creature was waiting for is
+        // GM information, and it stays so when the waiting comes to nothing.
+        !actor?.hasPlayerOwner,
       );
     }
   };
@@ -649,13 +708,17 @@ export async function spendJudge(actor: any): Promise<boolean> {
   return true;
 }
 
-async function post(actor: any, html: string): Promise<void> {
+async function post(actor: any, html: string, gmOnly = false): Promise<void> {
   const ChatMessage = (globalThis as any).ChatMessage;
   try {
-    await ChatMessage.create({
+    const data: any = {
       content: `<p>${html}</p>`,
       speaker: actor ? speakerFor(actor, String(actor?.name ?? "")) : narrator(),
-    });
+    };
+    if (gmOnly) {
+      data.whisper = ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id);
+    }
+    await ChatMessage.create(data);
   } catch (err) {
     log("ready: could not post to chat:", err);
   }

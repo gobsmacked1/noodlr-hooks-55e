@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import { validateWatch, WATCH_EVENTS } from "../src/integration/watch";
+import type { CreatureAction } from "../src/tactics/actions";
+import { holdable, triggersFor } from "../src/tactics/ready-plan";
 import {
   cannedTriggers,
   mentalScores,
@@ -9,7 +11,7 @@ import {
   requiresConcentration,
 } from "../src/system/dnd5e-ready";
 
-// THREE THINGS ARE PINNED, and they are the three that fail SILENTLY.
+// FOUR THINGS ARE PINNED, and they are the ones that fail SILENTLY.
 //
 //   1. THE VALIDATOR, because the thing on the other end of `noodlrHooks.watch` is a language model at one
 //      remove. An invented event name that got through would compile to a trigger nothing ever fires, and
@@ -22,6 +24,9 @@ import {
 //   3. THE CANNED TRIGGERS, which are the whole feature on a table with no AI module. Every one has to be
 //      `judge: false` or the fallback path costs model calls it cannot make, and every one has to name an
 //      event from the closed list or it is a picker entry that does nothing.
+//   4. WHAT A MONSTER MAY HOLD AND FOR WHAT. The NPC choice is random, so the only thing standing between
+//      it and nonsense is the pairing rule: a melee weapon waits for something to arrive in reach, a bow
+//      waits at a distance, and nothing waits on a resource a six-second clock could burn.
 //
 // The expiry arithmetic is `live()`, which is deliberately not exported: it reads `game.combats` and the
 // record's stamp, and a test of it would be a test of a mock tracker. What makes it safe is the same trick
@@ -184,4 +189,63 @@ test("the creature's own reach is what 'backs out of reach' means", () => {
   const kobold = cannedTriggers(5).find((t) => t.id === "leaves");
   assert.equal(giant?.descriptor.where?.beyondSelf, 15);
   assert.equal(kobold?.descriptor.where?.beyondSelf, 5);
+});
+
+/* -------------------------------------------- */
+/*  What a monster is allowed to hold, and for what */
+/* -------------------------------------------- */
+
+const action = (over: Partial<CreatureAction> = {}): CreatureAction =>
+  ({
+    item: {},
+    name: "Scimitar",
+    kind: "attack",
+    economy: "action",
+    ranged: false,
+    melee: true,
+    range: 5,
+    available: true,
+    depleting: false,
+    ...over,
+  }) as CreatureAction;
+
+test("a monster never holds a resource it cannot get back", () => {
+  // The release prompt fires on a six-second clock, so a readied breath weapon is spent on the first
+  // goblin through the door. Same rule `util/prompt.ts` states from the other end — a clock may spend a
+  // renewing resource and never a depleting one. A player is exempt because they said so in writing; a
+  // random choice has said nothing.
+  assert.equal(holdable(action()), true);
+  assert.equal(holdable(action({ depleting: true })), false);
+});
+
+test("only an available Action-costed attack or control effect is held", () => {
+  assert.equal(holdable(action({ economy: "bonus" })), false);
+  assert.equal(holdable(action({ available: false })), false);
+  assert.equal(holdable(action({ kind: "utility" })), false);
+  assert.equal(holdable(action({ kind: "heal" })), false);
+  assert.equal(holdable(action({ kind: "control" })), true);
+});
+
+test("the trigger a monster waits for is one its held action can answer", () => {
+  // The whole of what stops "random" reading as "wrong": a scimitar waiting for "an enemy comes into
+  // view" is holding an action it cannot use at the moment the trigger fires.
+  const byId = new Map(cannedTriggers(5).map((t) => [t.id, t]));
+  for (const ranged of [true, false]) {
+    const ids = triggersFor(ranged);
+    assert.ok(ids.length, "there must be something to draw from");
+    for (const id of ids) {
+      const trigger = byId.get(id);
+      assert.ok(trigger, `${id} is not a canned trigger, so nothing would ever pair with it`);
+      const reach = trigger.descriptor.where?.inReach === true;
+      assert.equal(
+        reach,
+        !ranged,
+        `${id} fires ${reach ? "in reach" : "at a distance"}, which a ${ranged ? "bow" : "blade"} cannot use`,
+      );
+    }
+  }
+  // `leaves` is deliberately absent from both: the opportunity-attack layer already answers a departure
+  // for free, so readying for one spends an Action to buy a reaction the creature had anyway.
+  assert.ok(!triggersFor(true).includes("leaves"));
+  assert.ok(!triggersFor(false).includes("leaves"));
 });

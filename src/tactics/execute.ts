@@ -18,6 +18,7 @@ import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward } from "../core/movement";
 import { duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
+import { declareReadied } from "../rules/ready";
 import type { PlanOption, TurnPlan } from "./planner";
 
 export interface Performed {
@@ -269,6 +270,21 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
 
       case "flee":
         result.moved = await moveOffField(selfToken, speedOf(plan));
+        break;
+
+      // Readying is the one plan that deliberately resolves nothing NOW. The Action is charged and the
+      // declaration stored; the effect happens later, on somebody else's turn, if the trigger comes. So
+      // there is no `used` to report — reporting one would put a swing in the log that never happened.
+      case "ready":
+        if (option.ready) {
+          const held = await declareReadied(
+            plan.board.self.actor,
+            option.ready,
+            { item: option.item, activity: option.activity },
+            { announce: "gm" },
+          );
+          if (!held) result.problem = "the readied action could not be stored";
+        }
         break;
 
       // Calling out, surrendering and showing mercy are social, not mechanical. The encounter layer
