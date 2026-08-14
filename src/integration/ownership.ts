@@ -439,6 +439,60 @@ export function advisories(): Advisory[] {
     });
   }
 
+  out.push(...sceneAdvisories());
+
+  return out;
+}
+
+/**
+ * The viewed scene's own vision settings, which no module can compensate for.
+ *
+ * Here because hiding, the perception sweep, surprise and the unseen-attacker rules are all built on
+ * "can this creature see that one", and a scene with Token Vision switched off answers yes to every
+ * pairing on the map — so all four go quietly useless together while their checkboxes still read ON.
+ * It is also the likeliest cause of the report that produced this: a player who can see every hostile
+ * token on the scene, with no fog, is describing this checkbox rather than a missing feature. Nothing in
+ * this module writes either field; both are per-scene and live in the scene's Vision tab.
+ */
+function sceneAdvisories(): Advisory[] {
+  const out: Advisory[] = [];
+  const scene: any = (globalThis as any).canvas?.scene;
+  if (!scene) return out;
+
+  if (scene.tokenVision === false) {
+    out.push({
+      level: "warn",
+      title: `Token Vision is off on "${String(scene.name)}"`,
+      detail:
+        "Every token on this scene is visible to everyone, so nothing can be hidden from anything: " +
+        "the Hide action has no line of sight to break, the perception sweep sees the whole map at " +
+        "once, and surprise and the unseen-attacker rules cannot apply. Turn it on in the scene's " +
+        "Vision tab. This is a scene setting — no module sets it, and none can work around it.",
+    });
+  } else if (scene.fog?.exploration === false) {
+    out.push({
+      level: "info",
+      title: `Fog of War is off on "${String(scene.name)}"`,
+      detail:
+        "Players see everything currently within their tokens' vision, but nothing is remembered as " +
+        "explored and nothing stays dark once left behind. Vision itself still works, so the rules " +
+        "here are unaffected. Also in the scene's Vision tab.",
+    });
+  }
+
+  // Walls are what vision is computed against, so a scene with none is bright and open by construction.
+  const walls = Number(scene.walls?.size ?? scene.walls?.length ?? 0);
+  if (scene.tokenVision !== false && walls === 0) {
+    out.push({
+      level: "info",
+      title: `"${String(scene.name)}" has no walls`,
+      detail:
+        "With nothing to block a line, cover and line of sight are decided by light and sense ranges " +
+        "alone. Hiding in the open will be refused more often than a table expects. Note that tiles — " +
+        "trees, rocks, furniture — block nothing on their own; only walls do.",
+    });
+  }
+
   return out;
 }
 

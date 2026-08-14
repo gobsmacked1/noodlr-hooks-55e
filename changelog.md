@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.1
+
+Three bugs in one chat card, all reported from the first few seconds of playing as a player, and all in the
+Hide action.
+
+- **Hiding was refused by creatures that could not see you.** "Out of any enemy's line of sight" was being
+  tested as "no wall is in the way", which left out distance, darkness and darkvision range entirely — so a
+  rogue a hundred feet away in unlit woodland was told they were in plain view of nine hostiles that could
+  not, in fact, see them. The clue was that no fight had started: the part of this module that decides
+  whether a monster notices you had already worked out the truth, and the Hide check was asking a different
+  question. It now asks the same one, and only judges cover against enemies that can genuinely see you.
+- **A refused hide listed every hostile in the scene, publicly.** Pressing Hide and failing handed the whole
+  table the names, the count and the creature types of everything waiting for them. The card now says only
+  that there is nowhere to hide from here; the GM gets the details in a whisper, and `api.surveyHide()`
+  still prints everything.
+- **You became Hidden even when the action was refused.** Argon's action bar stamps the Hiding status itself,
+  immediately after the action and regardless of what the action decided, so a player was told they could
+  not hide and was hidden anyway — at their passive Stealth, for free. The status is now made to agree with
+  the ruling. The same fix covers the opposite case: pressing Hide while already hidden used to switch the
+  status off underneath a successful roll.
+
+Also: the rules windows now warn when the **scene** makes these rules meaningless. A scene with Token
+Vision switched off shows every token to everybody, so nothing can hide from anything; a scene with no walls
+has nothing to break line of sight with. Both are core Foundry scene settings, in the scene's Vision tab —
+no module sets them and none can work around them. If players can see every hostile token and there is no
+Fog of War, that is where to look.
+
 ## 0.4.0
 
 The whole of D&D 5e (2024) was mined into a machine-readable corpus and this release is what reading it

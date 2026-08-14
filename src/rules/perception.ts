@@ -233,6 +233,45 @@ function separation(a: any, b: any): number {
  * modelling a creature's vertical arc of sight would be inventing precision we do not have.
  */
 function perceives(spotter: any, target: any, cache: Map<string, any>, live = false): boolean {
+  const { seen, useModes } = sightOf(spotter, target, cache);
+
+  if (!seen) return false;
+  if (!isStealthEnabled()) return true;
+
+  // A clear line of sight is Foundry's answer, not 5e's. Ask the dice too.
+  const wasHiding = live && Boolean(hidingState(target));
+  const evaded = evades(spotter, target, separation(spotter, target), useModes);
+  if (evaded) {
+    announceEvasion(spotter, target, evaded);
+    return false;
+  }
+
+  // "An enemy finds you" is one of the four things that end the 2024 Hide, and this is that moment. Only
+  // on a real sweep: the diagnostic survey asks the same question about every pairing on the map and must
+  // not change the world by being run.
+  if (live && wasHiding) {
+    void reveal(target, `${String(spotter?.name ?? "an enemy")} found them`);
+  }
+  return true;
+}
+
+/**
+ * Can `spotter` SEE `target`, before anything either of them is doing about it?
+ *
+ * This is the vision half of `perceives`, split out because two callers want the question stopped at
+ * different points. The sweep wants the whole thing: eyes first, then the dice. The Hide prerequisite
+ * wants ONLY this half, and the reason is circularity — `evades` reads what the target is doing to hide,
+ * so a creature that is already hiding would be invisible to the very test deciding whether it may hide
+ * again, and every re-hide would pass unconditionally.
+ *
+ * Reports `useModes` alongside the answer because the caller cannot otherwise tell whether it got the
+ * real detection-mode verdict or the stat-block fallback, and `evades` needs to know which.
+ */
+function sightOf(
+  spotter: any,
+  target: any,
+  cache: Map<string, any>,
+): { seen: boolean; useModes: boolean } {
   const id = String(spotter?.id ?? "");
   if (!cache.has(id)) cache.set(id, buildVision(spotter));
   const source = cache.get(id);
@@ -260,25 +299,48 @@ function perceives(spotter: any, target: any, cache: Map<string, any>, live = fa
   } else {
     seen = withinSenses(spotter, target) && hasLineOfSight(spotter, target);
   }
+  return { seen, useModes };
+}
 
-  if (!seen) return false;
-  if (!isStealthEnabled()) return true;
-
-  // A clear line of sight is Foundry's answer, not 5e's. Ask the dice too.
-  const wasHiding = live && Boolean(hidingState(target));
-  const evaded = evades(spotter, target, separation(spotter, target), useModes);
-  if (evaded) {
-    announceEvasion(spotter, target, evaded);
-    return false;
+/**
+ * Which of `observers` can currently see `target`, by token id.
+ *
+ * Exists so the Hide prerequisite in `rules/hide.ts` answers "out of any enemy's line of sight" with the
+ * SAME machinery that decides whether a fight starts. Before v0.4.1 those were two unrelated tests: the
+ * sweep ran detection modes, ranges, light and darkness, while Hide counted wall-blocked corner rays and
+ * nothing else — so nine hostiles a hundred feet away in the dark, whom no sweep would ever let notice
+ * anybody, were reported as having the rogue "in plain view". Two answers to one question is a bug
+ * whichever of them is right, and this is the one that is right.
+ *
+ * Pure, and owns the lifecycle of the vision sources it builds: they were never registered with the
+ * canvas, so leaving them behind leaks polygons and could not be tidied up by anyone else.
+ *
+ * An observer whose visibility cannot be worked out is reported as SEEING, because the caller's failure
+ * direction has to be refusing a hide rather than granting one nobody has earned.
+ */
+export function observersWhoSee(observers: any[], target: any): Set<string> {
+  const seen = new Set<string>();
+  const vision = new Map<string, any>();
+  try {
+    for (const observer of observers) {
+      const id = String(observer?.id ?? "");
+      try {
+        if (sightOf(observer, target, vision).seen) seen.add(id);
+      } catch (err) {
+        log(`could not work out whether ${observer?.name} can see ${target?.name}:`, err);
+        seen.add(id);
+      }
+    }
+  } finally {
+    for (const source of vision.values()) {
+      try {
+        source?.destroy?.();
+      } catch {
+        /* a source that will not tidy up is not worth failing the question over */
+      }
+    }
   }
-
-  // "An enemy finds you" is one of the four things that end the 2024 Hide, and this is that moment. Only
-  // on a real sweep: the diagnostic survey asks the same question about every pairing on the map and must
-  // not change the world by being run.
-  if (live && wasHiding) {
-    void reveal(target, `${String(spotter?.name ?? "an enemy")} found them`);
-  }
-  return true;
+  return seen;
 }
 
 /**

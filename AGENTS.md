@@ -1836,14 +1836,36 @@ is exactly the set `enforce.ts` hands over. A fifth interception that forgets it
 test instead of failing quietly at a table.
 
 - **Argon is not a rules module and never was, which is why this was reachable at all.** Read from
- `enhancedcombathud-dnd5e/scripts/echDnd5e.js`: each basic-action button is a `DND5eSpecialActionButton`
- resolving three ways — Convenient Effects if it holds an effect of the same NAME (`:1147`), else **the
- actor's own item matched by localized name** (`:1111`) used through the ordinary `activity.use()`, else
- a bare chat card plus a direct status toggle for the only two that name one (`:1164`, dodging and
- hiding). Route 2 is why intercepting `dnd5e.preUseActivity` catches the bar for free in any world
- carrying the PHB content, and route 1 is why **Dodge specifically does not arrive that way**: CE ships a
- "Dodge" effect and no "Hide". Argon's `consumeActionEconomy` is display state on its own panel objects
- and writes nothing to the actor, so route 3 spends nothing either.
+  `enhancedcombathud-dnd5e/scripts/echDnd5e.js`: each basic-action button is a `DND5eSpecialActionButton`
+  resolving two ways — Convenient Effects if it holds an effect of the same NAME (`:1147`), else **the
+  actor's own item matched by localized name** (`:1111`) used through the ordinary `activity.use()`,
+  falling back to a bare chat card when the actor has no such item. Route 2 is why intercepting
+  `dnd5e.preUseActivity` catches the bar for free in any world carrying the PHB content, and route 1 is why
+  **Dodge specifically does not arrive that way**: CE ships a "Dodge" effect and no "Hide". Argon's
+  `consumeActionEconomy` is display state on its own panel objects and writes nothing to the actor.
+  - **CORRECTION (2026-08-14): the status toggle is NOT a third route, and reading it as one cost a live
+    bug.** This note used to describe "a bare chat card plus a direct status toggle" as the no-item
+    fallback. In fact `_onLeftClick` (`:1152-1157`) does the item use and the status toggle **one after the
+    other in the same branch, with the toggle outside any success test**:
+
+    ```js
+    success = this.actorItem ? await this.activity.use({ event }, { event }) : await this.createChatMessage();
+    if (this.statusId) { const status = CONFIG.statusEffects.find(e => e._id === this.statusId); if (status) this.actor.toggleStatusEffect(status.id); }
+    ```
+
+    So for the two buttons whose definition names a status — Hide (`dnd5ehiding00000`, `:1605`) and Dodge —
+    **vetoing the activity does not stop the status arriving.** A refused Hide stamped `hiding` anyway, and
+    `hidingState` reads a status with no banked number as hiding at passive Stealth, so the player was told
+    they could not hide and was then hidden for free. It is also a **toggle** and it is **not awaited**,
+    which makes the other direction equally wrong: pressing Hide while already hidden switches the status
+    off underneath a successful roll.
+  - **The transferable rule: a `preUseActivity` veto stops the activity, not the button.** Whatever drew
+    the button may write to the actor on its own account, before or after, and need not consult the result.
+    So any rule that both intercepts an activity AND owns a status has to reconcile that status after the
+    fact rather than assume the veto held — `reconcileHiding()` in `rules/hide.ts` is the pattern, snapshot
+    taken inside the synchronous hook (the last moment before the other module's write) and applied after a
+    settle. Dodge is exposed to the same thing from the other side and is left alone deliberately: our
+    `rules/dodge.ts` only expires a stale marker, so the worst case is a toggle we then clean up on time.
 - **Newly wired: Influence, Administer First Aid, Disengage and Dodge.** The first two are intercepted
  beside Hide in `police()`; the second two are *observed*, because there is nothing to adjudicate in
  them and cancelling a working button to reimplement it buys nothing.
@@ -1889,6 +1911,66 @@ test instead of failing quietly at a table.
  with nothing to hang it on), Ready (a prose trigger, and the reaction it buys is billed as an Action —
  the known imperfection already recorded under the declarations note), and Search (the roll is one skill
  of four and the reading is the GM's). Study and Utilize stay refused in `rules/general.ts`.
+
+## Two parts of one module answering "can X see Y" differently (v0.4.1, 2026-08-14)
+
+Reported from the first five seconds of a player smoke-test: a rogue pressed Argon's Hide button and was
+refused, *"in plain view of Beholder Zombie, Dire Wolf, Dire Wolf, Archpriest, Archmage, Bandit Captain,
+Bandit Captain, Bandit Captain, Bandit Captain"*, at 90–110 feet, outdoors, with walls and trees in between.
+Three separate bugs in one card, and the user found the diagnosis themselves by asking the right question:
+**if nine hostiles genuinely had line of sight, why had no fight started?**
+
+- **Because they did not, and the two layers were not asking the same thing.** `rules/perception.ts`
+  answers visibility properly — it builds a vision source per creature and runs its detection modes, so
+  darkvision range, light, magical darkness and invisibility all apply, with a stat-block fallback of
+  stated senses plus a wall test. `canHide()` asked **neither**: it tested screens and then counted
+  wall-blocked corner rays, so "out of any enemy's line of sight" was implemented as "no wall between".
+  Distance and darkness were absent from the rule entirely. A hundred feet of unlit woodland is exactly
+  the case where those two readings diverge most, and the sweep was right: nothing on that map could see
+  the rogue, which is why nothing engaged.
+  - Fixed by exporting `observersWhoSee()` from `perception.ts` and having `canHide` skip any enemy it
+    names. **`sightOf()` was split out of `perceives()` for this and the split is load-bearing**: the Hide
+    prerequisite must ask the VISION question only, never the full `perceives`, because `evades()` reads
+    what the target is doing to hide — so a creature already hiding would be invisible to the very test
+    deciding whether it may hide again, and every re-hide would pass unconditionally.
+  - **The generalisable rule: one question, one implementation.** Two answers to "can X see Y" is a bug
+    whichever of them is right, and this one survived because the wrong copy was cheap, local and looked
+    reasonable in isolation. Anything else that ever needs this question asks `perception.ts`.
+  - Cover is still judged here, on the enemies that vision says are genuinely watching. That division is
+    the correct one: vision decides who is a watcher, geometry decides whether they have a clear shot.
+- **The refusal named the roster, on a public card.** A player pressing Hide in a prepared scene was handed
+  every hostile's name, count and creature type by a failed action — a spoiler dressed as an error message,
+  and unrecoverable, because a player cannot un-know it. `HideCheck` and `HideResult` now carry `reason`
+  (safe for the table, names nobody) and `detail` (the same answer with the watchers named, whispered to
+  GMs and printed by `api.surveyHide()`). The whisper is skipped when the two agree, which is every
+  successful hide, so an ordinary session gains no noise.
+  - Worth noting the ordering: fixing the vision test shrinks this leak by itself, since most of those nine
+    are no longer watchers. It still had to be fixed separately — one guard around a corner would have
+    leaked just the same, and a message that is only safe because another layer is working is not safe.
+- **The status arrived anyway**, which is Argon writing it directly and is documented in full under the
+  Argon note above.
+
+**Fog of War and "the player can see every hostile token" are neither of these, and no module of ours or
+theirs is responsible.** Both are per-scene core settings — `scene.tokenVision` and `scene.fog.exploration`
+(v14 schema; `canvas.visibility.tokenVision` and `canvas.fog.fogExploration` are the live getters). With
+Token Vision off, every token on the scene is visible to everyone and there is nothing for any of this to
+do: no line of sight to break, no unseen attacker, no surprise, and a perception sweep that sees the whole
+map at once. `sceneAdvisories()` in `integration/ownership.ts` now reports all three of Token Vision off,
+Fog of War off and **a scene with no walls at all** — the last because it is the honest explanation for
+hides being refused outdoors, and because a tile is not a wall: trees, rocks and furniture placed as tiles
+block nothing, which is the single most common misreading of why line of sight "isn't working".
+
+- This is the same doctrine as the ownership resolver and the greying of "Behavioral automation": a
+  capability that cannot function has to say so in the interface. The advisory is the only honest form of
+  it here, because the cause is outside the module and cannot be worked around from inside one.
+- **What the disabled community modules actually provided, checked rather than assumed.** Vision 5e is the
+  real loss and the loss is fidelity, not features: it maps stat-block senses onto detection modes for
+  every actor regardless of `sight.enabled`, and without it dnd5e NPC tokens have no modes at all (the NPC
+  template ships no `prototypeToken`, so core defaults sight to disabled), which drops every hostile onto
+  our coarser stat-block fallback. Stealthy and Perceptive provided the *rendering* half of hiding — they
+  wrap `_canDetect` so a hidden token stops being drawn — and **we deliberately do not**, so a creature our
+  rules have ruled unnoticed is still visible on screen. That is a real gap, stated here rather than
+  discovered again. Neither of them, and nothing else on the disable list, ever provided Fog of War.
 
 ## What the finished corpus caught (v0.4.0, 2026-08-13)
 
