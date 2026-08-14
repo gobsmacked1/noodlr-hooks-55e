@@ -70,6 +70,13 @@ for the table as a whole. Everything stands aside where Midi QoL is doing the sa
 prompts, which unlike most of its mechanics ship switched on, so if you run midi you keep its prompt for hits
 and damage and this module's for opportunity attacks. The rules windows say who owns which.
 
+**Compiled per-day and per-rest abilities come back after a rest.** A bug rather than a feature, and only
+reachable by tables running the capability compiler: an ability read off a creature's own prose as "1/day" or
+"recharges on a short rest" recorded the use correctly and then never gave it back, because nothing was
+telling that ledger a rest had happened. Once per campaign instead of once per day, silently. Resting now
+restores it, and a rest marked as a new day restores the daily ones whether it was long or short. Nothing
+that dnd5e recovers on its own — uses printed on a sheet, spell slots, hit dice — was ever affected.
+
 **One thing the system ships switched off, now said out loud.** dnd5e can roll a monster's Recharge 5-6 at the
 start of its turn and defaults to not doing it, in a setting that is not in Foundry's settings list at all
 (Configure Settings → dnd5e → Combat → Monsters → Auto-recharge). Nothing here does it instead, so a spent

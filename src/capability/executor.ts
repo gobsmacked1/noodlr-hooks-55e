@@ -38,7 +38,7 @@ import {
   summonCreature,
   summonedTokens,
 } from "./primitives";
-import { clearUse, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
+import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
 
@@ -422,6 +422,28 @@ export function registerCapabilityExecutor(): void {
 
   Hooks.on("deleteCombat", () => {
     previousCombatant = null;
+  });
+
+  // Rest-scoped allowances come back. Not a trigger event — `periodStamp` derives "which rest are we
+  // after" from a counter on the actor, and nothing anywhere was bumping it, so a compiled 1/day or
+  // per-short-rest rule spent its charge once and never got it back for the rest of the campaign.
+  //
+  // Deliberately NOT gated on the primary GM: `Hooks.callAll` runs only on the client that performed
+  // the rest, and that client is the one that owns the actor and can therefore write the flag. A GM
+  // gate here would mean a player's own long rest restored nothing.
+  Hooks.on("dnd5e.restCompleted", (actor: any, result: any, config: any) => {
+    if (!actor) return;
+    // dnd5e recovers per-day uses on any rest flagged as a new day, and our stamp conflates "day"
+    // with "long rest" (one counter serves both), so a new day has to bump the long counter or a daily
+    // rule never returns. The cost is that long-rest rules also come back on a new-day short rest,
+    // which is the generous direction this ledger already errs in on purpose: a creature quietly
+    // losing an ability is worse than one getting an extra use of it.
+    const long =
+      result?.type === "long" ||
+      result?.longRest === true ||
+      result?.newDay === true ||
+      config?.newDay === true;
+    void noteRest(actor, long);
   });
 
   // on_activity_use. Fires on the client that used it, so the gate inside `fireTrigger` decides.

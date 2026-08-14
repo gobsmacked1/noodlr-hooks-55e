@@ -212,9 +212,29 @@ place. **Wiring a new hook means adding its event to that list in the same chang
 go on calling a working rule dead — the inverse failure, and the harder one to notice.
 
 This is the same principle as the ownership resolver, arriving from the other direction: there we made
-a rule that had stood aside say so, and here a rule that cannot fire. `always`, `on_short_rest` and
-`on_long_rest` are all correctly inert today; `noteRest()` in `capability/uses.ts` exists and has no
-callers.
+a rule that had stood aside say so, and here a rule that cannot fire. `always` is answered by query
+instead (see `capability/standing.ts`), and `on_short_rest` / `on_long_rest` are still correctly inert.
+
+**A rest-scoped USE is a different thing from a rest TRIGGER, and conflating the two hid a real bug for
+two months (v0.4.2).** `periodStamp` derives "which rest are we after" from a counter on the actor, and
+**`noteRest()` had no callers** — so a compiled `1/day` or per-short-rest rule spent its charge once and
+never got it back for the rest of the campaign. Two earlier notes in this file recorded the missing
+caller as a known fact and one of them went further and excused it ("does not need any while the system
+owns rests"), which was simply wrong: dnd5e recovering the uses printed on a *sheet* says nothing about
+a ledger we keep in our own flag. The lesson is about the shape of the note rather than the bug — **an
+observation that something has no callers is a finding, and writing a reason it is fine turns it into a
+dead end nobody re-opens.**
+
+- Wired on `dnd5e.restCompleted`, and **not** gated on the primary GM. `Hooks.callAll` runs only on the
+ client that performed the rest, and that client is the one that owns the actor and can therefore write
+ the flag; a GM gate would mean a player's own long rest restored nothing.
+- **A new day bumps the long counter even on a short rest**, because one counter serves both `day` and
+ `long_rest` and dnd5e recovers per-day uses on any rest flagged `newDay`. That refreshes long-rest
+ rules slightly early, which is the generous direction `readLedger` already errs in on purpose.
+- Nothing is cleared — the stamp goes stale, exactly as with the action ledger. Locked by a test, so a
+ future "tidy up by deleting stale entries" fails rather than losing a use spent before a reload.
+- A table that narrates a long rest without opening the rest dialog gets no recovery, which is the same
+ limitation dnd5e's own item uses have. Consistent, and worth saying out loud.
 
 ### What the enabled-module audit gave the compiler (2026-08-11)
 
@@ -2174,7 +2194,9 @@ and already work; **do not build any of these without checking what it already s
  Combat page carries a `system`-state row saying where it is. Note the interaction with our own code — a spent
  recharge feature is correctly *not offered* as a turn option, so with this off a breath weapon disappears
  from the planner's options for the rest of the fight and looks like the planner having forgotten it.
-- `noteRest()` in `capability/uses.ts` still has no callers, and does not need any while the system owns rests.
+- **Corrected the same day:** this note originally said `noteRest()` needed no callers "while the system owns
+ rests", which confused two different ledgers and left compiled per-day uses permanently spent. It is wired
+ to `dnd5e.restCompleted` now — see the rest-scoped-use note under the wired-triggers section.
 
 ## What the finished corpus caught (v0.4.0, 2026-08-13)
 

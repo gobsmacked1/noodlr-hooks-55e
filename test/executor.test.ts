@@ -7,7 +7,7 @@ import {
   clearBindings,
 } from "../src/capability/bindings";
 import { fireTrigger } from "../src/capability/executor";
-import { __clearShadow, usesLeft } from "../src/capability/uses";
+import { __clearShadow, noteRest, spendUse, usesLeft } from "../src/capability/uses";
 import { __damageLogInternals, noteTurnStart } from "../src/capability/damage-log";
 import { validateCapability, type Capability } from "../src/integration/capability";
 
@@ -259,6 +259,48 @@ test("a use is only spent when the effect actually happened", async () => {
   assert.equal(outcomes[0].fired, false);
   const left = usesLeft(actor, "hash-limbs:0", { max: 4, per: "day" }, null, null);
   assert.equal(left.spent, 0);
+});
+
+// ---- Rest ------------------------------------------------------------------------------------------
+
+test("a rest gives a rest-scoped allowance back, and the short one does not refresh the daily", async () => {
+  // Every stamp here is derived from a counter on the actor, and nothing was bumping it — so a 1/day
+  // rule spent its charge once and stayed spent for the campaign. `noteRest` is what the
+  // `dnd5e.restCompleted` listener calls.
+  const actor = troll();
+  const daily = { max: 1, per: "day" } as const;
+  const perShort = { max: 1, per: "short_rest" } as const;
+
+  await spendUse(actor, "daily", daily, null, null);
+  await spendUse(actor, "short", perShort, null, null);
+  assert.equal(usesLeft(actor, "daily", daily, null, null).remaining, 0);
+  assert.equal(usesLeft(actor, "short", perShort, null, null).remaining, 0);
+
+  await noteRest(actor, false);
+  assert.equal(
+    usesLeft(actor, "short", perShort, null, null).remaining,
+    1,
+    "a short rest recharges",
+  );
+  assert.equal(usesLeft(actor, "daily", daily, null, null).remaining, 0, "but not the daily one");
+
+  await noteRest(actor, true);
+  assert.equal(usesLeft(actor, "daily", daily, null, null).remaining, 1);
+});
+
+test("the ledger keeps what was spent since the rest, rather than being cleared by it", async () => {
+  // The stamp goes stale; nothing is deleted. That is what makes a use spent before a reload still
+  // spent after one, and it must survive a rest for the same reason.
+  const actor = troll();
+  const daily = { max: 2, per: "day" } as const;
+  await spendUse(actor, "daily", daily, null, null);
+  await noteRest(actor, true);
+  await spendUse(actor, "daily", daily, null, null);
+  assert.equal(
+    usesLeft(actor, "daily", daily, null, null).spent,
+    1,
+    "only the post-rest use counts",
+  );
 });
 
 // ---- Multiattack -----------------------------------------------------------------------------------
