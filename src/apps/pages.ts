@@ -138,6 +138,14 @@ const HOUSE: Page = {
           ownership: "stealth",
         },
         {
+          id: "hideAlways",
+          label: "NOODLRHOOKS.Combat.HideAlways.Name",
+          hint: "NOODLRHOOKS.Combat.HideAlways.Hint",
+          state: "live",
+          setting: C.hideAlways,
+          kind: "boolean",
+        },
+        {
           id: "surprise",
           label: "NOODLRHOOKS.Combat.Surprise.Name",
           hint: "NOODLRHOOKS.Combat.Surprise.Hint",

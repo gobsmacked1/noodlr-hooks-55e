@@ -337,6 +337,13 @@ Hooks.once("init", () => {
 
   const mod = game.modules.get(MODULE_ID);
   if (mod) mod.api = api;
+
+  // And again at the console, because every diagnostic in AGENTS.md is written `api.surveyX()` and there
+  // is no `api` in a browser console. Reported twice as the surveys "erroring" (2026-08-15), which is
+  // exactly what `game.modules.get(...).api` misremembered as `api` produces: a ReferenceError that says
+  // nothing about the module. `noodlrHooks` rather than `api` because a one-word global belongs to
+  // whoever grabs it last, and this is the same prefix the hooks already use.
+  (globalThis as any).noodlrHooks = api;
 });
 
 Hooks.once("ready", () => {

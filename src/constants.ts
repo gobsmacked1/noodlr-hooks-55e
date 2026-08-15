@@ -39,6 +39,8 @@ export const COMBAT_SETTINGS = {
   engageRadius: "combat.engageRadius",
   /** Whether a declared hide actually keeps a creature unnoticed. */
   stealth: "combat.stealth",
+  /** House rule: pressing Hide always rolls and always banks, whatever the position and the roll. */
+  hideAlways: "combat.hideAlways",
   /** Whether creatures caught unawares are marked Surprised when a fight starts. */
   surprise: "combat.surprise",
   /** Whether the Invisibility spell ends itself on attacking, damaging or casting. */

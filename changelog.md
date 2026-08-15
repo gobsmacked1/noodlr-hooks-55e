@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.6.2
+
+**A troll sheds a limb when it is bloodied, and gains the exhaustion for it.** Last release removed the
+GM-only notes that were talking the compiler out of rules; a second kind of tooling text was still getting
+through, and it was welded to the rule rather than sitting in a note beside it. The troll's own stat block
+reads "1 Exhaustion (apply=false) level for each missing limb" — that switch tells the chat card not to
+draw a button, and read as an instruction it says plainly not to apply the exhaustion. There are 1,128 of
+these across the books, almost all of them attached to a condition. The compiler now reads the words and
+not the markup, which fixes the missing exhaustion and any other condition that came through disarmed.
+Anything compiled before this release is re-read automatically the next time its scene loads.
+
+**Diagnostics say when a rule fires, not just what it does.** `surveyCapabilities()` listed a rule's
+trigger, effect and cost and never its conditions, so "this ability keeps going off at the wrong time" —
+which is the usual complaint — was the one thing it could not help with. It now prints each guard and the
+whole rule in plain English.
+
+**Hiding never refuses you again.** Pressing Hide used to be answered with "you cannot hide" whenever an
+enemy had line of sight or the roll came in under 15, which is the printed 2024 rule and is not how most
+tables play it. Now the roll always happens and always sticks: whatever you rolled becomes the number an
+enemy has to beat to notice you. Anything that was already looking straight at you simply starts out
+having noticed — so hiding in plain sight of a guard costs you the action and buys you nothing *from that
+guard*, while still hiding you from everyone further down the corridor. Break line of sight with the guard
+and it loses you like everyone else. The old behaviour is one switch away, under House Rules.
+
+**And the card never says who noticed you, or how many.** A hide reads the same to the table whether the
+corridor is empty or four guards are watching. Telling a player "hidden, but two of them can see you" hands
+them the presence and the size of a group they had no way to know about, from an action that succeeded, and
+there is no taking it back. The GM gets the names in a whisper; the player finds out by being noticed.
+
+**Being spotted by one enemy no longer reveals you to all of them.** This is the substantive half. Stealth
+and invisibility were being ended the same way, and they are not the same thing: a sentry seeing you should
+not hand your position to the four guards around the corner. Each enemy now has its own answer, tracked
+per watcher and updated as people move — found when one of them beats your number, lost again when it can
+no longer see you. Attacking, casting aloud and invisibility ending still reveal you to everybody at once,
+which is correct and is the difference.
+
+**A monster that meets a wall walks round it.** It walked into the wall and stood there for the rest of the
+fight instead — reported with a Troll, and it was every creature. When the direct line was blocked the only
+alternatives tried were shorter steps along the same blocked line. It now fans out to either side and takes
+whichever legal step closes the most ground. Still not pathfinding: a creature three corners away gets
+closer each turn rather than solving the maze, but it no longer stops.
+
 ## 0.6.1
 
 **Sneak Attack applies again, and so does every heal.** The damage lock from 0.6.0 was reaching cards it

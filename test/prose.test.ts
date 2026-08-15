@@ -5,21 +5,80 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SECRET, TOOLING, isMetaAside, plainText, scrubMeta } from "../src/capability/prose";
+import {
+  SECRET,
+  TOOLING,
+  isMetaAside,
+  plainText,
+  scrubMeta,
+  unwrapEnrichers,
+} from "../src/capability/prose";
 
-// The Troll's, verbatim from `actors24/giant/troll.yml` — the note that cost a release.
-const TROLL = `<p>If the troll takes damage while it is Bloodied, one of its limbs is severed.</p>
-<p>The troll has 1 Exhaustion level for each missing limb.</p>
-<section class="secret">
-<p><strong>Foundry Note</strong></p>
-<p>The Exhaustion levels from missing limbs must be applied manually.</p>
-</section>`;
+// Loathsome Limbs, verbatim from `actors24/giant/troll.yml` — the note that cost a release. Kept
+// character-for-character rather than paraphrased, because a paraphrase is a specimen of the bug we
+// imagined: the first version of this constant dropped both of the rule's guards, so the test passed
+// while saying nothing about whether the sentence a compiler needs survives intact.
+const TROLL =
+  `<p class="feature">If the [[lookup @name lowercase]]{monster} ends any turn Bloodied and took ` +
+  `15+ Slashing damage during that turn, one of the [[lookup @name lowercase]]{monster}l's limbs is ` +
+  `severed, falls into the [[lookup @name lowercase]]{monster}'s space, and becomes a ` +
+  `<strong>@UUID[Compendium.dnd5e.actors24.Actor.mmTrollLimb00000]{Troll Limb}</strong>. The limb ` +
+  `acts immediately after the [[lookup @name lowercase]]{monster}'s turn. The [[lookup @name ` +
+  `lowercase]]{monster} has 1 &amp;Reference[Exhaustion apply=false] level for each missing limb, ` +
+  `and it grows replacement limbs the next time it regains Hit Points.</p>` +
+  `<section class="secret" id="secret-01PBOuaZ8xS1KYt6"><p><strong>Foundry Note</strong></p>` +
+  `<p>This feature provides an <strong>Active Effect</strong> condition in the character sheet's ` +
+  `Effects tab to enable each level of Exhaustion. Since the condition can be applied multiple ` +
+  `times, the GM must manually manage the level of Exhaustion. There is an active effect available ` +
+  `for each level of exhaustion.</p></section>`;
 
 test("a hidden note is removed and the rule beside it is not", () => {
   const text = plainText(TROLL);
   assert.match(text, /1 Exhaustion level for each missing limb/);
   assert.doesNotMatch(text, /Foundry Note/);
-  assert.doesNotMatch(text, /applied manually/);
+  assert.doesNotMatch(text, /manually manage/);
+  assert.doesNotMatch(text, /Effects tab/);
+});
+
+test("BOTH of Loathsome Limbs' guards survive the scrub", () => {
+  // Reported twice from play as the Troll shedding limbs at full health. Whatever else is wrong there,
+  // it is not that the compiler was handed a rule with its conditions missing: this is the exact string
+  // it reads, and each guard has to be legible in it on its own terms.
+  const text = plainText(TROLL);
+  assert.match(text, /ends any turn Bloodied/);
+  assert.match(text, /took 15\+ Slashing damage during that turn/);
+  assert.deepEqual(scrubMeta(text).removed, []);
+});
+
+test("`apply=false` never reaches the compiler beside a condition it negates", () => {
+  // The reason the exhaustion clause survives every other test here and still produces a descriptor
+  // with no exhaustion in it. `apply=false` tells the RENDERER not to draw an apply button; welded to
+  // the word Exhaustion it reads as an instruction not to apply Exhaustion, and a well-behaved model
+  // obeys it. 1,128 of these in the shipped corpus.
+  const text = plainText(TROLL);
+  assert.doesNotMatch(text, /apply\s*=/);
+  assert.doesNotMatch(text, /false/);
+  assert.match(text, /has 1 Exhaustion level/);
+});
+
+test("an enricher unwraps to its reading, keeping every word and number", () => {
+  assert.equal(unwrapEnrichers("&Reference[Exhaustion apply=false]"), "Exhaustion");
+  assert.equal(unwrapEnrichers("&Reference[Blinded apply=long]"), "Blinded");
+  assert.equal(unwrapEnrichers("&Reference[Bonus Action]"), "Bonus Action");
+  // Every token is an option, so the VALUE is the reading — the key names a Foundry lookup table.
+  assert.equal(unwrapEnrichers("&Reference[condition=invisible]"), "invisible");
+  assert.equal(
+    unwrapEnrichers("a @UUID[Compendium.dnd5e.actors24.Actor.mmTrollLimb00000]{Troll Limb}"),
+    "a Troll Limb",
+  );
+  assert.equal(unwrapEnrichers("the [[lookup @name lowercase]]{monster} bites"), "the monster bites");
+});
+
+test("an unlabelled roll keeps its dice, which are the point", () => {
+  // Deleting the markup here would delete the rule. Left whole deliberately; same for an unlabelled
+  // @UUID, whose name is only resolvable through a Foundry global this file may not touch.
+  const roll = "deals [[/damage 2d6 slashing]] damage";
+  assert.equal(unwrapEnrichers(roll), roll);
 });
 
 test("the whole note goes, not just the sentences carrying a marker", () => {

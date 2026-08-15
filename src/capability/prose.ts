@@ -93,11 +93,18 @@ export const SECRET =
  * - `compendium` — **the one that would have done real damage, and it was caught by measuring
  *   rather than by review.** It reads as pure tooling and it is not: `@UUID[Compendium.dnd5e.…]`
  *   and `@Embed[Compendium.…]` are how the content team writes a link to a spell, so the word sits
- *   in the middle of thousands of ordinary rules. Re-measured 2026-08-15 on a working census: adding
- *   it takes the open-prose strip from **5 descriptions to 2,469, and from 2 distinct sentences to
- *   1,334** — every one of them a rule, in the shape "You can cast @UUID[Compendium.…]{Armor of
- *   Shadows}". It also flips one hidden section from a kept rule to a dropped note. Anyone tempted
- *   to add it can reproduce that in seven seconds, which is the whole reason the census exists.
+ *   in the middle of thousands of ordinary rules. Re-measured 2026-08-15 with {@link unwrapEnrichers}
+ *   in place: adding it takes the open-prose strip from **5 descriptions to 1,336, and from 2
+ *   distinct sentences to 452** — every one of them a rule, in the shape "You can cast Armor of
+ *   Shadows". Anyone tempted to add it can reproduce that in seven seconds, which is the whole
+ *   reason the census exists.
+ *
+ *   Those two numbers were **2,469 and 1,334 before enrichers were unwrapped**, and the halving is
+ *   worth understanding rather than editing over: unwrapping deletes the word `Compendium` along
+ *   with the markup carrying it, so the counterfactual now only catches prose that says "compendium"
+ *   in English. It is still 452 rules deleted, so the verdict is unchanged — but it is a reminder
+ *   that **a counterfactual recorded in a comment ages against changes nowhere near it**, and this
+ *   one has now been re-measured twice.
  * - `drag` — "the target is dragged 10 feet" is a real grapple rule.
  * - `token` — a Feather Token is an item, and "token" is game vocabulary in this system.
  * - `\bAE\b` — two letters, and a bare abbreviation is not worth the risk when "Active Effect"
@@ -144,6 +151,58 @@ export function isMetaAside(text: string): boolean {
 }
 
 /**
+ * Turn Foundry's enricher syntax into the words it renders as.
+ *
+ * THE SECOND CONTAMINATION, AND IT IS SHARPER THAN THE NOTES. An enricher's OPTIONS are instructions
+ * to the renderer, and they are written in the imperative English of the thing the rule is about:
+ *
+ *   The troll has 1 &Reference[Exhaustion apply=false] level for each missing limb.
+ *
+ * `apply=false` means "do not draw an apply button on the chat card". Beside the word `Exhaustion`,
+ * to a model reading for what to emit, it is a plain-English instruction not to apply Exhaustion —
+ * and that is the exact clause the Troll reportedly never acts on. Same failure as the hidden notes
+ * (an instruction about the software read as an instruction about the rule) at a much smaller
+ * granularity, and much harder to see, because there is no heading and no hidden section to notice.
+ * **1,128 occurrences of `apply=false` in the shipped corpus**, essentially all of them welded to a
+ * condition name.
+ *
+ * UNWRAP RATHER THAN DELETE, and the distinction is the whole design. The words inside an enricher
+ * are the rule — `Exhaustion` is the condition, `{Troll Limb}` is what gets summoned, `2d6` is the
+ * damage — so this keeps the reading and throws away the markup, exactly as tag-stripping does one
+ * line above. Nothing here removes a word or a number, which is the standing rule for everything
+ * upstream of the cache key.
+ *
+ * WHAT IS DELIBERATELY LEFT ALONE. An **unlabelled** `@UUID[…]` (3,460 of them) renders as a
+ * document's name, and that name is only resolvable through a Foundry global this file is not
+ * allowed to touch — so the choice is between a noisy id and deleting a noun out of the middle of a
+ * sentence, and a noisy id is plainly the safer of the two. An unlabelled `[[…]]` roll (4,120) is
+ * left whole for a better reason: `[[/damage 2d6 slashing]]` carries the dice, and they are the
+ * point.
+ *
+ * The generic-name templating survives: `[[lookup @name lowercase]]{monster}` unwraps to `monster`,
+ * not to this creature's name, so 270 creatures still share one wording and one cache entry.
+ */
+export function unwrapEnrichers(text: string): string {
+  return (
+    text
+      // `&Reference[Exhaustion apply=false]` → `Exhaustion`; `&Reference[condition=blinded]` →
+      // `blinded`. Option tokens are dropped, and when EVERY token is an option the value is the
+      // reading — the key names a Foundry lookup table rather than anything in the fiction.
+      .replace(/&Reference\[([^\]]*)\]/gi, (_all, inner: string) => {
+        const tokens = String(inner).trim().split(/\s+/).filter(Boolean);
+        const plain = tokens.filter((t) => !t.includes("="));
+        if (plain.length) return plain.join(" ");
+        return tokens.map((t) => t.slice(t.indexOf("=") + 1)).join(" ");
+      })
+      // A labelled link of any flavour (`@UUID`, `@Embed`, `@Item`, …) reads as its label, which is
+      // what the content team wrote it for.
+      .replace(/@\w+\[[^\]]*\]\{([^}]*)\}/g, "$1")
+      // A labelled roll or lookup, same reasoning.
+      .replace(/\[\[[^\]]*\]\]\{([^}]*)\}/g, "$1")
+  );
+}
+
+/**
  * Prose as a human reads it, with the block structure kept.
  *
  * Newlines matter more here than anywhere else in the module: a stat block's Multiattack and the
@@ -151,21 +210,26 @@ export function isMetaAside(text: string): boolean {
  * three attacks" ends up attached to the wrong one.
  */
 export function plainText(html: unknown): string {
-  return String(html ?? "")
-    .replace(SECRET, (section) => (isMetaAside(section) ? "" : section))
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&(?:quot|#34);/gi, '"')
-    .replace(/&(?:apos|#39);/gi, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return (
+    unwrapEnrichers(
+      String(html ?? "")
+        .replace(SECRET, (section) => (isMetaAside(section) ? "" : section))
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
+        .replace(/<li[^>]*>/gi, "• ")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/gi, " ")
+        // Before the enrichers, or `&amp;Reference[…]` is not a reference to anything.
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/&(?:quot|#34);/gi, '"')
+        .replace(/&(?:apos|#39);/gi, "'"),
+    )
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
 }
 
 export interface Scrubbed {

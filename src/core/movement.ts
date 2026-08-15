@@ -5,8 +5,10 @@
 // This module performs it.
 //
 // Deliberate limits, so the behaviour is predictable rather than clever:
-//   - Straight-line steps only. No pathfinding: if a wall blocks the direct line, we shorten the step
-//     and try again rather than route around. A creature that cannot get there simply gets closer.
+//   - Single steps, not paths. No pathfinding: when the direct line is blocked the step is shortened and
+//     then fanned out to either side, and whichever candidate closes the most ground and is actually legal
+//     is the one taken. A creature that cannot get there this turn simply gets closer and tries again —
+//     what it must never do is stop dead against a wall, which is exactly what "straight line only" did.
 //   - Never moves further than the budget it was given, and never onto an occupied square.
 //   - Snapped to the grid where the scene has one, so tokens land in squares like a player's would.
 //   - Nothing here touches hit points, resources, or the turn — movement is the only side effect.
@@ -388,22 +390,70 @@ export async function moveToward(
   const wanted = Math.min(toPixels(budget), Math.max(0, separation - stopShort));
   if (wanted < gridSize() * 0.25) return 0;
 
-  const ux = (goal.x - origin.x) / separation;
-  const uy = (goal.y - origin.y) / separation;
+  const bearing = Math.atan2(goal.y - origin.y, goal.x - origin.x);
 
   return stepTo(
     token,
     origin,
-    [1, 0.75, 0.5, 0.25].map((fraction) => ({
-      label: `${Math.round(toUnits(wanted * fraction))} ft`,
-      point: {
-        x: origin.x + ux * wanted * fraction,
-        y: origin.y + uy * wanted * fraction,
-      },
-    })),
+    approaches(origin, bearing, wanted),
     `toward ${describe(target?.document ?? target)}`,
     { budget, elevation: reachableElevation(token, target) },
   );
+}
+
+/** How far off the direct line a creature will step to get past something. */
+const FAN = [0, Math.PI / 5, -Math.PI / 5, (2 * Math.PI) / 5, (-2 * Math.PI) / 5];
+
+/** How much of the wanted distance to try, straight ahead. */
+const SHORTER = [1, 0.75, 0.5, 0.25];
+
+/**
+ * Destinations to try, best first, for a creature walking toward something.
+ *
+ * Straight ahead and then progressively shorter used to be the whole list, and it is why a creature that
+ * met a wall stopped dead: every one of the four candidates lay on the same blocked line, so shortening
+ * the step only moved the refusal closer. `moveAwayFrom` had had a fan of bearings since it was written
+ * and this did not, which is the whole of the bug — a Troll walked into a wall and stood there for the
+ * rest of the fight rather than taking one step sideways (reported 2026-08-15).
+ *
+ * Ordered by how much ground the step actually closes (`cos` of the angle times the fraction), so the
+ * direct route always wins when it is open, a shallow detour beats a short shuffle forward, and a
+ * sidestep that barely gains anything is the last resort. That single rule replaces having to reason
+ * about which is preferable in each case, and it keeps the list to eight attempts — each one is a real
+ * `move()` with a stall watchdog behind it, so this is not a search space to be generous with.
+ *
+ * Deliberately NOT pathfinding. A creature that has to go round three corners still gets closer and tries
+ * again next turn, which is the behaviour this file promises at the top; what it must never do is stop.
+ *
+ * Exported only so `test/movement.test.ts` can pin the ordering without a canvas, the same precedent as
+ * `timeoutChoice` and `survivalOptions`.
+ */
+export function approaches(
+  origin: { x: number; y: number },
+  bearing: number,
+  wanted: number,
+): Array<{ label: string; point: { x: number; y: number } }> {
+  const candidates: Array<{ gain: number; offset: number; fraction: number }> = [];
+  for (const offset of FAN) {
+    // Sideways steps are tried at full stretch only. Half of a wide detour gains almost nothing and would
+    // crowd out the shorter straight steps, which are better moves.
+    for (const fraction of offset === 0 ? SHORTER : [1]) {
+      candidates.push({ gain: Math.cos(offset) * fraction, offset, fraction });
+    }
+  }
+  candidates.sort((a, b) => b.gain - a.gain);
+
+  return candidates.map(({ offset, fraction }) => {
+    const distance = wanted * fraction;
+    const degrees = Math.round((offset * 180) / Math.PI);
+    return {
+      label: `${Math.round(toUnits(distance))} ft${degrees === 0 ? "" : ` at ${degrees}\u00b0`}`,
+      point: {
+        x: origin.x + Math.cos(bearing + offset) * distance,
+        y: origin.y + Math.sin(bearing + offset) * distance,
+      },
+    };
+  });
 }
 
 /**

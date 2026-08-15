@@ -11,6 +11,28 @@
 // out of any enemy's line of sight". Under legacy rules none of that exists — 2014's Hide entry defers the
 // whole question to the GM — so the prerequisites and the DC are skipped and any roll becomes the DC.
 //
+// AND BY DEFAULT WE DO NOT REFUSE ON EITHER OF THEM (`combat.hideAlways`, user's ruling 2026-08-15). The
+// letter of the rule is right and telling a player "you cannot hide" is the wrong way to deliver it: they
+// press a button on their own sheet, spend nothing, and are told no by software. The house rule keeps both
+// tests and changes what they DO — the roll is always banked as the number to beat, and every enemy that
+// can currently see this creature with nothing in the way is written into its `spotted` list, so the hide
+// is worth exactly nothing against them and full value against everyone else. Hiding in plain sight of one
+// guard therefore costs an action and fools the rest of the corridor, which is both the outcome the rule
+// intends and a decision the player gets to make. Turn it off for the printed refusal.
+//
+// That per-observer list is the whole difference between hiding and invisibility, and it is why the two
+// cannot share a reveal. Invisibility ending is a fact about the world and everyone sees you at once;
+// being clocked by one sentry is a fact about that sentry. Attacking still reveals you to everybody —
+// `reveal` in `rules/stealth.ts` — because that is a noise the whole room hears.
+//
+// AND THE PUBLIC CARD MUST NOT BETRAY ANY OF IT (user's edict, 2026-08-15). Every successful hide reads
+// identically at the table: the creature hid, at this DC. Not who is watching, and NOT HOW MANY — the count
+// alone tells a player that something is out there and how much of it, which they had no way to know and
+// cannot un-know, and it spoils an ambush as completely as naming the creatures would. This is the reason
+// the house rule is the right default rather than merely the kinder one: a refusal cannot be delivered
+// without explaining itself, so the printed rule cannot be enforced at all without leaking the room. The
+// watchers go to the GM's whisper; the player learns by being noticed.
+//
 // HOW THE PREREQUISITE IS ACTUALLY TESTED, and why it is per-enemy. The rules read as one global condition
 // plus a line-of-sight clause, but every term in them is relative to a particular observer: you are behind
 // cover *from someone*, and fog is between you and *someone*. So each enemy is asked separately whether
@@ -50,6 +72,7 @@
 // stranger than that is what `force` is for.
 
 import { log, MODULE_ID } from "../constants";
+import { isHideAlwaysAllowed } from "../settings";
 import { narrator, speakerFor } from "../util/speaker";
 import { tokenFor } from "../util/tokens";
 import { affordable, payBill, slotLabel, turnBill, type TurnBill } from "./economy/bill";
@@ -81,6 +104,13 @@ export interface HideCheck {
   reason: string;
   /** The same answer with the watchers named, for the GM's whisper and the console survey. */
   detail: string;
+  /**
+   * Token ids of enemies that can see this creature right now with nothing between them.
+   *
+   * The house rule turns this from a veto into a fact: instead of refusing the action, these are seeded
+   * into the hider's `spotted` list, so the hide holds against everyone else and buys nothing from them.
+   */
+  exposed: string[];
 }
 
 /** The outcome of actually taking the action. */
@@ -210,7 +240,12 @@ function obscuredFrom(observer: any, token: any): boolean {
  * whether to even offer the button.
  */
 export function canHide(token: any): HideCheck {
-  const allow = (reason: string): HideCheck => ({ allowed: true, reason, detail: reason });
+  const allow = (reason: string): HideCheck => ({
+    allowed: true,
+    reason,
+    detail: reason,
+    exposed: [],
+  });
   if (!isDnd5e()) return allow("no 5e prerequisites to check");
   if (rulesVersion() === "legacy") return allow("2014 rules leave the prerequisites to the GM");
 
@@ -224,16 +259,19 @@ export function canHide(token: any): HideCheck {
   const watching = observersWhoSee(enemies, token);
 
   const exposed: string[] = [];
+  const names: string[] = [];
   for (const enemy of enemies) {
     if (!watching.has(String(enemy.id))) continue;
     if (obscuredFrom(enemy, token)) continue;
     const cover = coverFrom(enemy, token);
     if (cover === null) {
-      exposed.push(`${String(enemy.name)} (could not read the walls)`);
+      exposed.push(String(enemy.id));
+      names.push(`${String(enemy.name)} (could not read the walls)`);
       continue;
     }
     if (cover >= 0.75) continue;
-    exposed.push(String(enemy.name));
+    exposed.push(String(enemy.id));
+    names.push(String(enemy.name));
   }
 
   if (exposed.length === 0) {
@@ -248,7 +286,8 @@ export function canHide(token: any): HideCheck {
     reason:
       "there is nowhere to hide from here — the Hide action needs Heavily Obscured, or Three-Quarters " +
       "or Total Cover, and to be out of the line of sight of anything that can see you",
-    detail: `in plain view of ${exposed.join(", ")}`,
+    detail: `in plain view of ${names.join(", ")}`,
+    exposed,
   };
 }
 
@@ -276,8 +315,11 @@ export async function takeHideAction(
   const actor = token?.actor;
   if (!actor) return failed("no actor to hide");
 
+  // Under the house rule the position is read but never refused: whoever can already see you is recorded
+  // and the hide holds against everybody else. See `isHideAlwaysAllowed` for why that is the default.
+  const always = isHideAlwaysAllowed();
   const prerequisites = canHide(token);
-  if (!prerequisites.allowed && !options.force) {
+  if (!prerequisites.allowed && !options.force && !always) {
     return failed(prerequisites.reason, { detail: prerequisites.detail });
   }
 
@@ -314,12 +356,19 @@ export async function takeHideAction(
   }
 
   const dc = hideDc();
-  if (dc !== null && total < dc) {
+  if (dc !== null && total < dc && !always) {
     return failed(`rolled ${total} against DC ${dc}`, { total, dc });
   }
 
+  // Anything that already has eyes on this creature is written down as having them. This is the whole of
+  // the house rule's teeth: it is what stops a hide taken in front of a guard being worth anything against
+  // that guard, without ever telling the player they may not try. `evades` reads the list before it reads
+  // the number, so no roll however high buys anything back from a watcher on it — only breaking line of
+  // sight does, and the perception sweep clears them when it happens.
+  const spotted = always ? prerequisites.exposed : [];
+
   try {
-    await token.document.setFlag(MODULE_ID, "stealth", { dc: total, ts: Date.now() });
+    await token.document.setFlag(MODULE_ID, "stealth", { dc: total, ts: Date.now(), spotted });
     if (!token.document.hasStatusEffect?.(HIDING_STATUS)) {
       await actor.toggleStatusEffect?.(HIDING_STATUS, { active: true });
     }
@@ -330,14 +379,27 @@ export async function takeHideAction(
 
   log(
     `hide: ${String(token.name)} is hidden at DC ${total}` +
-      `${advantage ? " (Fog of War gave advantage)" : ""}`,
+      `${advantage ? " (Fog of War gave advantage)" : ""}` +
+      `${spotted.length > 0 ? `, already seen by ${spotted.length}` : ""}`,
   );
+  // NOTHING ABOUT THE WATCHERS REACHES THE TABLE — not their names, and not even how many there are.
+  //
+  // This is the user's edict (2026-08-15) and it is about the fiction rather than about tidiness. A real GM
+  // does not answer "I hide" with "two creatures already have you in view": the hiding player does not know
+  // those creatures exist, and being told there are exactly two of them is knowledge they could not have
+  // had and cannot un-have. It spoils the encounter as thoroughly as naming them would. So the public card
+  // says the same thing for every successful hide — the creature hid, at this DC — and the GM's whisper
+  // carries who has eyes on them. The player finds out by being noticed, which is the point of hiding.
   return {
     hidden: true,
     total,
     dc,
     reason: prerequisites.reason,
-    detail: prerequisites.detail,
+    detail:
+      spotted.length > 0
+        ? `hid at DC ${total} but is ${prerequisites.detail}, so the hide is worth nothing against ` +
+          `${spotted.length === 1 ? "that one" : "those"} until it breaks line of sight`
+        : prerequisites.reason,
   };
 }
 
@@ -368,16 +430,26 @@ interface HideOutcome {
   result: HideResult;
 }
 
-/** One creature's outcome, worded for the table. */
-function hideLine(token: any, result: HideResult): string {
+/**
+ * One creature's outcome, worded for the table.
+ *
+ * Exported so `test/hide.test.ts` can pin the one property that matters here: a successful hide reads the
+ * same whether or not anybody is watching. That is a leak nobody would notice in review, because the
+ * sentence a leaking version produces is perfectly reasonable prose.
+ */
+export function hideLine(token: any, result: HideResult): string {
   const name = foundry.utils.escapeHTML(String(token?.name ?? "?"));
-  return result.hidden
-    ? `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Hidden", {
-        dc: String(result.total),
-      })}`
-    : `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Failed", {
-        reason: foundry.utils.escapeHTML(result.reason),
-      })}`;
+  if (!result.hidden)
+    return `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Failed", {
+      reason: foundry.utils.escapeHTML(result.reason),
+    })}`;
+
+  // Deliberately identical whether or not somebody already has eyes on this creature. See the note in
+  // `takeHideAction`: a hide that reads differently when it is being watched tells the player there is
+  // something out there to watch them.
+  return `<strong>${name}</strong> ${game.i18n.format("NOODLRHOOKS.Combat.Hide.Hidden", {
+    dc: String(result.total),
+  })}`;
 }
 
 async function postHide(outcomes: HideOutcome[]): Promise<void> {
@@ -395,10 +467,13 @@ async function postHide(outcomes: HideOutcome[]): Promise<void> {
 /**
  * The half of the ruling only the GM may read.
  *
- * A refused hide has to say enough for the player to act on — move, find cover, try elsewhere — without
- * handing them a roster of everything on the map. So the sentence goes to the table and the names come
- * here. The whisper is skipped entirely when the detail says nothing the public line did not, which is
- * every successful hide, so this adds no noise to an ordinary session.
+ * Two things land here and both are information the player must not have. A refused hide has to say enough
+ * for them to act on — move, find cover, try elsewhere — without handing them a roster of the map. And a
+ * successful hide that somebody is already watching looks, to the table, exactly like one nobody is: the
+ * count of watchers is itself a spoiler, so it comes here rather than into the card.
+ *
+ * Skipped when the detail says nothing the public line did not, which is a clean hide with nobody about,
+ * so an ordinary session gains no noise.
  */
 async function whisperHideDetail(outcomes: HideOutcome[]): Promise<void> {
   const lines = outcomes
@@ -552,7 +627,7 @@ export function surveyHide(): unknown {
       })),
     };
   });
-  const report = { rules: rulesVersion(), selected: rows };
+  const report = { rules: rulesVersion(), alwaysAllowed: isHideAlwaysAllowed(), selected: rows };
   console.log(`[${MODULE_ID}] hide survey\n${JSON.stringify(report, null, 2)}`);
   return report;
 }

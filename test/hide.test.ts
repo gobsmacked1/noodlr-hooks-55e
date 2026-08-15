@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { canHide } from "../src/rules/hide";
+import { canHide, hideLine } from "../src/rules/hide";
 
 const HOSTILE = -1;
 const FRIENDLY = 1;
@@ -56,7 +56,9 @@ beforeEach(() => {
     // anything other than "legacy" means the 2024 prerequisites apply.
     settings: { get: () => true },
     users: { filter: () => [] },
+    i18n: { format: (key: string, data: Record<string, string>) => `${key} ${Object.values(data).join(" ")}` },
   };
+  (globalThis as any).foundry = { utils: { escapeHTML: (s: string) => s } };
   (globalThis as any).CONFIG = { specialStatusEffects: { DEFEATED: "dead" } };
   (globalThis as any).canvas = {
     grid: {
@@ -147,4 +149,48 @@ test("a friendly creature is not an enemy, however close it stands", () => {
   const ally = token({ id: "ally", name: "Cleric", x: GRID, darkvision: 60 });
   scene(rogue, [ally]);
   assert.equal(canHide(rogue).allowed, true);
+});
+
+test("the watchers are reported by id, because that is what the hide is banked against", () => {
+  // The house rule does not refuse the action; it hides the creature from everyone EXCEPT the enemies
+  // this list names. So the ids have to be right and complete — a watcher missing from here is one the
+  // rogue is wrongly hidden from, which is the failure mode the whole per-observer design exists to fix.
+  const rogue = token({ id: "rogue", name: "Rogwiz" });
+  const near = token({ id: "near", name: "Bandit", disposition: HOSTILE, x: GRID * 3, darkvision: 60 });
+  const far = token({ id: "far", name: "Archer", disposition: HOSTILE, x: GRID * 40, darkvision: 60 });
+  scene(rogue, [near, far]);
+
+  const check = canHide(rogue);
+  assert.deepEqual(check.exposed, ["near"]);
+});
+
+test("nobody in view means nobody is exposed, so the hide is whole", () => {
+  const rogue = token({ id: "rogue", name: "Rogwiz" });
+  scene(rogue, []);
+  assert.deepEqual(canHide(rogue).exposed, []);
+});
+
+test("a watched hide and a clean one read identically at the table", () => {
+  // The player does not know those watchers exist. Saying "hidden, but two of them can see you" hands them
+  // a fact they had no way to have and cannot un-have, and it spoils an ambush as completely as naming the
+  // creatures would. The count is the leak, not just the names.
+  const clean = hideLine(token({ name: "Rogwiz" }), {
+    hidden: true,
+    total: 19,
+    dc: 15,
+    reason: "nobody is watching",
+    detail: "nobody is watching",
+  });
+  const watched = hideLine(token({ name: "Rogwiz" }), {
+    hidden: true,
+    total: 19,
+    dc: 15,
+    reason: "there is nowhere to hide from here",
+    detail: "hid at DC 19 but is in plain view of Bandit Captain, Archmage",
+  });
+
+  assert.equal(watched, clean);
+  for (const leak of ["Bandit", "Archmage", "plain view", "2", "two"]) {
+    assert.equal(watched.includes(leak), false, `"${leak}" reached the public card`);
+  }
 });

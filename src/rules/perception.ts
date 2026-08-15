@@ -52,8 +52,9 @@ import {
   describeStealth,
   evades,
   hidingState,
+  noteLostSight,
+  noteSpotted,
   passivePerception,
-  reveal,
 } from "./stealth";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
@@ -133,13 +134,25 @@ function enlisted(combat: any): Set<string> {
 async function sweep(): Promise<void> {
   if (!shouldSweep()) return;
   sweeping = true;
+  // One vision source per spotter, reused across the party and across both passes below. Building the
+  // source runs a full wall sweep, which is the entire cost of this feature; testing an extra target
+  // against an existing one is arithmetic. Never build inside an inner loop.
+  const vision = new Map<string, any>();
   try {
-    // Creatures already fighting have nothing to notice. Everyone else keeps watching, so a warband
-    // that was out of earshot when the fight started can still wander into it (user, 2026-08-05).
     const combat = activeCombat();
     const already = combat?.started ? enlisted(combat) : new Set<string>();
-    const hostiles = tokensOnScene().filter((t) => isHostile(t) && !already.has(String(t.id)));
+    const living = tokensOnScene().filter(isHostile);
     const party = tokensOnScene().filter(isPlayerToken);
+
+    // Who-can-see-whom bookkeeping runs over EVERY hostile, including the ones already fighting, and it
+    // runs before the engage check so that decision reads fresh state. The engage check below cannot do
+    // this job: it deliberately ignores enlisted creatures, and breaking line of sight matters most in
+    // the middle of a fight.
+    await maintainSpotted(living, party, vision);
+
+    // Creatures already fighting have nothing to notice. Everyone else keeps watching, so a warband
+    // that was out of earshot when the fight started can still wander into it (user, 2026-08-05).
+    const hostiles = living.filter((t) => !already.has(String(t.id)));
     if (hostiles.length === 0 || party.length === 0) return;
 
     // Closest pair first, so the creature that would plausibly notice first is the one that does.
@@ -151,34 +164,76 @@ async function sweep(): Promise<void> {
     }
     pairs.sort((a, b) => a.distance - b.distance);
 
-    // One vision source per spotter, reused across the party. Building the source runs a full wall
-    // sweep, which is the entire cost of this feature; testing an extra target against an existing one
-    // is arithmetic. Never build inside the inner loop.
-    const vision = new Map<string, any>();
-    try {
-      for (const { spotter, target } of pairs) {
-        if (!perceives(spotter, target, vision, true)) continue;
-        if (combat?.started) {
-          await reinforce(combat, spotter, `${spotter.name} spots ${target.name}`);
-        } else {
-          await engage(spotter, target);
-        }
-        return;
+    for (const { spotter, target } of pairs) {
+      if (!perceives(spotter, target, vision)) continue;
+      if (combat?.started) {
+        await reinforce(combat, spotter, `${spotter.name} spots ${target.name}`);
+      } else {
+        await engage(spotter, target);
       }
-    } finally {
-      // These are ours and were never registered with the canvas; leaving them would leak polygons.
-      for (const source of vision.values()) {
-        try {
-          source?.destroy?.();
-        } catch {
-          /* a source that will not tidy up is not worth failing a sweep over */
-        }
-      }
+      return;
     }
   } catch (err) {
     log("perception sweep failed:", err);
   } finally {
+    // These are ours and were never registered with the canvas; leaving them would leak polygons.
+    for (const source of vision.values()) {
+      try {
+        source?.destroy?.();
+      } catch {
+        /* a source that will not tidy up is not worth failing a sweep over */
+      }
+    }
     sweeping = false;
+  }
+}
+
+/**
+ * Keep each hider's list of watchers-who-have-them current, in both directions.
+ *
+ * This is the whole of the per-observer stealth model's upkeep, and it replaced a much blunter rule: a
+ * hidden creature that any one enemy found used to be revealed to EVERYBODY, status lifted and roll
+ * discarded. That is right for invisibility ending and wrong for hiding, and the difference is the point
+ * — a rogue sneaking past four guards who is clocked by one of them has been clocked by one of them.
+ *
+ * Only runs when somebody is actually hiding, which is nearly never, so the cost of building a vision
+ * source per hostile is not paid by an ordinary fight.
+ */
+async function maintainSpotted(
+  hostiles: any[],
+  party: any[],
+  cache: Map<string, any>,
+): Promise<void> {
+  if (!isStealthEnabled() || hostiles.length === 0) return;
+
+  for (const target of party) {
+    const hiding = hidingState(target);
+    if (!hiding) continue;
+
+    const found: string[] = [];
+    const lost: string[] = [];
+    const present = new Set<string>();
+
+    for (const spotter of hostiles) {
+      const id = String(spotter.id);
+      present.add(id);
+      const { seen, useModes } = sightOf(spotter, target, cache);
+      if (!seen) {
+        // Sight is the only test for LOSING somebody. Re-running the contest here would let a watcher
+        // forget a creature it had already found and re-find it on alternate sweeps, which at the table
+        // reads as the hide flickering on and off.
+        if (hiding.spotted.has(id)) lost.push(id);
+        continue;
+      }
+      if (hiding.spotted.has(id)) continue;
+      if (!evades(spotter, target, separation(spotter, target), useModes)) found.push(id);
+    }
+
+    // A watcher that has left the scene or died keeps no claim on anybody.
+    for (const id of hiding.spotted) if (!present.has(id)) lost.push(id);
+
+    if (found.length > 0) await noteSpotted(target, found);
+    if (lost.length > 0) await noteLostSight(target, lost);
   }
 }
 
@@ -232,26 +287,24 @@ function separation(a: any, b: any): number {
  * Elevation is not considered beyond what core's own modes do: Foundry's vision is largely planar, and
  * modelling a creature's vertical arc of sight would be inventing precision we do not have.
  */
-function perceives(spotter: any, target: any, cache: Map<string, any>, live = false): boolean {
+function perceives(spotter: any, target: any, cache: Map<string, any>): boolean {
   const { seen, useModes } = sightOf(spotter, target, cache);
 
   if (!seen) return false;
   if (!isStealthEnabled()) return true;
 
   // A clear line of sight is Foundry's answer, not 5e's. Ask the dice too.
-  const wasHiding = live && Boolean(hidingState(target));
   const evaded = evades(spotter, target, separation(spotter, target), useModes);
   if (evaded) {
     announceEvasion(spotter, target, evaded);
     return false;
   }
 
-  // "An enemy finds you" is one of the four things that end the 2024 Hide, and this is that moment. Only
-  // on a real sweep: the diagnostic survey asks the same question about every pairing on the map and must
-  // not change the world by being run.
-  if (live && wasHiding) {
-    void reveal(target, `${String(spotter?.name ?? "an enemy")} found them`);
-  }
+  // Being found used to lift the hide outright, here, for everybody. It does not any more: `maintainSpotted`
+  // records that THIS watcher has them and leaves the hide standing against everyone else. The universal
+  // reveal is still right for the things that deserve it — attacking, casting aloud, invisibility ending —
+  // and those all still call `reveal` from `rules/stealth.ts`. `live` is no longer consulted for that
+  // reason: this function is pure again, which is what the diagnostic survey always needed it to be.
   return true;
 }
 

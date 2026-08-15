@@ -29,6 +29,7 @@ import {
 } from "../integration/capability";
 import { bindingsFor } from "./bindings";
 import { conditionsMet, type EvalContext, type Subject } from "./predicates";
+import { describePredicate, describeRule } from "./describe";
 import { asQuantity, resolveQuantity } from "./quantity";
 import {
   addCombatants,
@@ -617,6 +618,16 @@ export function surveyCapabilities(): Record<string, unknown> {
           // which is what a third of the compiled corpus actually does.
           standing: isStanding(rule),
           uses: rule.uses ? `${rule.uses.max} per ${rule.uses.per}` : "unlimited",
+          // THE GUARDS, and their absence is the single most useful thing this survey can report.
+          // Every other field here describes a rule that fires; `guards` is the only one that says
+          // WHEN, and a rule firing at the wrong time is what gets reported from a table. The Troll
+          // shedding limbs at full health (2026-08-15) was two rounds of back-and-forth precisely
+          // because this survey could show that a summon was bound and running and could not show
+          // that its "while Bloodied" had gone missing in compilation.
+          guards: (rule.condition ?? []).map(describePredicate),
+          // In English, because a reviewer skims twenty of these looking for the wrong one. Same
+          // renderer as the capability sheet, so the console and the window cannot disagree.
+          reads: describeRule(rule),
         })),
       })),
     };

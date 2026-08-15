@@ -618,6 +618,18 @@ Reservations and known gaps:
 - Revert map: the pivot is self-contained in `src/combat/auto/` plus the rewritten `npc-turn.ts`.
   Restoring the AI loop means restoring that one file from v0.4.21.
 
+## `api.surveyX()` in this file means `noodlrHooks.surveyX()` at the console
+
+Every diagnostic below is written as `api.something()`, which is what it is called from inside the module
+and is not a name that exists in a browser console. Reported twice as the surveys "erroring", and a
+`ReferenceError: api is not defined` says nothing about which module the reader was supposed to reach
+through. `module.ts` therefore assigns the same object to `globalThis.noodlrHooks` beside
+`game.modules.get(MODULE_ID).api`, so **`noodlrHooks.surveyEconomy()` works as typed** and tab-completion
+lists the whole surface. Not `api`: a one-word global belongs to whoever assigns it last.
+
+Two of them need something selected and say so rather than failing: `explainTurn()` wants a controlled
+token in an active combat, `testMove()` wants a controlled token.
+
 ## Research method: the corpus, subagents, and not losing the work
 
 Every "nobody automates this" finding in this file came from reading source, never from asking a model
@@ -1932,6 +1944,123 @@ test instead of failing quietly at a table.
  with nothing to hang it on), Ready (a prose trigger, and the reaction it buys is billed as an Action —
  the known imperfection already recorded under the declarations note), and Search (the roll is one skill
  of four and the reading is the GM's). Study and Utilize stay refused in `rules/general.ts`.
+
+## Hiding is per-watcher, and the refusal was the wrong shape entirely (v0.6.2, 2026-08-15)
+
+v0.4.1 fixed *which* enemies count as watchers and left the surrounding rule alone. The user's report a day
+later was that the rule itself is wrong: **"we should never tell the Player they simply can't Hide."** They
+are right, and the reason is worth stating because it is not a preference about difficulty. A refusal makes
+hiding a binary that the printed rule never intended and that no table plays — 2024's Hide is a check whose
+result is a **number other creatures have to beat**, and turning it into a pass/fail against DC 15 throws
+that number away. The interesting hides are the partial ones.
+
+- **`combat.hideAlways` (world, default ON) is a house rule and is labelled as one.** Off gives the printed
+ rule back verbatim. It defaults on because the printed rule is what produced the bug report, and because
+ the failure modes are asymmetric: playing loose costs a player their action, playing strict costs them a
+ mechanic. Same reasoning as the generous direction the economy layer errs in everywhere.
+- **THE BANKED DC IS NOT THE WHOLE STATE ANY MORE.** `Banked.spotted` is a list of token ids, and it is what
+ makes "hidden from some people" expressible at all. A DC alone can only answer a question about the world;
+ hiding is a question about a *pair*. Everything else here follows from that one field.
+ - Seeded at declaration from `HideCheck.exposed`, so hiding in front of a guard is legal, costs the
+ action, and hides you from that guard not at all. That is the user's own wording implemented literally.
+ - **`evades()` checks `spotted` after the absolute veils and before the contest**, and the ordering is
+ load-bearing in both directions. Magical darkness beats a watcher that has already found you; a watcher
+ that has already found you is not asked to roll again.
+- **Losing sight is tested by SIGHT ALONE, never by re-running the contest.** `maintainSpotted` drops a
+ watcher when `sightOf` says it cannot see the target, and adds one when the contest says it can. Re-running
+ the contest to *remove* somebody would let a watcher forget a creature and re-find it on alternate sweeps,
+ which at the table reads as the hide flickering. A watcher that leaves the scene or dies is dropped too.
+- **Stealth's reveal is per-watcher; invisibility's is universal, and conflating them was the bug in (4).**
+ `perceives()` no longer calls `reveal` at all, and lost its `live` parameter as a consequence — it is a pure
+ predicate again, which is what the diagnostic survey always needed. The universal `reveal` still fires
+ where it should: attacking, casting aloud, invisibility ending. **Do not reintroduce a reveal into the
+ perception sweep**; a sentry noticing you is not you standing up and shouting.
+- **EVERY SUCCESSFUL HIDE READS IDENTICALLY AT THE TABLE, and the COUNT is the leak rather than the names**
+ (user's edict, 2026-08-15, correcting a first attempt of mine that whispered the names and published the
+ number). "Hidden, but two of them can see you" tells a player that something is out there and how much of
+ it, from a *successful* action, and they cannot un-know it — an ambush is as thoroughly spoiled by the
+ tally as by the roster. v0.4.1 had already established the principle for a refusal and I applied it too
+ narrowly.
+ - **This is the strongest argument for `hideAlways` being the default rather than merely the kinder
+ option.** A refusal cannot be delivered without explaining itself, so the printed rule is not
+ enforceable at all without leaking the room; the house rule is the only version of Hide that can keep
+ the GM's secret. The player learns there was a sentry by being noticed by it.
+ - `hideLine` is exported **solely** so `test/hide.test.ts` can pin it, because a leaking version produces
+ perfectly reasonable prose and would pass any review. Same precedent as `timeoutChoice` and
+ `survivalOptions`.
+- Diagnostics: `api.surveyHide()` reports `alwaysAllowed` and every watcher's verdict.
+
+## `apply=false`: the second contamination, and it is welded to the rule (v0.6.2, 2026-08-15)
+
+v0.6.1 stripped the hidden "Foundry Note" asides and the Troll went on shedding limbs at full health
+with no exhaustion. The right move at that point was **not** to conclude the model had misread the
+rule; it was to look again at what was sent. There was a second piece of tooling prose in there, one
+granularity down and with no heading to notice it by:
+
+> The troll has 1 `&Reference[Exhaustion apply=false]` level for each missing limb.
+
+`apply=false` tells the chat card's renderer not to draw an apply button. Sitting inside the word
+`Exhaustion`, read by something looking for what to emit, it is a plain-English instruction **not to
+apply Exhaustion** — and that is exactly the clause reported missing. **1,128 occurrences in the
+shipped corpus**, essentially all of them welded to a condition name. `unwrapEnrichers` in
+`capability/prose.ts`, called from inside `plainText`, so it is upstream of the hash and a stale
+descriptor recompiles.
+
+- **UNWRAP, NEVER DELETE, and that distinction is the whole design.** The words inside an enricher
+  are the rule: `Exhaustion` is the condition, `{Troll Limb}` is what gets summoned, `2d6` is the
+  damage. This keeps the reading and discards the markup, which is exactly what tag-stripping does one
+  line above it. Nothing here removes a word or a number, which is the standing rule for everything
+  upstream of the cache key.
+- **An unlabelled `@UUID[…]` is left whole (3,460 of them), and that is the conservative choice
+  rather than an oversight.** It renders as a document's name, resolvable only through a Foundry
+  global this file may not touch — so the options are a noisy id or deleting a noun out of the middle
+  of a sentence. An unlabelled `[[…]]` roll (4,120) is left whole for a better reason: `[[/damage 2d6
+  slashing]]` carries the dice, and they are the point.
+- **The generic-name templating survives.** `[[lookup @name lowercase]]{monster}` unwraps to
+  `monster`, not to this creature's name, so 270 creatures still share one wording and one cache
+  entry. Unwrapping to the resolved name would have quietly multiplied the compile bill by 270.
+- **THE LESSON IS ABOUT THE SEARCH, NOT THE STRING.** After v0.6.1 the file said, in effect, "the
+  notes are handled". The honest state was "one *class* of note is handled", and nothing had asked
+  whether there were others. **A scrubber is never finished; it is finished for the shapes somebody
+  has looked for.** The `compendium` counterfactual recorded in `prose.ts` had to be re-measured in
+  the same change and halved (2,469 → 1,336 descriptions), which is a second instance of the same
+  thing: a measurement in a comment ages against edits nowhere near it.
+- Requires a recompile of anything compiled before this release. The hash changes, so an enabled
+  compiler does it on the next scene load without being asked.
+
+## A survey that cannot show a rule's guards cannot diagnose a rule that fires too often (v0.6.2)
+
+`surveyCapabilities()` reported the trigger, the effect, the adjudication, whether the rule runs and
+what it costs — every field describing a rule that fires, and **not one describing when.** So two
+rounds of "the Troll is summoning limbs at full health" were spent unable to distinguish the two
+possibilities that matter: a descriptor whose `while Bloodied` went missing in compilation, versus a
+predicate failing open at runtime. Those have opposite fixes.
+
+It now carries `guards` (each condition through `describePredicate`) and `reads` (the whole rule
+through `describeRule`, the same renderer the capability sheet uses, so console and window cannot
+disagree). **The general form: a diagnostic that reports only what a thing does, and never what
+gates it, is unable to diagnose the commonest complaint about it** — which is not "it did the wrong
+thing" but "it did the right thing at the wrong time".
+
+## A creature that meets a wall must not stop (v0.6.2, 2026-08-15)
+
+`moveToward` offered four candidate destinations and **all four lay on the same line**, so a blocked route
+was refused four times and the creature stood still for the rest of the fight. `moveAwayFrom` had had a fan
+of bearings since it was written; this never did, and nothing compared the two. Reported as a Troll walking
+into a wall and giving up the pursuit.
+
+- **Candidates are ordered by ground closed — `cos(offset) × fraction` — and that single rule replaces
+ arguing about preference.** The direct route wins when it is open, a shallow detour beats a short shuffle
+ forward, and a wide sidestep is the last resort. Sideways steps are offered at full stretch only; half of
+ a wide detour gains almost nothing and would crowd out the better straight steps.
+- **Eight candidates, and that is a budget rather than a round number.** Each is a real `move()` with a
+ stall watchdog behind it, so this is a list to be stingy with, not a search space.
+- **Every candidate must make progress.** A step that gains nothing is worse than not moving: it spends the
+ budget and ends the approach. Pinned by a test.
+- **Still not pathfinding, deliberately.** A creature three corners away gets closer each turn and tries
+ again, which is what the header of `core/movement.ts` has always promised. What it may never do is stop.
+- The fan is deterministic rather than seeded, so identical creatures all break the same way round the same
+ obstacle. Cheap to change (`positioning.ts` has the seeded-bearing precedent) and not obviously worth it.
 
 ## Two parts of one module answering "can X see Y" differently (v0.4.1, 2026-08-14)
 

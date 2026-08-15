@@ -66,12 +66,31 @@ import { screensBetween } from "../core/screens";
 interface Banked {
   dc: number;
   ts: number;
+  /**
+   * Token ids that already have eyes on this creature, and for whom the DC therefore means nothing.
+   *
+   * Hiding is not one fact about a creature, it is one fact per watcher, and until v0.7.0 this layer had
+   * no way to say so: a hide either worked against everybody or was refused outright. That is why a rogue
+   * pressing Hide in a lit corridor was told "you cannot" — the only two answers available were both
+   * wrong. A guard standing over you is on this list; the four in the next room are not, and the same
+   * roll hides you from them perfectly well.
+   *
+   * Membership is earned two ways and lost one. It is seeded at declaration with everything that can
+   * plainly see the creature, and added to when a watcher's passive Perception beats the DC. It is
+   * cleared for a watcher that loses sight of the creature — which is the whole of "this remains the case
+   * until you break line of sight with the enemies that spotted you", and the reason it has to be stored
+   * rather than recomputed: once a guard has seen you step behind the barrel, the barrel is no longer
+   * hiding you from that guard.
+   */
+  spotted?: string[];
 }
 
 /** A creature's hidden state, whoever is keeping track of it. */
 export interface Hiding {
   dc: number;
   from: string;
+  /** Watchers this creature is not hidden from at all, whatever the DC says. Token ids. */
+  spotted: Set<string>;
 }
 
 /**
@@ -454,7 +473,8 @@ export function hidingState(token: any): Hiding | null {
       typeof stealthy?.getBankedStealth === "function"
     ) {
       const dc = Number(stealthy.getBankedStealth(token));
-      if (Number.isFinite(dc)) return { dc, from: "Stealthy" };
+      // No `spotted` list: that module owns the whole state and has no per-observer concept to read.
+      if (Number.isFinite(dc)) return { dc, from: "Stealthy", spotted: new Set<string>() };
     }
   } catch {
     /* their internals are not our contract; a throw means "no opinion" */
@@ -465,7 +485,11 @@ export function hidingState(token: any): Hiding | null {
     if (game.modules?.get?.("perceptive")?.active) {
       const raw = Number(doc?.getFlag?.("perceptive", "PPDCFlag"));
       if (Number.isFinite(raw) && raw !== 0) {
-        return { dc: raw < 0 ? Number.POSITIVE_INFINITY : raw, from: "Perceptive" };
+        return {
+          dc: raw < 0 ? Number.POSITIVE_INFINITY : raw,
+          from: "Perceptive",
+          spotted: new Set<string>(),
+        };
       }
     }
   } catch {
@@ -480,13 +504,76 @@ export function hidingState(token: any): Hiding | null {
   if (!hasStatus(doc, HIDING_STATUS)) return null;
 
   const own = readFlag(doc, "stealth") as Banked | undefined;
-  if (Number.isFinite(Number(own?.dc))) return { dc: Number(own?.dc), from: "a Stealth roll" };
+  const spotted = new Set<string>(
+    Array.isArray(own?.spotted) ? (own?.spotted as unknown[]).map(String) : [],
+  );
+  if (Number.isFinite(Number(own?.dc)))
+    return { dc: Number(own?.dc), from: "a Stealth roll", spotted };
 
   // Declared but with no number of its own — the status arrived from somewhere that never rolled. Passive
   // Stealth is the honest stand-in, and it keeps the token HUD icon working as a declaration.
   const passive = Number(token?.actor?.system?.skills?.ste?.passive);
   const base = Number((globalThis as any).CONFIG?.DND5E?.skillPassive?.base ?? 10);
-  return { dc: Number.isFinite(passive) ? passive : base, from: "the Hiding condition" };
+  return {
+    dc: Number.isFinite(passive) ? passive : base,
+    from: "the Hiding condition",
+    spotted,
+  };
+}
+
+/**
+ * Record that these watchers have this creature in sight, so its hide buys nothing against them.
+ *
+ * Additive and idempotent: a watcher already on the list costs no write, which matters because the
+ * perception sweep runs every six seconds and a world setting round trip per sweep per pairing would be
+ * a flood. Silent when the creature is not hiding — there is nothing to qualify.
+ */
+export async function noteSpotted(token: any, watchers: Iterable<string>): Promise<void> {
+  const doc = token?.document ?? token;
+  const own = readFlag(doc, "stealth") as Banked | undefined;
+  if (!own || !Number.isFinite(Number(own.dc))) return;
+
+  const spotted = new Set<string>((own.spotted ?? []).map(String));
+  let added = 0;
+  for (const id of watchers) {
+    const key = String(id);
+    if (!key || spotted.has(key)) continue;
+    spotted.add(key);
+    added += 1;
+  }
+  if (added === 0) return;
+
+  try {
+    await doc.setFlag(MODULE_ID, "stealth", { ...own, spotted: [...spotted] } satisfies Banked);
+    log(`stealth: ${doc?.name} has been spotted by ${added} more watcher(s)`);
+  } catch (err) {
+    log(`could not record who spotted ${doc?.name}:`, err);
+  }
+}
+
+/**
+ * These watchers have lost sight of the creature, so its hide works against them again.
+ *
+ * The other half of the per-observer model, and the half that makes it a rule rather than a one-way
+ * ratchet: a rogue seen crossing a lit hall is hidden again the moment the door closes behind them.
+ * "Lost sight" is the vision question only, asked of `rules/perception.ts` — never a fresh contest, or a
+ * watcher would forget the creature and re-find it on alternate sweeps.
+ */
+export async function noteLostSight(token: any, watchers: Iterable<string>): Promise<void> {
+  const doc = token?.document ?? token;
+  const own = readFlag(doc, "stealth") as Banked | undefined;
+  if (!own || !Array.isArray(own.spotted) || own.spotted.length === 0) return;
+
+  const gone = new Set<string>([...watchers].map(String));
+  const kept = own.spotted.map(String).filter((id) => !gone.has(id));
+  if (kept.length === own.spotted.length) return;
+
+  try {
+    await doc.setFlag(MODULE_ID, "stealth", { ...own, spotted: kept } satisfies Banked);
+    log(`stealth: ${doc?.name} has slipped out of sight of ${own.spotted.length - kept.length}`);
+  } catch (err) {
+    log(`could not clear who had spotted ${doc?.name}:`, err);
+  }
 }
 
 /** Passive Perception, or the score of a creature with average Wisdom and no training. */
@@ -615,6 +702,13 @@ export function evades(
 
   const hiding = hidingState(target);
   if (!hiding) return null;
+
+  // This watcher already has them. Checked AFTER the absolute veils and before the contest, and both
+  // placements are the rule rather than convenience: a guard who watched you duck behind the barrel is
+  // not fooled by the barrel however well you rolled, but stepping into a fog bank or turning invisible
+  // is a new fact about the world that beats anything it saw a moment ago. That ordering is also the
+  // difference between hiding and invisibility the whole redesign turns on.
+  if (hiding.spotted.has(String(spotter?.id))) return null;
 
   const dc = hiding.dc + present.reduce((sum, veil) => sum + veil.bonus, 0);
   const perception = passivePerception(spotter) + bonus;

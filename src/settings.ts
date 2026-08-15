@@ -134,6 +134,7 @@ export function registerCombatSettings(): void {
   world(COMBAT_SETTINGS.autoEngage, "AutoEngage", Boolean, true);
   world(COMBAT_SETTINGS.engageRadius, "EngageRadius", Number, 30);
   world(COMBAT_SETTINGS.stealth, "Stealth", Boolean, true);
+  world(COMBAT_SETTINGS.hideAlways, "HideAlways", Boolean, true);
   world(COMBAT_SETTINGS.surprise, "Surprise", Boolean, true);
   world(COMBAT_SETTINGS.invisBreak, "InvisBreak", Boolean, true);
   // Both sides default to what the single setting used to do, so a fresh world behaves as before and an
@@ -571,6 +572,23 @@ function splitValue(base: string, subject: unknown): unknown {
  */
 export function isStealthEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.stealth));
+}
+
+/**
+ * May a creature always take the Hide action, however hopeless its position and however badly it rolls?
+ *
+ * ON by default, and the default is the decision. RAW 2024 gates Hide behind Heavily Obscured or
+ * three-quarters cover, out of every enemy's line of sight, and a DC 15 check — so a refusal is correct by
+ * the letter and reads at the table as the button being broken. The user's ruling (2026-08-15): let them
+ * spend the action, bank whatever they rolled as the number to beat, and let each enemy's own perception
+ * decide who is fooled. A rogue hiding in plain sight of a guard has simply bought nothing from that guard,
+ * which is the same outcome the rule intends and arrives at by refusing.
+ *
+ * The gate is not deleted, because it is the printed rule and some tables want it. Off, the prerequisites
+ * and the DC refuse exactly as they did before.
+ */
+export function isHideAlwaysAllowed(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.hideAlways));
 }
 
 /**
