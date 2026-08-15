@@ -24,6 +24,153 @@
   border-color: rgba(120, 46, 34, 0.6);
 }
 
+/* ---- The Damage button's lock ---------------------------------------------------------------- */
+
+/* Four states, and only one of them is an invitation. The green is the whole feature at the table: a
+   player learns within one fight that green means the swing landed and the button is theirs, which is
+   information the system's card has never carried. */
+
+.noodlr-gate--waiting,
+.noodlr-gate--miss,
+.noodlr-gate--spent {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Green when it is genuinely pressable, and only then — `open` is "nobody could tell you, decide for
+   yourself", which must not look like a confirmed hit. */
+.noodlr-gate--hit:not(:disabled) {
+  border-color: var(--dnd5e-color-success, rgba(60, 120, 60, 0.9));
+  background: rgba(60, 130, 60, 0.18);
+  font-weight: bold;
+}
+
+.noodlr-gate--hit:not(:disabled):hover {
+  background: rgba(60, 130, 60, 0.3);
+}
+
+/* A graze has already been paid out, so the button is shut for the right reason rather than the sad
+   one. Amber says "something happened, just not this". */
+.noodlr-gate--graze {
+  opacity: 0.75;
+  border-color: rgba(180, 130, 40, 0.8);
+  background: rgba(180, 130, 40, 0.12);
+  cursor: not-allowed;
+}
+
+/* The GM's way past a reading they disagree with. Deliberately plain and small: it is an override, not
+   a feature, and it should not compete with the buttons the card is actually about. */
+.noodlr-gate-unlock {
+  width: auto;
+  align-self: flex-start;
+  padding: 0 0.6em;
+  font-size: var(--font-size-11, 0.7rem);
+  line-height: 1.7;
+  opacity: 0.7;
+}
+
+.noodlr-gate-unlock:hover {
+  opacity: 1;
+}
+
+/* ---- Compact chat cards ----------------------------------------------------------------------- */
+
+/* Client-scoped, toggled by `applyCompactCards()` on `document.body`.
+ *
+ * WHAT IS CUT AND WHAT IS NOT. Every rule below takes out padding, a gap, a margin or a decorative
+ * image. No rule touches a font size, because the request was explicitly for the same text in less
+ * space — a smaller card that cannot be read from across the room has solved nothing.
+ *
+ * The three biggest wins, in order, are the ones worth knowing if this ever needs re-tuning: the
+ * 38px sender avatar and its header margin, the 32px repeat of the same artwork inside the card's own
+ * summary row, and the doubled padding of message → description → details. The 28px dice total is the
+ * one number left at full size on purpose; it is the answer everybody is leaning in to read.
+ *
+ * `!important` throughout, and for the usual reason: these override a system stylesheet loaded after
+ * ours, whose selectors are long chains under `:is(.chat-popout, #chat-log, .chat-log)`. */
+
+body.noodlr-compact-cards :is(.chat-popout, #chat-log, .chat-log) .message {
+  padding: 0.25rem 0.35rem !important;
+}
+
+body.noodlr-compact-cards :is(.chat-popout, #chat-log, .chat-log) .message .message-header {
+  margin-bottom: 0.15rem !important;
+}
+
+body.noodlr-compact-cards
+  :is(.chat-popout, #chat-log, .chat-log)
+  .message
+  .message-header
+  .message-sender {
+  gap: 0.4rem !important;
+}
+
+body.noodlr-compact-cards
+  :is(.chat-popout, #chat-log, .chat-log)
+  .message
+  .message-header
+  .message-sender
+  :is(img, video) {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+body.noodlr-compact-cards :is(.chat-popout, #chat-log, .chat-log) .message .name-stacked {
+  min-height: 0 !important;
+}
+
+body.noodlr-compact-cards .dnd5e2 .chat-card {
+  gap: 0.2rem !important;
+}
+
+body.noodlr-compact-cards .dnd5e2 .chat-card .description {
+  padding: 0.25rem 0.35rem !important;
+}
+
+body.noodlr-compact-cards .dnd5e2 .chat-card .description .summary {
+  gap: 0.35rem !important;
+}
+
+body.noodlr-compact-cards .dnd5e2 .chat-card .description .summary > img {
+  width: 22px !important;
+  height: 22px !important;
+}
+
+body.noodlr-compact-cards .dnd5e2 .chat-card .description .details p:first-child {
+  padding-top: 0.25rem !important;
+}
+
+body.noodlr-compact-cards .dnd5e2 .chat-card .card-buttons {
+  gap: 0.2rem !important;
+}
+
+/* Foundry's default button is sized for a form, not for a stack of four inside a chat card. This is
+   where most of the remaining height goes once the images are down. */
+body.noodlr-compact-cards .dnd5e2 .chat-card .card-buttons button,
+body.noodlr-compact-cards .message :is(.card-tray, .effects-tray, .targets-tray) button {
+  line-height: 1.5 !important;
+  padding-block: 0 !important;
+  min-height: 0 !important;
+}
+
+body.noodlr-compact-cards .message .dice-roll .dice-result .dice-formula {
+  padding: 0.1rem 0.25rem !important;
+}
+
+body.noodlr-compact-cards .message .dice-roll .dice-result .dice-total {
+  margin-top: 0.15rem !important;
+  padding: 0 !important;
+}
+
+/* The trays (targets, damage, effects) repeat the card's own gutter around a single row. */
+body.noodlr-compact-cards .message :is(.card-tray, .effects-tray, .targets-tray) {
+  margin-block: 0.2rem !important;
+}
+
+body.noodlr-compact-cards .message p.supplement {
+  padding: 0 0.25rem !important;
+}
+
 /* ---- The capability sheet ------------------------------------------------------------------- */
 
 .noodlr-capability-sheet .window-content {

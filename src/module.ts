@@ -28,7 +28,12 @@
 //     listener had been registered for GMs only.
 
 import { MODULE_ID, log } from "./constants";
-import { migrateSettings, registerCombatSettings, getCombatAutomation } from "./settings";
+import {
+  applyCompactCards,
+  migrateSettings,
+  registerCombatSettings,
+  getCombatAutomation,
+} from "./settings";
 import { announceRuling, proposeRuling, requestBehavior, PROTOCOL } from "./integration/contract";
 import { registerDossierCleanup } from "./tactics/dossier";
 import { toggleSelectedCombatantAutomation } from "./tactics/control";
@@ -47,6 +52,7 @@ import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
+import { registerDamageGate, surveyGate } from "./rules/gate";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
 import { surveyLegendary } from "./rules/legendary";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
@@ -115,6 +121,7 @@ export interface NoodlrHooksApi {
   surveyMovement(): unknown;
   surveyForced(): unknown;
   surveyDamage(): unknown;
+  surveyGate(): unknown;
   surveyDamageSaves(): unknown;
   surveyOffers(): unknown;
   surveyCounterspell(): unknown;
@@ -223,6 +230,8 @@ const api: NoodlrHooksApi = {
   surveyForced: () => surveyForced(),
   /** Whether rolled damage is being applied here, for whom, and what could be put back. */
   surveyDamage: () => surveyDamage(),
+  /** Which Damage buttons are held shut, why, and whether a verdict is still expected. */
+  surveyGate: () => surveyGate(),
   /** Which saving throws are outstanding, who is rolling them, and what they will settle. */
   surveyDamageSaves: () => surveyDamageSaves(),
   /** Which reactions the selected creature would be offered, who gets asked, and what costs something. */
@@ -372,6 +381,11 @@ Hooks.once("ready", () => {
   // And the compiler is asked from wherever Ready was pressed, which for a character is a player's
   // client. Routed to the GM so a player's browser never spends the world's credit.
   registerWatchRelay();
+  // The Damage button held shut until the attack has been resolved. Every client, and that is the whole
+  // point: the press to stop happens on the roller's own machine, and only that machine can refuse it.
+  registerDamageGate();
+  // The system's cards drawn at half height, if this screen asked for it.
+  applyCompactCards();
   // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is
   // only computable from `updateActor` (which fires everywhere) while the damage TYPES arrive on the
   // applying client. A GM-only ledger would be blind to damage a player applied.

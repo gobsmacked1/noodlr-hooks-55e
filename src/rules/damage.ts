@@ -35,8 +35,10 @@ import {
   snapshotHp,
   type HpSnapshot,
 } from "../system/dnd5e-damage";
+import { grazeDamage } from "../system/dnd5e-graze";
 import { offerReaction } from "./offer";
 import { considerBarbs } from "./barbs";
+import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
 import {
   activityOf,
   damageParts,
@@ -144,9 +146,15 @@ async function consider(message: any, flags: any): Promise<void> {
     });
     for (const key of keysOf(message)) windows.set(key, window);
     await window;
+    // Only now, because a Shield answered inside that window moves a creature out of `hits` and the
+    // button must never open on a hit that has since been turned aside.
+    await settleAttack(message, reading);
     return;
   }
   if (kind !== "damage" && kind !== "healing") return;
+
+  // One press per attack, recorded where a reload and a second client can both see it.
+  await noteSpent(message);
 
   const parts = damageParts(message);
   if (parts.length === 0) return;
@@ -188,9 +196,14 @@ async function consider(message: any, flags: any): Promise<void> {
  * card's id, which the attack roll carries too — so the usage card is the join. Midi instead puts both
  * the verdict and the rolls on one message, so that message's own id is the join. Recording under both
  * costs a map entry and removes a whole branch from the lookup.
+ *
+ * AN EMPTY READING IS STILL A VERDICT AND MUST BE FILED. "Nothing was hit" is not "there was no attack",
+ * and the damage roll cannot tell the two apart — so a rogue who rolled 14 against AC 15 and then rolled
+ * damage anyway, which players do every round, was told "no attack roll was recorded for it" and handed
+ * the Apply button for an attack that demonstrably did not land. The distinction that matters downstream
+ * is drawn in `resolveTargets`, where all three shapes are separately reportable.
  */
 function remember(message: any, reading: HitReading): void {
-  if (reading.hits.length === 0 && reading.unresolved.length === 0) return;
   for (const key of keysOf(message)) verdicts.set(key, reading);
   while (verdicts.size > VERDICT_LIMIT) {
     const oldest = verdicts.keys().next().value;
@@ -293,6 +306,56 @@ async function barbsWindow(message: any, reading: HitReading, attacker: any): Pr
   Object.assign(reading.margin, fresh.margin);
 }
 
+/**
+ * The attack is finished being argued about. Say so, and pay out anything a miss still owes.
+ *
+ * ORDER MATTERS AND IT IS THE OBVIOUS ONE: graze is settled before the verdict is filed, so the button is
+ * released into a world where the miss has already been paid for. The other way round leaves a window in
+ * which a player sees "Grazed" and no damage, presses something, and is right to.
+ *
+ * The verdict is deliberately a THREE-way answer plus an escape. `open` is what an attack against nobody,
+ * or against a target nobody could resolve, comes back as — the module has no reading, so it says so and
+ * hands the decision to the human rather than inventing a miss. Locking on "I do not know" is the one
+ * behaviour that would make this feature a liability.
+ */
+async function settleAttack(message: any, reading: HitReading): Promise<void> {
+  const grazed = await applyGraze(message, reading);
+
+  let verdict: GateVerdict = "open";
+  if (reading.hits.length > 0) verdict = "hit";
+  else if (reading.missed.length > 0) verdict = grazed ? "graze" : "miss";
+  await noteVerdict(message, verdict);
+}
+
+/**
+ * Graze: the ability modifier, flat, to everything this swing missed.
+ *
+ * Applied rather than offered, and the button stays shut behind it, because pressing Damage would roll the
+ * weapon's dice — which is not what Graze deals. See `system/dnd5e-graze.ts` for the rule and for why the
+ * mastery is read off the attack message rather than off the weapon.
+ *
+ * `unresolved` targets are excluded on purpose. Graze needs a creature to deal damage TO, and "there are
+ * two of these on the scene and the record cannot say which" is exactly as unanswerable here as it is for
+ * a hit.
+ */
+async function applyGraze(message: any, reading: HitReading): Promise<boolean> {
+  if (reading.missed.length === 0) return false;
+  const item = itemOf(message);
+  const graze = grazeDamage(message, item, activityOf(message, item));
+  if (!graze) return false;
+
+  await applyRolledDamage(
+    message,
+    reading.missed.map((doc) => ({ doc, multiplier: 1, note: masteryNote() })),
+    [{ value: graze.amount, type: graze.type, properties: new Set<string>() }],
+  );
+  return true;
+}
+
+function masteryNote(): string {
+  return game.i18n.localize("NOODLRHOOKS.Combat.Gate.Graze");
+}
+
 /** The token that rolled a card, for naming the thing a reaction is being taken against. */
 function tokenFor(message: any): any {
   const speaker = message?.speaker;
@@ -340,6 +403,16 @@ function resolveTargets(message: any): Resolution {
   if (kind === "attack") {
     const verdict = verdicts.get(originatingId(message)) ?? verdicts.get(String(message?.id ?? ""));
     if (!verdict) return { targets: [], unresolved: [], declined: reason("NoAttack") };
+    // An attack roll aimed at nobody. Distinct from having no attack roll at all, and distinct again
+    // from a miss: there is a verdict and it is about nothing, so the Apply button is the honest answer
+    // and "no attack roll was recorded" would be a plain untruth.
+    if (
+      verdict.hits.length === 0 &&
+      verdict.missed.length === 0 &&
+      verdict.unresolved.length === 0
+    ) {
+      return { targets: [], unresolved: [], declined: reason("NoTargets") };
+    }
     return { targets: verdict.hits, unresolved: verdict.unresolved };
   }
 

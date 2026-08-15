@@ -7,6 +7,7 @@ import {
   exportable,
   isExecutable,
   isQuantity,
+  isTerminal,
   validateCapability,
 } from "../src/integration/capability";
 import type { Capability, CapabilityRule } from "../src/integration/capability";
@@ -161,6 +162,33 @@ test("an unevaluable guard makes the rule inert rather than firing unguarded", (
   // But it must not run. A monster that regenerates when it should not is invisible at the table.
   assert.equal(isExecutable(guarded), false);
   assert.equal(isExecutable(regeneration.rules[0]), true);
+});
+
+test("a compiled rule may not kill, whatever it read", () => {
+  // The first smoke test's second surprise: the Troll's own prose says it dies only if it ends its
+  // turn with 0 hit points and took fire or acid, and the compiler read the restriction as the
+  // instruction. Whether that particular compile was repairable is beside the point — a descriptor
+  // that removes a creature from play is the one outcome nobody can undo from a chat card, and the
+  // dying layer already owns it. So the vocabulary keeps the word and the executor refuses it.
+  for (const status of ["dead", "Defeated", "SLAIN"]) {
+    const rule: CapabilityRule = {
+      trigger: { event: "on_turn_start" },
+      condition: [],
+      effect: { kind: "apply_status", status },
+      adjudication: "engine",
+    };
+    assert.equal(validateCapability({ ...regeneration, rules: [rule] }).ok, true, status);
+    assert.equal(isTerminal(rule), true, status);
+    assert.equal(isExecutable(rule), false, status);
+  }
+  const prone: CapabilityRule = {
+    trigger: { event: "on_turn_start" },
+    condition: [],
+    effect: { kind: "apply_status", status: "prone" },
+    adjudication: "engine",
+  };
+  assert.equal(isTerminal(prone), false);
+  assert.equal(isExecutable(prone), true);
 });
 
 test("an effect kind with no executor is valid and inert", () => {

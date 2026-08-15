@@ -160,6 +160,7 @@ export function registerCombatSettings(): void {
   // the party to click) is the wrong way round.
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
+  world(COMBAT_SETTINGS.damageGate, "DamageGate", Boolean, true);
   split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.counterspell, "Counterspell", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.ready, "Ready", Boolean, { npc: true, pc: true });
@@ -196,6 +197,19 @@ export function registerCombatSettings(): void {
     type: Boolean,
     default: false,
   });
+
+  // In the native list beside `debugLogging`, and for the same reason: it is a property of this screen
+  // rather than a rule, so it should be findable without knowing which of three rule windows to open.
+  game.settings.register(MODULE_ID, SETTINGS.compactCards, {
+    name: "NOODLRHOOKS.CompactCards.Name",
+    hint: "NOODLRHOOKS.CompactCards.Hint",
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: applyCompactCards,
+  });
+
   game.settings.register(MODULE_ID, SETTINGS.settingsMigrated, {
     scope: "world",
     config: false,
@@ -689,4 +703,34 @@ export function isInfluenceEnabled(): boolean {
 export function getCombatAutomation(): CombatAutomationMode {
   const raw = String(game.settings.get(MODULE_ID, COMBAT_SETTINGS.automation) ?? "full");
   return raw === "partial" || raw === "off" ? raw : "full";
+}
+
+/**
+ * Does the Damage button wait until the attack has been resolved?
+ *
+ * Only meaningful where a verdict is going to arrive, so the renderer checks the rest of that (see
+ * `gateActive()` in `rules/gate.ts`). Splitting this off from `autoDamage` rather than riding on it is
+ * deliberate: a table can want the subtraction done for them and still want the button live, or want
+ * the button held and the subtraction left to the tray.
+ */
+export function isDamageGateEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.damageGate));
+}
+
+/**
+ * Put the compact-card class on `document.body`, or take it off.
+ *
+ * A class rather than injected style, so the whole feature is one stylesheet block that a GM can read,
+ * a browser can override, and this module can withdraw from without leaving anything behind. Called at
+ * ready and again from the setting's `onChange`, which is what makes the toggle immediate — Foundry
+ * re-renders nothing for a client setting, and a density change that needs a page reload reads as the
+ * checkbox not working.
+ */
+export function applyCompactCards(): void {
+  try {
+    const on = Boolean(game.settings.get(MODULE_ID, SETTINGS.compactCards));
+    document.body?.classList?.toggle("noodlr-compact-cards", on);
+  } catch {
+    /* before settings exist, or outside a browser: nothing to style either way */
+  }
 }

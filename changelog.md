@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.6.0
+
+**The Damage button waits its turn.** The two commonest mistakes at a table are the two the chat card
+invites: rolling damage on a miss, and rolling it twice because the first press produced no visible
+change. Damage is now held until the attack has been rolled and everybody who might turn it aside has
+had their say — a Shield cast in reply turns a hit into a miss, so the button cannot open before that
+window closes. It goes **green** when the attack landed, and one press closes it. A GM who disagrees
+with any of this gets an "Unlock" button beside it; a player does not, because for them the lock is
+the point.
+
+It fails open, on purpose. No GM online, no verdict the module could reach, an attack against nobody,
+or simply nothing arriving within thirty seconds, and the button hands itself back the way it always
+worked. A lock with no way out would be far worse than the mistakes it prevents. Switch the whole
+thing off in Combat settings if you would rather press it yourself.
+
+**Graze does the right thing on a miss.** A Greatsword and the other Graze weapons deal their ability
+modifier to a creature they missed — flat, no dice — and nothing in Foundry has ever applied it.
+Pressing Damage would roll the weapon's dice, which is not what Graze deals, so the button stays shut
+and the correct amount is applied for you.
+
+**Chat cards, half the height.** Same fonts, much less air. There is a per-client toggle in Foundry's
+own settings list, so each person at the table decides for themselves.
+
+**The Bloodied status.** It turns out you already have one — dnd5e applies it at half hit points and
+several compiled abilities key off it. What it also has is an off switch, and with it off the status
+is never created, so those abilities silently never fire. The settings page now says who owns this
+and warns you when it has been switched off.
+
+**Fixes from the first play test of automatic damage.** Six, and two of them are about a Troll that
+would not stop.
+
+**A dead creature no longer runs its stat block.** A Troll marked dead kept summoning a limb a round
+for the rest of the fight. Nothing a creature's abilities say is acted on once it is out of the fight,
+with the deliberate exception of rules that are *about* being at zero hit points.
+
+**A summoned creature may not summon.** The published bestiary closes a circle by itself: a Troll's
+Loathsome Limbs makes a Troll Limb, and a Troll Limb's Troll Spawn makes a Troll. Read as instructions
+rather than as the once-a-day and the one-in-twelve-after-24-hours they really are, that is a loop with
+no end and no per-creature allowance can close it, because every new Troll gets a fresh one. The second
+link is now refused. There is also a ceiling of eight summoned creatures standing per summoner, however
+often its ability says it may fire.
+
+**An ability with no uses left now refuses instead of firing for free.** A 4/day feature counted down
+to zero and then went on reporting "0 left" and working, which is how four limbs became a great many.
+
+A creature with Regeneration announced the full amount every turn whether or not it had anywhere to put
+it, so a Troll at 84 out of 84 hit points read as gaining 15 a round forever. It was never actually
+gaining them — the healing has always stopped at the maximum — but the chat line said otherwise, which
+is indistinguishable from a bug. It now reports what it restored, and says nothing at all when there was
+nothing to restore.
+
+**A compiled ability can no longer kill anything.** The same Troll announced that it was dead in the
+middle of a fight it was winning, because its own stat block says it dies only if it ends its turn at 0
+hit points with fire or acid damage on it, and the restriction was read as the instruction. Rules
+compiled from a stat block may now heal, harm, summon and apply any condition except the ones that
+remove a creature from play — those belong to the dying rules and to you, where they can be argued with.
+
+Damage rolled after a **missed** attack was handed back to you with an Apply button and the message "no
+attack roll was recorded", which was not true: the attack was recorded, and it missed. A miss is now
+recognised for what it is and quietly applies nothing. An attack that named no target at all still asks
+you to press the button, and now says so in those words.
+
 ## 0.5.1
 
 **Monsters lie in wait.** The Ready action shipped last release for the party and for a GM driving a

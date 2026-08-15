@@ -11,7 +11,7 @@
 // the dying layer all run exactly as they do for a hand-applied hit. Dice are rolled by Foundry.
 // Nothing here reimplements arithmetic that lives in the system.
 
-import { log, warn } from "../constants";
+import { MODULE_ID, log, warn } from "../constants";
 import { centerOf, insideScene, occupied, type Point } from "../core/positioning";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { hasStatus } from "../system/dnd5e-conditions";
@@ -72,28 +72,45 @@ export interface HealOptions {
 }
 
 /**
- * Heal, or grant temporary hit points.
+ * Heal, or grant temporary hit points. Returns how much actually landed, or null on failure.
  *
  * Healing is a damage description of type `healing`, which dnd5e inverts automatically unless
  * `invertHealing` is explicitly false (actor.mjs:866). Going through the same path rather than
  * writing `hp.value` keeps the clamp at maximum, the `dnd5e.applyDamage` hook and every listener on
  * it — including our own dying layer — behaving identically to a healing spell.
+ *
+ * THE RETURN IS THE AMOUNT RESTORED AND NOT THE AMOUNT ASKED FOR, which is the difference between an
+ * honest card and a misleading one. dnd5e clamps healing at maximum (`actor.mjs:735` bounds the delta
+ * by `-hp.damage`) and `applyTempHP` refuses a pool smaller than the one already there, so a troll at
+ * full health regains nothing — and reporting "regains 15 hit points" every turn regardless is how a
+ * working clamp got reported as runaway temporary hit points. Read the sheet before and after rather
+ * than trusting the request.
  */
-export async function healActor(actor: any, options: HealOptions): Promise<boolean> {
+export async function healActor(actor: any, options: HealOptions): Promise<number | null> {
   const amount = Math.max(0, Math.round(Number(options.amount) || 0));
-  if (!actor || amount <= 0) return false;
+  if (!actor || amount <= 0) return null;
+  const pool = () => {
+    const hp = actor?.system?.attributes?.hp;
+    const value = Number(options.temporary ? hp?.temp : hp?.value);
+    return Number.isFinite(value) ? value : null;
+  };
   try {
+    const before = pool();
     if (options.temporary) {
-      if (typeof actor.applyTempHP !== "function") return false;
+      if (typeof actor.applyTempHP !== "function") return null;
       await actor.applyTempHP(amount);
-      return true;
+    } else {
+      if (typeof actor.applyDamage !== "function") return null;
+      await actor.applyDamage([{ value: amount, type: "healing" }], {});
     }
-    if (typeof actor.applyDamage !== "function") return false;
-    await actor.applyDamage([{ value: amount, type: "healing" }], {});
-    return true;
+    const after = pool();
+    // An unreadable sheet is the one case where the request is the best answer available; it is also
+    // the case `hasHitPoints` already screens out everywhere this matters.
+    if (before === null || after === null) return amount;
+    return Math.max(0, after - before);
   } catch (err) {
     warn(`could not heal ${actor?.name} for ${amount}:`, err);
-    return false;
+    return null;
   }
 }
 
@@ -111,6 +128,47 @@ export interface SummonOptions {
 }
 
 const DISPOSITION: Record<string, number> = { hostile: -1, neutral: 0, friendly: 1 };
+
+/**
+ * The id a summon is filed under, and the id it is counted by.
+ *
+ * ONE FUNCTION FOR BOTH SIDES, because they were two and they disagreed. `summonCreature` stamped the
+ * summoner's TOKEN uuid and the executor counted with its ACTOR uuid, which for an unlinked token is a
+ * longer string containing the first — so nothing ever matched, every standing count read zero, and
+ * the cap that was supposed to hold a troll to four limbs could not see the three already on the map.
+ */
+export function summonerKey(subject: any): string {
+  if (!subject) return "";
+  const doc = docOf(subject);
+  return String(doc?.uuid ?? subject?.actor?.uuid ?? "");
+}
+
+/**
+ * The document these three want, from any of the three shapes they are handed: an executor subject
+ * (`{actor, token}`), a Token placeable (`{document}`), or a document itself.
+ */
+function docOf(subject: any): any {
+  const candidate = subject?.token ?? subject;
+  return candidate?.document ?? candidate ?? null;
+}
+
+/** Was this creature put on the scene by a compiled summon? */
+export function isSummoned(subject: any): boolean {
+  return Boolean(docOf(subject)?.flags?.[MODULE_ID]?.summonedBy);
+}
+
+/** Out of the fight: the defeated status, or hit points at zero when nobody flagged it. */
+export function isDefeated(subject: any): boolean {
+  const defeated = (globalThis as any).CONFIG?.specialStatusEffects?.DEFEATED ?? "dead";
+  try {
+    if (docOf(subject)?.hasStatusEffect?.(defeated)) return true;
+  } catch {
+    /* an unreadable status falls through to hit points */
+  }
+  const actor = subject?.actor ?? subject;
+  const hp = Number(actor?.system?.attributes?.hp?.value);
+  return Number.isFinite(hp) && hp <= 0;
+}
 
 /**
  * Find a creature by name: world actors first, then compendium packs.
@@ -163,9 +221,9 @@ function placementNear(origin: Point, mode: SummonOptions["placement"], self: an
 /**
  * Place creatures on the scene beside a summoner. Returns the TokenDocuments created.
  *
- * Tagged with this module's flag so they can be counted and cleaned up. The cap that matters (the
- * Troll's four limbs) is enforced by the descriptor's `uses`, not here — this primitive does what it
- * is told, and the rule about how often lives with the rule.
+ * Tagged with this module's flag so they can be counted and cleaned up. How OFTEN a creature may be
+ * summoned lives with the rule; how MANY may stand at once is the executor's cap, which reads the same
+ * flag back through `summonedTokens`.
  */
 export async function summonCreature(summoner: any, options: SummonOptions): Promise<any[]> {
   const scene = (canvas as any)?.scene ?? (game as any)?.scenes?.current;
@@ -203,7 +261,7 @@ export async function summonCreature(summoner: any, options: SummonOptions): Pro
       const raw = token.toObject();
       raw.flags = {
         ...(raw.flags ?? {}),
-        "noodlr-hooks-55e": { summonedBy: String(summonerDoc?.uuid ?? ""), tag: options.tag ?? "" },
+        [MODULE_ID]: { summonedBy: summonerKey(summoner), tag: options.tag ?? "" },
       };
       data.push(raw);
     } catch (err) {
@@ -371,7 +429,7 @@ export function usesRemaining(item: any): number | null {
 export function summonedTokens(summonerUuid?: string): any[] {
   const tokens: any[] = (canvas as any)?.scene?.tokens?.contents ?? [];
   return tokens.filter((doc: any) => {
-    const flag = doc?.flags?.["noodlr-hooks-55e"];
+    const flag = doc?.flags?.[MODULE_ID];
     if (!flag?.summonedBy) return false;
     return !summonerUuid || flag.summonedBy === summonerUuid;
   });

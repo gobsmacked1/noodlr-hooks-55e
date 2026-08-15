@@ -2585,6 +2585,186 @@ something the code demonstrably did not do.
 - **`on_activity_use` at 29,974 is not a gap**, it is the corpus describing what an activity does when
   used, which is the system's own job. The trigger being the largest bucket says nothing about coverage.
 
+## What the first play test of automatic damage found (v0.6.0, 2026-08-14)
+
+A Rogue against one Troll, and three bugs in ninety seconds. Two are one lesson twice: **a layer that
+reports what it INTENDED rather than what it DID is indistinguishable from a broken layer**, and both
+were reported as runaway behaviour rather than as wrong wording.
+
+- **`healActor` returns the DELTA now, not a boolean, and the executor reports that.** Regeneration
+ announced "regains 15 hit points" every turn including at full health, which the user read — entirely
+ reasonably — as a creature accumulating hit points without limit. The clamp was never wrong: healing
+ has always gone through `applyDamage` with `type: "healing"` precisely so dnd5e's ceiling, hook and
+ dying layer all apply. What was wrong was announcing the request. A heal that restores **0 is not a
+ firing**: `applyEffect` returns `ok: false`, so no chat line is posted and — because `spendUse` runs
+ only after `ran.ok` — no limited use is spent on a heal that could not land. An unreadable hit-point
+ pool still answers with the requested amount, since there is nothing better and `hasHitPoints` already
+ screens that case out everywhere it matters.
+- **A COMPILED RULE MAY NOT KILL.** The Troll announced "Troll is dead" mid-fight from an
+ `on_turn_start → apply_status dead` rule: its stat block says it dies *only if* it ends its turn at 0
+ hit points having taken fire or acid, and the compiler read the restriction as the instruction.
+ Whether that particular wording is repairable is beside the point — **removing a creature from play is
+ the one outcome nobody can argue with after the fact**, `rules/dying.ts` already owns it, and a
+ descriptor should never be able to reach it. `RESERVED_STATUSES` + `isTerminal()` in
+ `integration/capability.ts` make such a rule *valid but inert*: it still validates (the model is
+ allowed to have read that sentence), `isExecutable` refuses it so the capability sheet badges it as
+ needing a human, and `runRule` checks `isTerminal` **before** `isExecutable` so the refusal names the
+ real reason instead of the generic one. Same doctrine as the fail-closed rule for `other` and `custom`,
+ applied to an effect that is expressible rather than one that is not.
+- **A CLEAN MISS IS A VERDICT.** `remember()` in `rules/damage.ts` discarded any reading with no hits
+ and no unresolved targets, so an attack that rolled 14 against AC 15 left nothing filed and the damage
+ roll that followed reported "no attack roll was recorded for it" and handed over the Apply button —
+ for an attack that demonstrably did not land. Players roll damage after a miss every round, so this
+ fired constantly. Every reading is filed now and `resolveTargets` draws all three distinctions: no
+ verdict at all (`NoAttack`), a verdict about nobody (`NoTargets`, an attack that named no target), and
+ a verdict that resolved to no hits (silent, nothing to apply — the branch that already existed and was
+ unreachable). **The general form: "we have no answer" and "the answer is no" must never share a code
+ path**, and an early return that conflates them will always surface as the wrong message rather than as
+ a crash.
+- Untested, and stated rather than discovered later: `remember`/`resolveTargets` have no harness, because
+ `consider()` needs most of the Foundry globals. The `cards.ts` half is pinned; the filing is not.
+
+### The same fight's second half: the Troll that would not stop (v0.6.0)
+
+The dead Troll then summoned a limb a round for the rest of the encounter, the limbs died of their own
+Regeneration, and the population passed the sheet's four per day by a wide margin. Four separate faults,
+and **only one of them was the compiler being wrong** — the other three were guards this module should
+have had whatever the compiler produced, which is the reason they were fixed here rather than reported
+upstream to a prompt.
+
+- **A CREATURE THAT IS OUT OF THE FIGHT DOES NOT RUN ITS STAT BLOCK.** `POSTHUMOUS` in `executor.ts` is
+ the exemption list and it holds exactly `on_damage_taken` and `on_zero_hp`, because those two are
+ *about* being at zero and cannot be gated on not having dropped. Everything else stops. Regeneration
+ survived this on its own because it carries an `hp_at_least` guard; Loathsome Limbs carried nothing,
+ and nothing in the schema requires it to. **Read `isDefeated`, not hit points alone**: the status is
+ the dying layer's marker and a GM can lift it, whereas a hit-point test alone would keep a creature
+ running that everyone at the table has agreed is finished.
+- **A SUMMONED CREATURE MAY NOT SUMMON, and this is the one that actually closes the loop.** Measured
+ rather than reasoned: `actors24/giant/troll-limb.yml` carries **Troll Spawn**, whose profile is
+ `Compendium.dnd5e.actors24.Actor.mmTroll000000000` — the limb turns into a whole Troll, which has
+ Loathsome Limbs. The real rule is "if the limb isn't destroyed within 24 hours, roll 1d12; on a 12",
+ with `activation.type: ''` and `uses.max: ''`, i.e. not independently usable and unlimited. A compiler
+ has nothing to hang that on but a turn, and once it fires per turn the population is exponential.
+ **No allowance can fix it**, which is the important part: `uses` is per-actor and every new Troll gets
+ a fresh ledger, so a correct 4/day on both rules still diverges. Refusing the second link is the only
+ guard that holds, it costs nothing a GM cannot do by hand, and it is the same fail-closed doctrine as
+ `RESERVED_STATUSES` — the one effect whose output becomes another input gets the strictest treatment.
+- **`MAX_STANDING` (8) is the runaway brake**, in the same spirit as `RUNAWAY_LIMIT` in the turn hooks
+ and for the same reason: a miscompiled allowance should fill a corner rather than the map.
+ - **It could never have fired before, and the reason is a two-implementations bug.**
+ `summonCreature` stamped the summoner's **token** uuid and the executor counted with its **actor**
+ uuid, which for an unlinked token is a longer string *containing* the first — so nothing ever
+ matched, every standing count read zero, and the count in the chat line was silently always absent.
+ `summonerKey()` is now the single answer used by both sides, which is the v0.4.1 vision lesson
+ arriving in a third place: **one question, one implementation.**
+- **AN EMPTY POOL IS A REFUSAL, NOT A SPEND OF NOTHING.** `adjustUses` clamps, so a 4/day item at zero
+ went on returning "0 left" with `ok: true` forever. That matters because a descriptor may split an
+ ability into a `spend_resource` rule and a separate effect rule, and then that success is the only
+ thing between the sheet's allowance and an unlimited one. Same shape as the heal that restored nothing
+ and announced fifteen, and worth stating as the general form: **a primitive that clamps must report
+ the clamp, because its caller is deciding whether the rule fired.**
+- Not fixed here and not fixable here: the compiled Loathsome Limbs fired with neither of its guards
+ (RAW is "ends any turn Bloodied **and** took 15+ Slashing damage during that turn"). An unevaluable
+ guard fails closed, so the compiler emitted either none or evaluable-but-wrong ones. The capability
+ sheet is where that is repaired, one creature at a time, which is what it is for.
+
+## The Damage button waits for a verdict (v0.6.0, 2026-08-14)
+
+`rules/gate.ts`, `system/dnd5e-graze.ts`. Reported as an interface complaint — the cards are too tall
+and too easy to misclick — and the second half of it is a rules problem wearing a UI costume. dnd5e
+draws Attack and Damage side by side and leaves both live from the moment the card appears, because
+**the system has no verdict to gate on**: it decides whether an attack hit inside the card's RENDERER
+and stores the answer nowhere. So the two commonest mistakes at a table are the two the interface
+invites, and neither was fixable before `readHits` existed. This is what that reading buys at the
+other end, and it is the third feature in three releases to fall out of it (Shield, Silvery Barbs,
+now this).
+
+- **THE LOCK FAILS OPEN, AND THAT IS THE WHOLE SAFETY ARGUMENT.** A button that never unlocks is far
+ worse than a player rolling damage on a miss: the first is indistinguishable from the module being
+ broken and has no way out, the second is an ordinary table correction. Every uncertainty resolves to
+ open — no active GM, an attack against nobody, an unresolvable target, a card older than `PATIENCE`,
+ a GM who says so, or simply nobody answering in thirty seconds. **Never add a branch here that locks
+ on "I do not know."**
+- **`gateActive()` is composed entirely of WORLD settings and connected-user facts**, so a player's
+ client reaches the same answer as the GM's without asking. That symmetry is what makes it safe to
+ draw a lock on a client that cannot see the verdict machinery: where the machinery is not running,
+ nothing is drawn. `game.users.activeGM` is the term people forget — the verdict is written by the
+ primary GM, so with no GM connected every damage button in the log would be dead with no
+ explanation.
+- **The age test is what keeps the chat LOG usable.** A card with no flag is a fresh attack *and*
+ every card in the world from before this feature existed. Without `stale()`, scrolling back and
+ re-rolling damage from an old card would be impossible on every client at once. `relented` handles
+ the same case live by forcing a re-render when the wait runs out; the age test handles it for cards
+ nobody was watching when the clock ran.
+- **THE HARD HALF IS THE VETO, not the `disabled` attribute.** Disabling a button stops a mouse; it
+ does not stop a macro, a keybind, or a client whose render ran before the flag arrived.
+ `dnd5e.preRollDamage` is the refusal with teeth and it is registered on **every** client, because the
+ client that must be stopped is the one whose mouse is on the button. Both `dnd5e.preRollDamage` and
+ `...V2` fire for the same roll (`basic-roll.mjs:101-104`), so listen to exactly one — the
+ `rollSkill`/`rollSkillV2` trap again.
+- **The card is identified from `config.event`, which is the same reading dnd5e itself uses** to stamp
+ `originatingMessage` (`BasicRoll.buildPost`, `basic-roll.mjs:173`). A damage roll with no event came
+ from a macro, a sheet or our own graze and has no gate to check, so it passes. Guessing at an
+ attribution would refuse legitimate rolls with no way for anybody to see why.
+- **The verdict is filed AFTER the reaction window, not after the attack roll.** A Shield answered
+ inside that window moves a creature out of `hits`, and a button that opened on the earlier reading
+ would be green for an attack that no longer landed. `settleAttack` is called from the `await window`
+ branch in `damage.ts` for exactly that reason; moving it earlier silently reintroduces the bug.
+- **`open` and `hit` are different verdicts and both unlock.** `hit` means a verdict arrived and it was
+ yes; `open` means none is coming and the human decides. Only one of them is green.
+- **One press is enforced twice, and the local half is the one that works.** The flag is the durable
+ record, written by the GM, but it arrives over the wire and a determined double-click does not wait
+ for it. The `pressed` set is the same answer half a tick earlier, on the one client where the second
+ press is going to happen.
+- **A GM gets an Unlock button; a player does not.** Never blocked, only asked — the same doctrine as
+ the action economy. The lock reflects a reading this module made, and a GM who disagrees needs a way
+ past it that is not "turn the feature off". For a player, the lock IS the feature. An override is
+ recorded on the flag so `noteVerdict` cannot quietly close it again.
+- **`combat.damageGate` is deliberately its own setting rather than riding on `autoDamage`.** They ask
+ different questions: `autoDamage` is what happens TO a creature, and a table may reasonably want the
+ arithmetic done and the button left alone. It is world-scoped because a lock only half the table can
+ see is not a lock.
+- Diagnostics: `api.surveyGate()`.
+
+### Graze, and why the answer was to keep the button shut
+
+The obvious fix for "a miss should sometimes still deal damage" is to unlock the button, and it is
+wrong. Pressing Damage rolls the weapon's dice; Graze deals **the ability modifier alone, no dice**,
+and the rule says so twice (in the sentence and again in the clause about how it can be increased).
+So the button stays locked and `applyGraze` pays out the flat amount directly.
+
+- It is the same finding as everything else in `documentation-signals.md`:
+ `CONFIG.DND5E.weaponMasteries` gives every mastery exactly `{label, reference}`, and `graze` as a
+ whole word appears nowhere in `module/**.mjs` outside those config lines. The mastery is chosen on
+ the attack dialog, recorded on the attack message, and read by nobody.
+- **Read the mastery off the ATTACK MESSAGE (`flags.dnd5e.roll.mastery`), not off the weapon.** A
+ weapon can be mastered and the mastery declined on the dialog; the message is the record of what was
+ actually chosen for this swing.
+- **A modifier of zero or less deals nothing and returns null.** That is a real case (Strength 10 with
+ a Greatsword) and posting "takes 0 bludgeoning" would be noise on every miss.
+- An unreadable damage type is `""` rather than a guess. `Actor5e#applyDamage` treats unknown as
+ untyped, which skips resistance rather than inventing an immunity — the correct failure.
+- `unresolved` targets get no graze, for the same reason they get no hit: "there are two of these on
+ the scene and the record cannot say which" is exactly as unanswerable here.
+
+### Compact cards, and the Bloodied status
+
+- **`compactCards` is CLIENT-scoped and lives in Foundry's own settings list**, beside `debugLogging`
+ and for the same reason: it is a display preference rather than a rule, each person at the table
+ wants their own answer, and it should be findable without knowing which of our three windows to
+ open. It toggles one class on `document.body` and every rule keys off that; **font sizes are
+ deliberately untouched**, which was the user's explicit constraint — the height comes out of padding,
+ margins, avatar dimensions and `min-height`, not out of legibility.
+- Every rule carries `!important`. dnd5e's card styles are specific and shift between patch releases,
+ which is the same lesson `noodlr`'s stylesheet records about `user-select`.
+- **dnd5e already owns Bloodied and we should not build one.** `Actor5e#updateBloodied` applies the
+ status below `CONFIG.DND5E.bloodied.threshold` (0.5). What matters for us is that its visibility
+ setting has a **`none`** position, and at that setting **the status is never created at all** — so a
+ compiled ability guarded on `bloodied` silently never fires, which reads as the compiler being
+ broken. `systemSettingAdvisories()` reports it and `pages.ts` carries a `system`-state row saying who
+ owns it. Same doctrine as the `autoRecharge` advisory: we do not write another module's settings, we
+ say where the switch is.
+
 ## Configuration, not code: what to tell a GM
 
 Problems reported as module bugs that were world configuration, or another module's defaults, instead.

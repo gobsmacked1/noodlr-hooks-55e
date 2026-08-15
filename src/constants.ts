@@ -53,6 +53,16 @@ export const COMBAT_SETTINGS = {
   autoDamage: "combat.autoDamage",
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */
   autoSaves: "combat.autoSaves",
+  /**
+   * Whether the Damage button waits for the attack to be resolved before it can be pressed.
+   *
+   * NOT split by audience, unlike applying the damage, and the reason is that the two settings are about
+   * different things. `autoDamage` asks what happens TO a creature, which a table may reasonably want
+   * answered differently for the party and the bestiary. This one is about a control on a card, and the
+   * card belongs to whoever swung — so a split would be governed by the attacker's side, which is not
+   * the question anybody is asking. The GM is exempt rather than configured, as everywhere else.
+   */
+  damageGate: "combat.damageGate",
   /** Per audience. Whether a triggered reaction is offered to whoever plays the creature, on a clock. */
   reactionPrompts: "combat.reactionPrompts",
   /**
@@ -145,6 +155,15 @@ export const SETTINGS = {
   compileCapabilities: "capabilities.compile",
   /** Verbose console diagnostics. Client-scoped: it is for whoever has a console open. */
   debugLogging: "debugLogging",
+  /**
+   * Draw the system's activity and roll cards at half height.
+   *
+   * Client-scoped, and that is a judgement rather than an oversight: display density is a property of
+   * the screen somebody is looking at, not of the world, and a GM on a 32-inch monitor and a player on a
+   * laptop want different answers. It defaults ON so the table gets the compact log without anybody
+   * having to find the switch, and anybody who prefers the system's own spacing can turn it back.
+   */
+  compactCards: "compactCards",
   /**
    * How far the one-time settings migrations have run. See `migrateSettings()`.
    *

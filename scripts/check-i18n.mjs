@@ -56,6 +56,11 @@ const families = {
   ],
   // The same, for the save layer.
   "NOODLRHOOKS.Combat.AutoSaves.Why": ["NoActivation"],
+  // The Damage button's four states, as a tooltip and as the refusal a press produces. Both are built
+  // from one `state` string in gate.ts, so the two lists are deliberately identical — a state that
+  // gained a tooltip and no refusal would notify the raw key at the moment somebody clicked.
+  "NOODLRHOOKS.Combat.Gate.Title": ["Graze", "Hit", "Miss", "Open", "Spent", "Waiting"],
+  "NOODLRHOOKS.Combat.Gate.Refused": ["Graze", "Miss", "Spent", "Waiting"],
   // Why a readied action woke up. Built from a variable in ready-events.ts, and shown to the player in
   // the release prompt — a missing one reads as the trigger having fired for no reason.
   "NOODLRHOOKS.Ready.Why": [

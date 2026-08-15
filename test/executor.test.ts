@@ -101,7 +101,10 @@ function troll(hp = 40) {
     healed: [] as number[],
     async applyDamage(description: any[]) {
       const entry = description[0];
-      if (entry.type === "healing") (this as any).healed.push(entry.value);
+      if (entry.type !== "healing") return;
+      const pool = (this as any).system.attributes.hp;
+      pool.value = Math.min(pool.max, pool.value + entry.value);
+      (this as any).healed.push(entry.value);
     },
     async setFlag(_ns: string, key: string, value: any) {
       flags[key] = value;
@@ -134,7 +137,11 @@ beforeEach(() => {
       tokens: { contents: [] },
       async createEmbeddedDocuments(_type: string, data: any[]) {
         created.push(...data);
-        return data.map((d, i) => ({ ...d, id: `summon-${i}` }));
+        const docs = data.map((d, i) => ({ ...d, id: `summon-${created.length + i}` }));
+        // Placed on the scene for real, so `summonedTokens` can count what is standing. A fake that
+        // creates nothing cannot exercise a cap that reads the canvas back.
+        (globalThis as any).canvas.scene.tokens.contents.push(...docs);
+        return docs;
       },
     },
   };
@@ -173,6 +180,33 @@ test("Regeneration heals when nothing burned it", async () => {
   assert.equal(outcomes[0].fired, true, outcomes[0].reason);
   assert.deepEqual(actor.healed, [15]);
   assert.match(String(chat[0].content), /Regeneration/);
+});
+
+test("…and reports what it restored rather than what it asked for", async () => {
+  // Reported from the first smoke test as a Troll "exploding". The clamp was always right; the chat
+  // line was not, and a creature announcing "regains 15" every turn while sitting at full health is
+  // indistinguishable from one gaining hit points without limit.
+  const actor = troll(80);
+  bindCapabilities(actor.uuid, [{ capability: REGENERATION }]);
+  noteTurnStart(actor.uuid);
+  damage.record({ uuid: actor.uuid }, 20, ["slashing"]);
+  noteTurnStart(actor.uuid);
+
+  await fireTrigger("on_turn_start", { self: { actor } });
+  assert.equal(actor.system.attributes.hp.value, 84);
+  assert.match(String(chat[0].content), /regains 4 hit points/);
+});
+
+test("…and stays quiet at full health, spending no use on a heal that cannot land", async () => {
+  const actor = troll(84);
+  bindCapabilities(actor.uuid, [{ capability: REGENERATION }]);
+  noteTurnStart(actor.uuid);
+  damage.record({ uuid: actor.uuid }, 20, ["slashing"]);
+  noteTurnStart(actor.uuid);
+
+  const outcomes = await fireTrigger("on_turn_start", { self: { actor } });
+  assert.equal(outcomes[0].fired, false);
+  assert.equal(chat.length, 0);
 });
 
 test("…and does not when it did", async () => {
@@ -247,6 +281,94 @@ test("…and not on the wrong damage type, however much of it there is", async (
   assert.equal(created.length, 0);
 });
 
+// ---- The runaway a play test found ----------------------------------------------------------------
+
+/** The Loathsome Limbs shape with no allowance and no guards: what a miscompile looks like. */
+const UNCAPPED_SUMMON: Capability = {
+  id: "hash-uncapped",
+  label: "Troll Spawn",
+  status: "compiled",
+  rules: [
+    {
+      trigger: { event: "on_turn_end" },
+      condition: [],
+      effect: { kind: "summon_creature", creature: "Troll Limb", count: { value: 1 } },
+      adjudication: "engine",
+    },
+  ],
+};
+
+function limbActorExists(): void {
+  (globalThis as any).game.actors.getName = (name: string) => ({
+    name,
+    async getTokenDocument(data: any) {
+      return { toObject: () => ({ ...data, name }) };
+    },
+  });
+}
+
+test("a summoned creature may not summon, whatever its sheet says", async () => {
+  // The stock bestiary closes the circle by itself: a Troll's Loathsome Limbs makes a Troll Limb, and
+  // the Troll Limb's own Troll Spawn makes a Troll. Read as instructions rather than as once-a-day and
+  // once-in-24-hours-on-a-12, that is exponential, and no allowance can stop it because each
+  // generation gets a fresh ledger.
+  const actor = troll();
+  limbActorExists();
+  bindCapabilities(actor.uuid, [{ capability: UNCAPPED_SUMMON }]);
+  const token = {
+    document: {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      uuid: "Token.limb",
+      flags: { "noodlr-hooks-55e": { summonedBy: "Token.troll" } },
+    },
+  };
+
+  const outcomes = await fireTrigger("on_turn_end", { self: { actor, token } });
+  assert.equal(outcomes[0].fired, false);
+  assert.match(String(outcomes[0].reason), /summoned creature may not summon/);
+  assert.equal(created.length, 0);
+});
+
+test("…and an uncapped one still stops filling the map", async () => {
+  const actor = troll();
+  limbActorExists();
+  bindCapabilities(actor.uuid, [{ capability: UNCAPPED_SUMMON }]);
+  const self = {
+    actor,
+    token: { document: { x: 0, y: 0, width: 1, height: 1, uuid: "Token.troll" } },
+  };
+
+  for (let round = 1; round <= 12; round++) await fireTrigger("on_turn_end", { self });
+  assert.equal(created.length, 8, "the standing cap holds even with no allowance on the rule");
+});
+
+test("a creature that is out of the fight stops running its stat block", async () => {
+  // Reported from the play test: a troll flagged dead went on summoning a limb a round. Only rules
+  // that are ABOUT being at zero are exempt, since those cannot be gated on not having dropped.
+  const actor = troll();
+  actor.statuses.add("dead");
+  limbActorExists();
+  bindCapabilities(actor.uuid, [{ capability: UNCAPPED_SUMMON }]);
+  const token = {
+    document: {
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      uuid: "Token.troll",
+      hasStatusEffect: (id: string) => id === "dead",
+    },
+  };
+
+  const outcomes = await fireTrigger("on_turn_end", { self: { actor, token } });
+  assert.equal(outcomes[0].fired, false);
+  assert.match(String(outcomes[0].reason), /out of the fight/);
+  assert.equal(created.length, 0);
+});
+
 test("a use is only spent when the effect actually happened", async () => {
   // The limb cannot be found, so nothing is placed. Charging the day's allowance for a summon that
   // never appeared would silently cost the creature a limb.
@@ -259,6 +381,39 @@ test("a use is only spent when the effect actually happened", async () => {
   assert.equal(outcomes[0].fired, false);
   const left = usesLeft(actor, "hash-limbs:0", { max: 4, per: "day" }, null, null);
   assert.equal(left.spent, 0);
+});
+
+const SPEND: Capability = {
+  id: "hash-spend",
+  label: "Loathsome Limbs",
+  status: "compiled",
+  rules: [
+    {
+      trigger: { event: "on_turn_end" },
+      condition: [],
+      effect: { kind: "spend_resource", resource: "Loathsome Limbs", amount: { value: 1 } },
+      adjudication: "engine",
+    },
+  ],
+};
+
+test("an empty pool is a refusal, not a spend of nothing", async () => {
+  // `adjustUses` clamps, so a 4/day item at zero went on reporting "0 left" and SUCCESS forever. Where
+  // a descriptor splits an ability into a spend rule and a separate effect rule, that success is the
+  // only thing standing between the sheet's allowance and an unlimited one.
+  const item = { name: "Loathsome Limbs", system: { uses: { max: 4, spent: 0 } } } as any;
+  item.update = async (data: any) => {
+    item.system.uses.spent = data["system.uses.spent"];
+  };
+  const actor = { ...troll(), items: [item] };
+  bindCapabilities(actor.uuid, [{ capability: SPEND }]);
+
+  for (let round = 1; round <= 6; round++) {
+    const outcomes = await fireTrigger("on_turn_end", { self: { actor } });
+    if (round <= 4) assert.equal(outcomes[0].fired, true, `round ${round}: ${outcomes[0].reason}`);
+    else assert.match(String(outcomes[0].reason), /no uses left/);
+  }
+  assert.equal(item.system.uses.spent, 4);
 });
 
 // ---- Rest ------------------------------------------------------------------------------------------

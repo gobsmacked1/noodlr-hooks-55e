@@ -585,6 +585,26 @@ const SHARED_ROLLS: Section = {
       today:
         "dnd5e ships this and it ships OFF: Combat Settings, Monsters, Auto-recharge. Turn it on.",
     },
+    {
+      id: "damageGate",
+      label: "NOODLRHOOKS.Combat.DamageGate.Name",
+      hint: "NOODLRHOOKS.Combat.DamageGate.Hint",
+      state: "live",
+      setting: C.damageGate,
+      kind: "boolean",
+    },
+    {
+      id: "bloodied",
+      label: "Bloodied at half hit points",
+      hint:
+        "Half maximum hit points or below, applied on every change, which is what a compiled ability " +
+        'guarded on being bloodied reads. Note the off position is not cosmetic: at "None" the status ' +
+        "is never created and those abilities silently never fire.",
+      state: "system",
+      today:
+        "dnd5e, and it ships ON: Configure Settings, dnd5e, Visibility, Bloodied. The default " +
+        '("Players") hides the icon from the party on hostile tokens while keeping the status.',
+    },
   ],
 };
 

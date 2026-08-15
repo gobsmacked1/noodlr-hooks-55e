@@ -19,14 +19,25 @@ function fakeActor(overrides: Record<string, any> = {}) {
   const calls: any[] = [];
   return {
     name: "Troll",
-    system: { attributes: { exhaustion: 0, hp: { value: 40, max: 84 } } },
+    system: { attributes: { exhaustion: 0, hp: { value: 40, max: 84, temp: 0 } } },
     statuses: new Set<string>(),
     calls,
+    // Clamped at the maximum, because that is what dnd5e does and it is the property `healActor`
+    // now reads back: a heal that hits the ceiling has to be reportable as the nothing it was.
     async applyDamage(description: any, options: any) {
       calls.push({ method: "applyDamage", description, options });
+      const hp = (this as any).system?.attributes?.hp;
+      if (!hp) return;
+      for (const part of Array.isArray(description) ? description : []) {
+        const value = Number(part?.value) || 0;
+        if (String(part?.type) === "healing") hp.value = Math.min(hp.max, hp.value + value);
+        else hp.value = Math.max(0, hp.value - value);
+      }
     },
     async applyTempHP(amount: number) {
       calls.push({ method: "applyTempHP", amount });
+      const hp = (this as any).system?.attributes?.hp;
+      if (hp) hp.temp = Math.max(Number(hp.temp) || 0, amount);
     },
     async toggleStatusEffect(id: string, options: any) {
       calls.push({ method: "toggleStatusEffect", id, options });
@@ -90,14 +101,39 @@ test("healing goes through the damage pipeline as type healing", async () => {
   // Not a direct write to hp.value: the clamp at maximum, the hook and the dying layer all live on
   // this path, and Regeneration must behave exactly like a cure spell.
   const actor = fakeActor();
-  assert.equal(await healActor(actor, { amount: 15 }), true);
+  assert.equal(await healActor(actor, { amount: 15 }), 15);
   assert.deepEqual(actor.calls[0].description, [{ value: 15, type: "healing" }]);
+});
+
+test("what is REPORTED is what landed, not what was asked for", async () => {
+  // The Troll bug. Regeneration asks for 15 every turn and the clamp was already correct; what was
+  // wrong was announcing 15 to a creature that gained 4, which reads as runaway healing.
+  const actor = fakeActor();
+  actor.system.attributes.hp.value = 80;
+  assert.equal(await healActor(actor, { amount: 15 }), 4);
+});
+
+test("a heal on a creature at full health restores nothing, and says nothing", async () => {
+  const actor = fakeActor();
+  actor.system.attributes.hp.value = actor.system.attributes.hp.max;
+  assert.equal(await healActor(actor, { amount: 15 }), 0);
+});
+
+test("an unreadable pool answers with the request, since there is nothing better", async () => {
+  const actor = fakeActor({ system: { attributes: { exhaustion: 0 } } });
+  assert.equal(await healActor(actor, { amount: 15 }), 15);
 });
 
 test("temporary hit points use the pool that does not stack", async () => {
   const actor = fakeActor();
-  await healActor(actor, { amount: 9, temporary: true });
+  assert.equal(await healActor(actor, { amount: 9, temporary: true }), 9);
   assert.deepEqual(actor.calls[0], { method: "applyTempHP", amount: 9 });
+});
+
+test("temporary hit points that lose to a bigger pool are reported as the nothing they are", async () => {
+  const actor = fakeActor();
+  actor.system.attributes.hp.temp = 12;
+  assert.equal(await healActor(actor, { amount: 9, temporary: true }), 0);
 });
 
 // ---- Conditions ------------------------------------------------------------------------------

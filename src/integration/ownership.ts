@@ -559,6 +559,28 @@ function systemSettingAdvisories(): Advisory[] {
         'in Configure Settings, dnd5e, Combat, Monsters — "Silent" applies it with no chat card.',
     });
   }
+
+  // Bloodied is the system's, and it is correct — but it has an off position, and switching it off does
+  // not merely hide an icon. `updateBloodied` returns before creating the effect, so the STATUS never
+  // exists, and every compiled `has_status: bloodied` guard silently reads false. A troll's Loathsome
+  // Limbs would then never fire, with nothing anywhere saying why.
+  let bloodied: unknown;
+  try {
+    bloodied = game.settings.get("dnd5e", "bloodied");
+  } catch {
+    return out;
+  }
+  if (String(bloodied) === "none") {
+    out.push({
+      level: "warn",
+      title: "The Bloodied status is switched off in the system",
+      detail:
+        "dnd5e applies Bloodied at half hit points and this world has it set to None, which stops the " +
+        "status being created rather than merely hiding it. Any compiled ability guarded on being " +
+        'bloodied will never fire. Turn it back on in Configure Settings, dnd5e, Visibility — "Players" ' +
+        "keeps the icon hidden from the party for hostile creatures while the status still exists.",
+    });
+  }
   return out;
 }
 

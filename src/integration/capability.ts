@@ -679,9 +679,38 @@ export function capabilityVocabulary(): Record<string, unknown> {
   };
 }
 
+/**
+ * Statuses a compiled rule may never apply, whatever its guards say.
+ *
+ * FAIL-CLOSED PROTECTS AGAINST GUARDS WE CANNOT READ. IT DOES NOTHING AGAINST GUARDS THAT ARE WRONG,
+ * and that is the hole a Troll fell through on 2026-08-14: its Regeneration compiled to a heal plus
+ * `on_turn_start → apply_status dead`, and the death rule fired on a creature at full hit points.
+ *
+ * The prose is why, and the shape recurs across the whole bestiary. "The troll dies only if it starts
+ * its turn with 0 Hit Points and doesn't regenerate" is a RESTRICTION on the ordinary rule, and a
+ * limiting clause read as an instruction is the single likeliest misreading in monster text — "only
+ * if", "unless", "doesn't". Nothing in the executor can tell a mis-read limit from a real save-or-die,
+ * because both arrive as the same descriptor.
+ *
+ * What makes the refusal free rather than a trade: **the ordinary rule is already implemented.** A
+ * creature at 0 hit points is handled by `rules/dying.ts`, so a death clause executed as an instruction
+ * can only ever kill something the ordinary rule would have spared. There is no correct firing to lose.
+ *
+ * A static list rather than `CONFIG.specialStatusEffects.DEFEATED`, deliberately: this file is pure and
+ * the tests depend on that, and a world that renamed its defeated status has not made "dead" safe.
+ */
+export const RESERVED_STATUSES: readonly string[] = ["dead", "defeated", "slain", "destroyed"];
+
+/** Does this rule end a creature outright? See `RESERVED_STATUSES`. */
+export function isTerminal(rule: CapabilityRule): boolean {
+  if (rule.effect?.kind !== "apply_status") return false;
+  return RESERVED_STATUSES.includes(String(rule.effect.status ?? "").toLowerCase());
+}
+
 /** Whether anything in this build actually runs the rule, for the sheet's inert/active badge. */
 export function isExecutable(rule: CapabilityRule): boolean {
   if (rule.adjudication !== "engine") return false;
+  if (isTerminal(rule)) return false;
   if (!WIRED_TRIGGERS.includes(rule.trigger?.event as TriggerEvent)) return false;
   if (!EFFECT_PARAMS[rule.effect?.kind as EffectKind]?.executable) return false;
   // One unevaluable guard is enough to stop the rule: see the fail-closed note at the top.

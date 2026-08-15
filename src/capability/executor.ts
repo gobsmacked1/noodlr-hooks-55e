@@ -22,6 +22,7 @@ import { narrator, speakerFor } from "../util/speaker";
 import {
   isExecutable,
   isStanding,
+  isTerminal,
   type Capability,
   type CapabilityRule,
   type TriggerEvent,
@@ -34,15 +35,39 @@ import {
   adjustUses,
   dealDamage,
   healActor,
+  isDefeated,
+  isSummoned,
   setCondition,
   summonCreature,
   summonedTokens,
+  summonerKey,
+  usesRemaining,
 } from "./primitives";
 import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
 
 // ---- Firing -------------------------------------------------------------------------------------
+
+/**
+ * Triggers a creature may still answer once it is out of the fight.
+ *
+ * Everything else stops at death, which is not a nicety: a troll flagged dead went on summoning a limb
+ * a round for as long as the fight lasted, and "the corpse is still running its stat block" is
+ * indistinguishable at the table from the module having lost its mind. These two are exempt because
+ * they are ABOUT being at zero — a rule that fires when the creature drops cannot be gated on the
+ * creature not having dropped.
+ */
+const POSTHUMOUS: readonly TriggerEvent[] = ["on_damage_taken", "on_zero_hp"];
+
+/**
+ * How many creatures one summoner may have standing at once, whatever its descriptor says.
+ *
+ * A runaway brake in the same spirit as `RUNAWAY_LIMIT` in the turn hooks, and it exists because a
+ * summon is the one effect whose output becomes another input. Above the four limbs the worked example
+ * needs, low enough that a miscompiled allowance fills a corner rather than the map.
+ */
+const MAX_STANDING = 8;
 
 export interface TriggerContext extends EvalContext {
   /** Populated on `on_damage_taken`, so a rule can react to what actually landed. */
@@ -145,7 +170,15 @@ async function runRule(
     // give a corpse a voice, and nothing in it should try.
     return no("narration: routed to the companion module");
   }
+  if (isTerminal(rule)) {
+    // Distinguished from the generic refusal below because the two need different answers from a
+    // reader: one is "nothing runs this yet", this one is "nothing ever will". See RESERVED_STATUSES.
+    return no("a compiled rule may not kill; a creature at 0 hit points is the dying layer's");
+  }
   if (!isExecutable(rule)) return no("no executor for this effect or one of its guards");
+  if (!POSTHUMOUS.includes(rule.trigger?.event as TriggerEvent) && isDefeated(ctx.self)) {
+    return no("the creature is out of the fight");
+  }
 
   const actor = ctx.self.actor;
   const { combat, combatant } = combatFor(actor);
@@ -216,8 +249,13 @@ async function applyEffect(
       const who = subject?.actor ?? self.actor;
       const amount = await quantityFor(effect.amount);
       if (amount === null) return { ok: false, reason: "the amount would not resolve" };
-      const ok = await healActor(who, { amount, temporary: Boolean(effect.temporary) });
-      return { ok, detail: `regains ${amount} hit points` };
+      const restored = await healActor(who, { amount, temporary: Boolean(effect.temporary) });
+      if (restored === null) return { ok: false, reason: "the hit points could not be written" };
+      // A regeneration on a creature at full health is not a firing. Reporting one is what made a
+      // correctly-clamped heal read as runaway healing; spending a limited use for it would be worse.
+      if (restored === 0) return { ok: false, reason: "already at full hit points" };
+      const kind = effect.temporary ? "temporary hit points" : "hit points";
+      return { ok: true, detail: `regains ${restored} ${kind}` };
     }
 
     case "apply_status": {
@@ -247,11 +285,26 @@ async function applyEffect(
 
     case "summon_creature": {
       const count = (await quantityFor(effect.count)) ?? 1;
-      // A cap stated on the effect is about the creature, not about the rule: "up to four at a time"
-      // survives the limbs being destroyed and re-summoned, which a `uses` allowance would not.
-      const standing = summonedTokens(String(self.actor?.uuid ?? "")).length;
       const wanted = Math.max(0, Math.round(count));
       if (wanted <= 0) return { ok: false, reason: "nothing to summon" };
+
+      // A SUMMONED CREATURE MAY NOT SUMMON. The one effect whose output is another input, and the
+      // stock bestiary already closes the circle: a Troll's Loathsome Limbs makes a Troll Limb, and a
+      // Troll Limb's Troll Spawn makes a Troll. Read as instructions rather than as the once-a-day and
+      // once-in-24-hours-on-a-12 they really are, that is an exponential curve, and no allowance on
+      // either rule can stop it because each generation gets a fresh ledger. Refusing the second link
+      // costs nothing a GM cannot do by hand and cannot be argued with at the table.
+      if (isSummoned(self)) {
+        return { ok: false, reason: "a summoned creature may not summon" };
+      }
+
+      // A cap on how many stand at once, which is a different question from how often the rule may
+      // fire: "up to four at a time" survives the limbs being destroyed and re-summoned, which a
+      // `uses` allowance would not.
+      const standing = summonedTokens(summonerKey(self)).length;
+      if (standing + wanted > MAX_STANDING) {
+        return { ok: false, reason: `already has ${standing} summoned creatures standing` };
+      }
 
       const created = await summonCreature(self.token ?? self.actor, {
         creature: String(effect.creature),
@@ -296,9 +349,20 @@ async function applyEffect(
       const amount = (await quantityFor(effect.amount)) ?? 1;
       const item = findItem(self.actor, String(effect.resource));
       if (!item) return { ok: false, reason: `no item named "${String(effect.resource)}"` };
-      const delta = effect.kind === "spend_resource" ? -Math.abs(amount) : Math.abs(amount);
-      const left = await adjustUses(item, delta);
+
+      // AN EMPTY POOL IS A REFUSAL, NOT A SPEND OF NOTHING. `adjustUses` clamps, so once a 4/day item
+      // reached zero it went on reporting "0 left" and success forever — and where the descriptor
+      // splits the ability into a spend rule and a separate effect rule, that success is the only
+      // thing standing between the sheet's allowance and an unlimited one. Same shape as the heal that
+      // restored nothing and announced fifteen.
+      const before = usesRemaining(item);
+      if (before === null) return { ok: false, reason: `"${item.name}" has no limited uses` };
+      const spending = effect.kind === "spend_resource";
+      if (spending && before <= 0) return { ok: false, reason: `"${item.name}" has no uses left` };
+
+      const left = await adjustUses(item, spending ? -Math.abs(amount) : Math.abs(amount));
       if (left === null) return { ok: false, reason: `"${item.name}" has no limited uses` };
+      if (left === before) return { ok: false, reason: `"${item.name}" is already at ${left}` };
       return { ok: true, detail: `${item.name}: ${left} left` };
     }
 
