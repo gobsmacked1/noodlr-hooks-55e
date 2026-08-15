@@ -167,18 +167,35 @@ function stale(message: any): boolean {
 
 // ── Drawing it ───────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The card an element sits in, but ONLY when it is a card this gate governs.
+ *
+ * ONE PREDICATE, BOTH HALVES, and it is a rule rather than tidiness. `decorate` asked whether the card
+ * also offers an attack roll; `refuse` asked nothing. So every card carrying a Damage button and no
+ * Attack button — Sneak Attack, every Heal activity, every Damage activity, the damage half of a Save —
+ * was judged `waiting` and vetoed, while nothing was drawn on it: no lock for a player to see, no
+ * Unlock for a GM to press, and a warning that read as noise. **A veto must never be able to reach a
+ * card the lock was not drawn on.**
+ *
+ * Read off the DOM rather than by resolving the activity: that would be a uuid lookup per card per
+ * render, and midi renames activities without removing the system's buttons.
+ */
+function gatedCard(el: unknown): HTMLElement | null {
+  const card = (el as Element | null | undefined)?.closest?.("[data-message-id]") as HTMLElement | null;
+  if (!card) return null;
+  if (!card.querySelector('button[data-action="rollDamage"]')) return null;
+  if (!card.querySelector('button[data-action="rollAttack"]')) return null;
+  return card;
+}
+
 function decorate(message: unknown, html: unknown): void {
   if (!gateActive()) return;
   const root: HTMLElement | undefined =
     html instanceof HTMLElement ? html : ((html as any)?.[0] as HTMLElement | undefined);
-  if (!root) return;
-
-  const damage = root.querySelector<HTMLButtonElement>('button[data-action="rollDamage"]');
+  const card = gatedCard(root);
+  if (!card) return;
+  const damage = card.querySelector<HTMLButtonElement>('button[data-action="rollDamage"]');
   if (!damage) return;
-  // An attack card is one that also offers an attack roll. Read off the DOM rather than by resolving the
-  // activity, because that is one uuid lookup per card per render and because midi renames activities but
-  // does not remove the system's buttons.
-  if (!root.querySelector('button[data-action="rollAttack"]')) return;
 
   const doc = message as any;
   const id = String(doc?.id ?? "");
@@ -206,7 +223,7 @@ function decorate(message: unknown, html: unknown): void {
   // Never blocked, only asked — the same doctrine the action economy follows. The lock reflects a reading
   // this module made, and a GM who disagrees with the reading needs a way past it that is not "turn the
   // feature off". A player gets no such control: for them the lock IS the feature.
-  if (!open && state !== "spent" && game.user?.isGM) offerOverride(root, doc);
+  if (!open && state !== "spent" && game.user?.isGM) offerOverride(card, doc);
 }
 
 function offerOverride(root: HTMLElement, doc: any): void {
@@ -238,12 +255,13 @@ function cap(state: string): string {
  * `originatingMessage` (`basic-roll.mjs` `buildPost`). A damage roll with NO event came from somewhere
  * other than a card button — a macro, a sheet, our own graze — and has no gate to check, so it passes.
  * Guessing at an attribution here would refuse legitimate rolls with no way for anybody to see why.
+ *
+ * `gatedCard` is what keeps it to attack cards. Everything else that rolls through `rollDamage` — a
+ * rogue's Sneak Attack, every heal, Magic Missile — must pass untouched.
  */
 function refuse(config: any): boolean | void {
   if (!gateActive()) return;
-  const id = String(
-    config?.event?.target?.closest?.("[data-message-id]")?.dataset?.messageId ?? "",
-  );
+  const id = String(gatedCard(config?.event?.target)?.dataset?.messageId ?? "");
   if (!id) return;
 
   const message = (game.messages as any)?.get?.(id);

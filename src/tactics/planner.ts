@@ -545,7 +545,27 @@ function hazardOptions(board: Board, p: TierProfile): PlanOption[] {
   ];
 }
 
-function survivalOptions(board: Board, p: TierProfile): PlanOption[] {
+/**
+ * `hasAny` is every other option this creature came up with, and the floor is only offered when there
+ * are none.
+ *
+ * A LOW SCORE IS NOT A FLOOR AT HIGH NOISE, and the comment below said "rarely the best choice" while
+ * the arithmetic said otherwise. `noise` is 0.85 at tier 1 precisely so that a stupid creature does not
+ * play optimally, which flattens the distribution — so 0.35 against advancing's 0.9 is close to a coin
+ * flip, and a Troll Limb spent about half its turns bellowing for help within earshot of the limb it
+ * was standing next to. Reported, reasonably, as the limbs "sitting in place calling for help" rather
+ * than moving.
+ *
+ * The fix is not to lower the number: noise flattens whatever spread it is given, so any score reachable
+ * by consideration is reachable by choice. `advance` had this right from the start — it takes `hasBetter`
+ * and declines outright — and the floor needs the same treatment for the same reason. **An option that
+ * must never beat a real one has to be absent, not cheap.**
+ *
+ * Fleeing keeps its score, because it is a genuine choice competing on merit rather than a floor: a
+ * badly hurt creature SHOULD sometimes run instead of swinging, and noise is what makes that a
+ * temperament rather than a threshold.
+ */
+export function survivalOptions(board: Board, p: TierProfile, hasAny: boolean): PlanOption[] {
   const options: PlanOption[] = [];
   const hp = board.self.hpFraction;
 
@@ -557,12 +577,15 @@ function survivalOptions(board: Board, p: TierProfile): PlanOption[] {
       reasons: ["would rather live"],
     });
   }
-  if (can(p, "callForHelp")) {
+  // Nothing in sight is the case this option exists for, and there it is the best thing available
+  // rather than a floor — so it is offered on its own terms even though something else may have been
+  // generated (a hazard to step out of, an ally to help).
+  const blind = board.enemies.length === 0;
+  if (can(p, "callForHelp") && (blind || !hasAny)) {
     options.push({
       kind: "call",
-      // A floor option: something to do when nothing else is reachable, rarely the best choice.
-      score: board.enemies.length === 0 ? 1.2 : 0.35,
-      reasons: board.enemies.length === 0 ? ["nothing in sight"] : ["rallying the others"],
+      score: blind ? 1.2 : 0.35,
+      reasons: blind ? ["nothing in sight"] : ["nothing else it can reach"],
     });
   }
   return options;
@@ -661,7 +684,9 @@ export function planTurn(combatant: any): TurnPlan | null {
   const readyRand = turnRandom(String(combatant?.id ?? ""), "ready");
 
   const offensive = attackOptions(board, kit, profile, threat);
-  const options = [
+  // Everything the creature can actually do, gathered before the floor is considered — the call for
+  // help is only in the running when this comes back empty. See `survivalOptions`.
+  const real = [
     ...offensive,
     ...advanceOptions(board, kit, offensive.length > 0),
     ...readyOptions(board, kit, profile, offensive.length > 0, readyRand),
@@ -671,9 +696,9 @@ export function planTurn(combatant: any): TurnPlan | null {
     ...hideOptions(board, kit, profile, rand),
     ...helpOptions(board, profile, threat),
     ...yieldOptions(board, profile, actor),
-    ...survivalOptions(board, profile),
     ...hazardOptions(board, profile),
   ];
+  const options = [...real, ...survivalOptions(board, profile, real.length > 0)];
   if (options.length === 0) return null;
 
   // Breadth is the creature's attention span: it weighs only the most promising handful, which is

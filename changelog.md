@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.6.1
+
+**Sneak Attack applies again, and so does every heal.** The damage lock from 0.6.0 was reaching cards it
+had no business on. It was drawn only on attack cards, correctly — but it *refused* on any card with a
+Damage button at all, so a rogue's Sneak Attack, every Heal and every standalone Damage activity was
+blocked with no lock visible to explain it and no way to press past it. One rule now decides both, so a
+refusal cannot land on a card the lock was never drawn on.
+
+**A troll's severed limbs stop at four.** Two separate faults, and between them the count ran away. Where
+a compiled ability keeps its allowance on one rule and its effect on another — which is how the Troll's
+Loathsome Limbs came back — an empty pool reported "no uses left" and the summon beside it went ahead
+anyway. Paying now comes first, whatever order the rules are written in, and nothing else in that
+ability happens if the creature could not pay. Separately, the summoned limbs were never being counted
+against the standing cap at all: the two halves of that check were identifying the summoner by different
+names, so the tally always read zero.
+
+**Notes written for you are no longer read as rules.** The 2024 stat blocks carry authoring asides in
+a hidden section, and the Troll's says in plain English that its exhaustion has to be applied by hand.
+The compiler was reading that instruction and obliging — which is why the ability came back with no
+exhaustion in it and no condition on when it fires. Anything addressed to the reader rather than to
+the game is now taken out before an ability is compiled, and the game's own words are left where they
+were: the Troll's own text says it has an Exhaustion level per missing limb in the sentence right
+above the note. **Your Troll needs recompiling to pick this up:** open the capability sheet and clear
+its Loathsome Limbs entry, or purge the cache.
+
+Two things worth knowing about how that works. A hidden section holding real rules is **kept** — a
+monster's curse or disease that the players are not meant to read is still a rule, and a few of those
+ship with the system. And where an instruction about Foundry turns up in the open, in the middle of
+the rule text itself, the sentence is removed and **you are told about it by name**, because that only
+happens on imported or homebrew sheets and only you can judge whether it mattered. Nothing dnd5e ships
+trips that; it was measured against all 31,905 of its ability descriptions.
+
+**Monsters stop bellowing for help within arm's reach of each other.** A creature of animal intelligence
+is *meant* to choose badly — that is what makes it read as an animal rather than a chess engine — but
+calling for help was competing on those terms against walking toward the enemy, and winning about half
+the time. It is a last resort again, offered only when there is genuinely nothing else the creature can
+do.
+
+**"Advances on you" now says how far.** An advance is entirely its movement, so a line that omits the
+distance reads the same whether the creature crossed forty feet or stood still — which is exactly how a
+pack of limbs being outrun by a Dashing rogue came to look like a pack of limbs sitting in place. The
+announcement is amended with the ground actually covered, or says plainly that none was.
+
+**Two console errors gone**, both the same one: a summoned creature whose initiative was described in
+words rather than numbers was rejected by Foundry outright, so it was never slotted in behind its
+summoner and turned up later in a random place in the order instead.
+
+**Two advisories added** for things outside this module that look like it. A teleport whose destination
+is occupied is cancelled by the system silently, after the spell slot has been spent and the visual
+effects have played — if a Misty Step costs a slot and nothing moves, the settings page now names the
+cause. And a missing setting can no longer stop a later advisory from being shown, which was hiding the
+Bloodied warning on some versions.
+
 ## 0.6.0
 
 **The Damage button waits its turn.** The two commonest mistakes at a table are the two the chat card

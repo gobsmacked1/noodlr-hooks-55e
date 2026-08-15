@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { collectScene, featuresOf, plainText, surveyScene } from "../src/capability/collect";
+import { collectScene, featuresOf, surveyScene } from "../src/capability/collect";
+import { plainText } from "../src/capability/prose";
 import { bindingsFor, clearBindings } from "../src/capability/bindings";
 import * as cache from "../src/capability/cache";
 import type { Capability } from "../src/integration/capability";
@@ -179,6 +180,51 @@ test("the resolved numbers travel with the prose, and outrank it", () => {
     spent: 1,
     recovery: [{ period: "lr", type: "recoverAll", formula: undefined }],
   });
+});
+
+test("a note addressed to the GM never reaches the compiler, and does not key the cache", async () => {
+  // The Troll's, and the reason `prose.ts` exists: the note is a plain-English instruction NOT to
+  // emit the effect the sentence above it states, and a well-behaved model obliges.
+  const rule = "The troll has 1 Exhaustion level for each missing limb.";
+  const withNote =
+    `<p>${rule}</p>` +
+    '<section class="secret"><p><strong>Foundry Note</strong></p>' +
+    "<p>The Exhaustion levels from missing limbs must be applied manually.</p></section>";
+
+  const [feature] = featuresOf(creature("Actor.a", "Troll", [item("Loathsome Limbs", withNote)]));
+  assert.equal(feature.prose, rule);
+  assert.deepEqual(
+    feature.removed,
+    [],
+    "a note inside a hidden section is expected, so it is quiet",
+  );
+  assert.equal(
+    feature.id,
+    cache.proseHash(rule),
+    "the note is gone before the wording is hashed, so editing one invalidates the entry",
+  );
+
+  await collectScene(scene([creature("Actor.a", "Troll", [item("Loathsome Limbs", withNote)])]));
+  assert.equal(compileCalls[0].items[0].prose, rule);
+  assert.doesNotMatch(compileCalls[0].items[0].prose, /manually/);
+});
+
+test("tooling written into open rule text is reported to the GM", async () => {
+  // Nothing dnd5e ships does this — measured at zero over 31,905 descriptions — so it means an
+  // importer or a homebrew author, and the GM is the only person who can judge whether it mattered.
+  const actor = creature("Actor.a", "Homebrew", [
+    item(
+      "Draconic Resistance",
+      "<p>The creature has resistance to one damage type. " +
+        "The resistances will need to be manually enabled/disabled.</p>",
+    ),
+  ]);
+  const [feature] = featuresOf(actor);
+  assert.match(feature.prose, /resistance to one damage type/);
+  assert.equal(feature.removed.length, 1);
+
+  const report = await collectScene(scene([actor]));
+  assert.deepEqual(Object.keys(report.scrubbed), ["Draconic Resistance"]);
 });
 
 // ---- Running a scene ---------------------------------------------------------------------------------

@@ -321,7 +321,13 @@ export async function addCombatants(
   const combat = (game as any)?.combat;
   if (!combat) return [];
 
-  let initiative = placement.initiative;
+  // The declared type says `number`, and the value arrives on a descriptor a model wrote — so it may be
+  // a string, a null or a NaN, and writing one to `Combatant.initiative` fails the whole create with a
+  // `DataModelValidationError` rather than merely placing the creature badly. A placement that will not
+  // read as a number is no placement: fall through to `after`, and then to letting the tracker roll.
+  // Not `Number.isFinite(Number(x))`, which would turn a null into a legitimate-looking initiative 0.
+  const asked: unknown = placement.initiative;
+  let initiative = typeof asked === "number" && Number.isFinite(asked) ? asked : undefined;
   if (initiative === undefined && placement.after) {
     const after = placement.after?.combatant ?? placement.after;
     const base = Number(after?.initiative);

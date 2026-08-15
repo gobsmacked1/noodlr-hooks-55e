@@ -416,6 +416,73 @@ test("an empty pool is a refusal, not a spend of nothing", async () => {
   assert.equal(item.system.uses.spent, 4);
 });
 
+/** The shape the play test produced: the allowance on one rule, the effect on another beside it. */
+const SPLIT_SUMMON: Capability = {
+  id: "hash-split",
+  label: "Loathsome Limbs",
+  status: "compiled",
+  rules: [
+    {
+      trigger: { event: "on_turn_end" },
+      condition: [],
+      effect: { kind: "spend_resource", resource: "Loathsome Limbs", amount: { value: 1 } },
+      adjudication: "engine",
+    },
+    {
+      trigger: { event: "on_turn_end" },
+      condition: [],
+      effect: { kind: "summon_creature", creature: "Troll Limb", count: { value: 1 } },
+      adjudication: "engine",
+    },
+  ],
+};
+
+test("a rule the creature could not pay for takes the rest of its capability down with it", async () => {
+  // v0.6.0 made an empty pool report a refusal and it changed nothing at the table, because the summon
+  // was a SEPARATE rule with an allowance of its own — i.e. none. So the fifth limb appeared beside a
+  // chat line reading "0 left". A spend that fails has to stop what it was paying for.
+  const item = { name: "Loathsome Limbs", system: { uses: { max: 4, spent: 0 } } } as any;
+  item.update = async (data: any) => {
+    item.system.uses.spent = data["system.uses.spent"];
+  };
+  const actor = { ...troll(), items: [item] };
+  limbActorExists();
+  bindCapabilities(actor.uuid, [{ capability: SPLIT_SUMMON }]);
+  const self = {
+    actor,
+    token: { document: { x: 0, y: 0, width: 1, height: 1, uuid: "Token.troll" } },
+  };
+
+  for (let round = 1; round <= 6; round++) await fireTrigger("on_turn_end", { self });
+  assert.equal(created.length, 4, "the sheet's allowance is what bounds the summon");
+
+  const outcomes = await fireTrigger("on_turn_end", { self });
+  assert.equal(outcomes[1].fired, false);
+  assert.match(String(outcomes[1].reason), /not paid for/);
+});
+
+test("paying comes first, whatever order the rules are listed in", async () => {
+  // Otherwise the guard is an accident of how the compiler happened to order its answer.
+  const item = { name: "Loathsome Limbs", system: { uses: { max: 1, spent: 1 } } } as any;
+  const actor = { ...troll(), items: [item] };
+  limbActorExists();
+  bindCapabilities(actor.uuid, [
+    { capability: { ...SPLIT_SUMMON, rules: [...SPLIT_SUMMON.rules].reverse() } },
+  ]);
+
+  const outcomes = await fireTrigger("on_turn_end", {
+    self: {
+      actor,
+      token: { document: { x: 0, y: 0, width: 1, height: 1, uuid: "Token.troll" } },
+    },
+  });
+  assert.equal(created.length, 0);
+  assert.ok(
+    outcomes.some((o) => /not paid for/.test(String(o.reason))),
+    "the summon listed first still waits for the spend listed second",
+  );
+});
+
 // ---- Rest ------------------------------------------------------------------------------------------
 
 test("a rest gives a rest-scoped allowance back, and the short one does not refresh the daily", async () => {

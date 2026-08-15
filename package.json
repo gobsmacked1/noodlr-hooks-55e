@@ -1,6 +1,6 @@
 {
   "name": "noodlr-hooks-55e",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "description": "Noodlr Hooks 5.5e — rules automation for D&D 5e (2024) in Foundry VTT. Standalone; no dependencies.",
@@ -11,6 +11,7 @@
     "check": "tsc --noEmit && node scripts/check-i18n.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
     "test": "node test/run.mjs",
+    "census:notes": "node scripts/census-meta-notes.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

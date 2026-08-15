@@ -2424,6 +2424,55 @@ and let the pairing rule keep it sane. `src/tactics/ready-plan.ts`.
  swing would put a hit in the log that never happened. `MOVING_PLANS` excludes it, so the
  did-not-move check cannot flag a turn that was never meant to move.
 
+### A LOW SCORE IS NOT A FLOOR AT HIGH NOISE (v0.6.1, 2026-08-14)
+
+Reported as the Troll's severed limbs "sitting in place calling for help" instead of closing to melee. It
+was a scoring bug, not a movement one, and the mechanism is the planner's central design working exactly
+as documented in a place nobody had thought about.
+
+`noise` is **0.85 at tier 1** precisely so that a stupid creature does not play optimally, and what noise
+does is FLATTEN the distribution. So the call-for-help floor at 0.35 against advancing's 0.9 was close to
+a coin flip, and a Troll Limb spent about half its turns bellowing for help beside the limb it was
+standing next to. The comment above it said "rarely the best choice" while the arithmetic said otherwise —
+the two had never been reconciled because the option had only ever been read at high tiers, where 0.35 is
+genuinely unreachable.
+
+- **The fix is not to lower the number.** Noise flattens whatever spread it is given, so *any score
+  reachable by consideration is reachable by choice*. **An option that must never beat a real one has to
+  be ABSENT, not cheap.** `advanceOptions` had this right from the start — it takes `hasBetter` and
+  declines outright — and the floor now takes `hasAny` for the same reason.
+- **The general form, worth applying before adding any new option: decide whether it competes on merit or
+  is a fallback, and implement fallbacks by absence.** Fleeing deliberately keeps its score, because a
+  badly hurt creature *should* sometimes run instead of swinging — noise is what makes that a temperament
+  rather than a threshold. That is the distinction to test each new option against.
+- **"Nothing in sight" stays offered on its own terms** (score 1.2), because that is the case the option
+  exists for rather than a floor. Note `readBoard` does NOT filter enemies by perception, so an empty
+  `board.enemies` means an empty tracker, not an unseen foe.
+- `survivalOptions` is exported solely so `test/planner.test.ts` can pin this without a scene, the same
+  precedent as `timeoutChoice`. `planTurn` needs canvas, a combat and a placed token; this needs neither.
+
+### An advance that does not say how far is indistinguishable from standing still (v0.6.1)
+
+The other half of the same report, and the same lesson as the heal that announced fifteen hit points at
+full health: **a layer that reports what it INTENDED rather than what it DID reads as a broken layer.**
+"Troll Limb advances on Rogwiz Ardue, still too far to strike" appeared three times in one fight and was
+read as a creature sitting in place; it had in fact walked its full Speed each time and was being outrun
+by a Dashing rogue. One number tells those two apart and nothing else does.
+
+- `TRAVEL_ONLY` is the set of plans whose entire content is the movement, and `amend()` in `npc-turn.ts`
+  rewrites the card with `performed.moved` once the move has resolved. `close` and `kite` are deliberately
+  excluded: they end in a real item use, so the swing is the news and the distance already rides in the
+  sentence from `option.approach`.
+- **Amended rather than followed by a second message**, because announcing first is deliberate (narration
+  has to read ahead of the dice) and a separate "it moved 30 ft" line would double the log for every
+  advance. A failed edit leaves a card that is merely vague, so it is logged and nothing else.
+- Appended as a trailing clause rather than spliced in: these plans produce differently-shaped sentences,
+  and a regex that has to find the right clause in each is one more thing to break when a phrasing changes.
+- `noteDossierEvent` records the settled text, not the speculative one.
+- **This does not close the open melee-movement item below.** One of the five advances in that log reported
+  a genuine refusal ("the token would not move"), which is still undiagnosed; what changed is that a
+  refusal is now distinguishable from a creature being outpaced, which it was not before.
+
 ## Silvery Barbs, and what changed to make the third answer yes (v0.5.0, 2026-08-14)
 
 `rules/barbs.ts`, `system/dnd5e-barbs.ts`, `system/dnd5e-reroll.ts`. Refused twice, and **both refusals named
@@ -2663,10 +2712,90 @@ upstream to a prompt.
  thing between the sheet's allowance and an unlimited one. Same shape as the heal that restored nothing
  and announced fifteen, and worth stating as the general form: **a primitive that clamps must report
  the clamp, because its caller is deciding whether the rule fired.**
-- Not fixed here and not fixable here: the compiled Loathsome Limbs fired with neither of its guards
- (RAW is "ends any turn Bloodied **and** took 15+ Slashing damage during that turn"). An unevaluable
- guard fails closed, so the compiler emitted either none or evaluable-but-wrong ones. The capability
- sheet is where that is repaired, one creature at a time, which is what it is for.
+- **The compiled Loathsome Limbs fired with neither of its guards and no exhaustion, and it WAS fixable
+  here — the cause was in our own prose extraction (v0.6.1).** The older note in this place said the
+  descriptor had to be repaired one creature at a time on the capability sheet, which was wrong and cost a
+  release. dnd5e's 2024 stat blocks put authoring asides in `<section class="secret">` (core's own
+  convention, stripped for players by `enrichHTML`), and the Troll's says: *"Foundry Note: The Exhaustion
+  levels from missing limbs must be applied manually."* **A model reading that has been told in plain
+  English not to emit the effect the rule states**, and it obliged — so the descriptor came back with no
+  exhaustion at all and, having been steered off the clause, no condition either. `src/capability/prose.ts`
+  is the scrubber, called before the hash, so editing or removing a note correctly invalidates the cache
+  entry. Do NOT re-add a local `plainText` to `collect.ts`: two implementations of "what did we send"
+  would differ, and a cache keyed on one of them is keyed on nothing.
+  - **The transferable rule: prose about the SOFTWARE must never reach the compiler.** That is the whole
+    predicate, and it is narrower than "notes addressed to a human" — see the census below for why the
+    wider version deletes rules.
+  - **And the lesson about the note itself: "the compiler read it wrong, repair it on the sheet" is a dead
+    end that should be the LAST conclusion, not the first.** Check what was actually sent before blaming
+    what came back. Requires a recompile of any creature compiled before this release.
+
+#### The scrubber, and the two mistakes measured out of it (v0.6.1)
+
+`scripts/census-meta-notes.mjs` (`npm run census:notes`) runs the real predicate over dnd5e 5.3.3's
+`packs/_source`: **31,905 descriptions, 34 hidden sections (30 notes, 4 rules), 0 tooling sentences in
+open prose.** It exists because both of the obvious designs are wrong in a way that is invisible
+without a corpus, and both were live for a while.
+
+- **Stripping every `<section class="secret">` deletes rules.** The first version did, and it is the
+  reading the section's own name invites. **4 of the 34 are game text** rather than asides — Aberrant
+  Ground's difficult terrain, Intoxicating Touch's whole attack line, Tentacle Disease's entire
+  progression, and Sneak Attack's "Once per turn." Small absolutely and *not* small per creature: it is
+  the whole of what three of those four abilities do. `isMetaAside()` therefore decides per section, and
+  a hidden section holding rules is kept and compiled like any other prose.
+  - The counts are low because dnd5e hides very little; **do not read 34 as the ceiling.** Homebrew and
+    DDB-imported content use hidden sections far more freely, which is the population the per-section
+    test actually protects.
+- **`compendium` cannot be a tooling word.** It was, and it matched `@UUID[Compendium.dnd5e...]`
+  enrichers — which appear in ordinary rule sentences — so the scrubber was classifying legitimate
+  hidden sections as notes and dropping them whole. The census is what found it, in the "kept" column,
+  and it is the reason that column is printed in full rather than merely counted: **a scrubber can only
+  be checked by looking at what it spared.** Re-read those four by hand after any change to `TOOLING`.
+- **The predicate is Foundry's own vocabulary, not the shape of the sentence.** "Manually", "Active
+  Effect", "the effects tab", "macro", "midi-qol", "DAE". Not "the DM decides", not "at the GM's
+  discretion" — those are *rules* text, they are all over the books, and a wide predicate would eat the
+  clause it appears in. Ordinary game words that read like tooling are pinned by tests: "dragged 10
+  feet", "Feather **Token**", "**automatically** fails", "**enchantment**".
+- **In the open, a hit is removed sentence-by-sentence and REPORTED by ability name** (`Feature.removed`
+  → `CollectReport.scrubbed` → a `warn`, and the `removed` column of `api.surveyScene()`). Zero of these
+  exist in dnd5e, so any occurrence is an imported or homebrew sheet and the GM is the only one who can
+  judge whether the sentence mattered. Inside a hidden section it is silent, because a note there is
+  expected — reporting the expected case is how a report becomes noise.
+- **Whole section in, whole section out.** A hidden aside is one authored unit ("Foundry Note" as a
+  heading, then the instruction), and taking out only the sentence with the trigger word leaves the
+  heading and any follow-on behind — which reads to a model exactly like the note it came from.
+
+### A capability's rules are not independent, and the fifth limb proved it (v0.6.1)
+
+Reported as the Troll exceeding its own 4/day. v0.6.0's "an empty pool is a refusal, not a spend of
+nothing" was correct and changed nothing at the table, because **the allowance and the effect were
+separate rules** — `uses` is per-rule, so the summon rule beside the spend rule had no allowance of its
+own to run out. The spend reported "no uses left" and the limb appeared next to it.
+
+- **If it cannot be paid for, none of it happens.** `spend_resource` rules run FIRST within a capability,
+  whatever order the descriptor listed them in (a stable sort, so everything else keeps its order), and a
+  failed spend marks the rest of that capability unpaid rather than letting it fire.
+- **Deliberately narrow: only a failed SPEND stops its siblings.** Other failures are ambiguous — a status
+  that was already present must not stop the damage that accompanies it — whereas a failed spend is
+  unambiguously "cannot pay".
+- **`MAX_STANDING` could never have fired, and it was a two-implementations bug.** `summonCreature`
+  stamped the summoner's **token** uuid and the executor counted with its **actor** uuid; for an unlinked
+  token the second is a longer string *containing* the first, so nothing ever matched and every standing
+  count read zero — including the one printed in the chat line. `summonerKey()` is the single answer both
+  sides use now. Same lesson as the v0.4.1 vision bug: **one question, one implementation.**
+- **A guard shaped like "refuse a recurring summon that has neither a condition nor a `uses` limit" was
+  written, tested, and backed out — do not rebuild it.** It reads as reasonable and it takes over the job
+  of two guards that already cover this from better angles: `MAX_STANDING` is the documented runaway brake
+  *for exactly that shape*, and the summoned-may-not-summon rule is what actually breaks the exponential.
+  Its only effect was to shadow both of their messages and to badge a legitimately-running rule as inert
+  on the capability sheet. Three existing tests fail if it comes back, which is the intended warning.
+- **Anything that is not a finite number in `effect.initiative` means "behind me".** `Number("after_summoner")`
+  is NaN and NaN reached `createEmbeddedDocuments` as an explicit initiative, which Foundry rejects
+  outright (`[Combatant5e] validation errors: initiative: must be a number`) — so the limb was never
+  enlisted there and the perception sweep enlisted it later with a rolled initiative instead. Visible
+  symptom: three console errors and a creature that should act immediately after its summoner turning up
+  in a random slot. `insert_combatant` had the `Number.isFinite` guard all along; this branch never did,
+  and `addCombatants` now refuses a non-finite one as well.
 
 ## The Damage button waits for a verdict (v0.6.0, 2026-08-14)
 
@@ -2725,6 +2854,17 @@ now this).
  arithmetic done and the button left alone. It is world-scoped because a lock only half the table can
  see is not a lock.
 - Diagnostics: `api.surveyGate()`.
+- **THE LOCK AND THE VETO MUST SHARE ONE PREDICATE, and they did not (v0.6.1).** `decorate` asked whether
+  the card also carries an Attack button; `refuse` asked nothing at all. So every card with a Damage
+  button and no Attack button — a rogue's **Sneak Attack**, every Heal activity, every standalone Damage
+  activity, the damage half of a Save — was judged `waiting` and refused, with **nothing drawn on it**: no
+  lock for a player to see, no Unlock for a GM to press, and a warning that read as noise. Reported as
+  Sneak Attack having stopped working, which it had.
+  - `gatedCard()` is now the single answer and both halves call it. **A veto must never be able to reach a
+    card the lock was not drawn on** — the general form of the fail-open rule above, since an invisible
+    refusal has no way out by construction.
+  - Read off the DOM rather than by resolving the activity: that would be a uuid lookup per card per
+    render, and midi renames activities without removing the system's buttons.
 
 ### Graze, and why the answer was to keep the button shut
 
@@ -2764,11 +2904,33 @@ So the button stays locked and `applyGraze` pays out the flat amount directly.
  broken. `systemSettingAdvisories()` reports it and `pages.ts` carries a `system`-state row saying who
  owns it. Same doctrine as the `autoRecharge` advisory: we do not write another module's settings, we
  say where the switch is.
+- **Every setting read in `systemSettingAdvisories()` is independently guarded and none of them returns
+  early (fixed v0.6.1).** The first two were chained, so on any dnd5e without `autoRecharge` the Bloodied
+  warning below it could never be reached. **A missing setting means "a version that does not have this
+  one", which says nothing about the next one** — and an advisory that silently disappears on some versions
+  is worse than no advisory, since the whole point is to explain a rule that is not firing.
 
 ## Configuration, not code: what to tell a GM
 
 Problems reported as module bugs that were world configuration, or another module's defaults, instead.
 Recorded because they will be reported again.
+
+- **A teleport whose destination is occupied is cancelled silently, and it is not ours (2026-08-14).**
+  Reported as Misty Step spending a 2nd-level slot, playing its mist and sound at the target square, and
+  leaving the caster where they stood. Read from source rather than inferred:
+  - At `movementAutomation: "full"` **dnd5e's** `constrainMovementPath` override truncates a path at the
+    first grid space held by a creature within one size step of the mover
+    (`canvas/layers/tokens.mjs:isOccupiedGridSpaceBlocking`), and it truncates **to the origin** when the
+    very first step is the blocked one — which for a teleport is the destination, since there are no
+    intermediate squares.
+  - **Chris's Premades** calls exactly that as a pre-check and returns early on a path that goes nowhere
+    (`cat_tokenUtils.mjs:58`, `moveToken` with `action: 'displace'`), while its `postAnimation` and
+    `postTeleport` passes run regardless. Hence the effects without the movement.
+  - Neither half is wrong on its own and neither is fixable from here, so `systemSettingAdvisories()`
+    says so whenever Movement Automation is Full and a teleporting module is present. **Our own
+    `preMoveToken` handlers are not implicated**: every path in `economy/speed.ts` gates on
+    `movement.method` being `dragging` or `keyboard`, so an API move never reaches any of them.
+  - The remedy for a GM is a clear destination square, or Movement Automation set to Difficulty Only.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —

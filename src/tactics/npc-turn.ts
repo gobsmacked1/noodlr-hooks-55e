@@ -63,6 +63,10 @@ function describeIntent(plan: TurnPlan): string {
       return `${me} attacks ${target} with ${o.itemName}.`;
     case "close":
       return `${me} ${travel.close} ${Math.round(o.approach ?? 0)} ${units} on ${target} and attacks with ${o.itemName}.`;
+    // The distance is filled in afterwards by `amend`, because an advance IS its movement and a
+    // sentence that omits the number reads the same whether the creature crossed forty feet or stood
+    // still. Reported as "no ground" rather than omitted when it moved nothing: that is the case the
+    // GM most needs to see, and it was invisible.
     case "advance":
       return `${me} ${travel.advance} ${target}, still too far to strike.`;
     case "heal-self":
@@ -95,6 +99,34 @@ function describeIntent(plan: TurnPlan): string {
     default:
       return `${me} hesitates.`;
   }
+}
+
+/**
+ * Plans whose entire content is the movement, so the distance covered is the whole report.
+ *
+ * `close` and `kite` are deliberately absent: they end in a real item use, so the swing is the news and
+ * the distance already rides in the sentence from `option.approach`.
+ */
+const TRAVEL_ONLY = new Set<PlanKind>(["advance", "help"]);
+
+/**
+ * The intent again, now that it is known how far the creature actually got.
+ *
+ * Same lesson as the heal that announced fifteen hit points at full health: **a layer that reports what
+ * it INTENDED rather than what it DID is indistinguishable from a broken layer.** "Troll Limb advances
+ * on Rogwiz Ardue, still too far to strike" was reported three times in one fight and read as a
+ * creature sitting in place — it had in fact walked its full Speed each time and was being outrun by a
+ * Dashing rogue. One number tells those two apart, and nothing else does.
+ */
+function amend(text: string, plan: TurnPlan, moved: number): string {
+  if (!TRAVEL_ONLY.has(plan.chosen.kind)) return text;
+  // Appended rather than spliced in. The sentences these plans produce differ in shape, and a regex
+  // that has to find the right clause in each of them is one more thing to get wrong when a phrasing
+  // changes; a trailing clause reads correctly whatever precedes it.
+  const stem = text.replace(/\.\s*$/, "");
+  return moved > 0
+    ? `${stem}, covering ${Math.round(moved)} ${plan.board.units}.`
+    : `${stem}, and covers no ground at all.`;
 }
 
 /** GM-only footnote: the tier that produced this and why the option scored well. */
@@ -179,7 +211,7 @@ export async function runTurnFor(combatant: any): Promise<void> {
     // and out of the chat log: players seeing "tier 3, looks like the easy one" would be told exactly
     // how the monster thinks, which is the GM's information, not theirs.
     const ChatMessage = (globalThis as any).ChatMessage;
-    await ChatMessage.create({
+    const card = await ChatMessage.create({
       content: `<p>${foundry.utils.escapeHTML(intent)}</p>`,
       speaker: speakerFor(combatant?.token ?? combatant?.actor, plan.board.self.name),
     });
@@ -187,6 +219,17 @@ export async function runTurnFor(combatant: any): Promise<void> {
     // Now make it happen: move the token, nominate the target, and hand the roll to the system so the
     // table's automation resolves it. Announced first so the narration reads ahead of the dice cards.
     const performed = await performPlan(plan);
+
+    // The card is amended rather than followed by a second one. Announcing first is deliberate (the
+    // narration has to read ahead of the dice), but for a movement-only plan the distance is not known
+    // until afterwards — and a separate "it moved 30 ft" line would double the log for every advance.
+    // A failed edit is a card that is merely vague, so it is logged and nothing else.
+    const settled = amend(intent, plan, performed.moved);
+    if (settled !== intent) {
+      await card
+        ?.update?.({ content: `<p>${foundry.utils.escapeHTML(settled)}</p>` })
+        .catch((err: unknown) => log("could not amend the turn announcement:", err));
+    }
     if (performed.problem) {
       log(`execution problem for ${plan.board.self.name}: ${performed.problem}`);
       await ChatMessage.create({
@@ -196,7 +239,7 @@ export async function runTurnFor(combatant: any): Promise<void> {
       });
     }
 
-    noteDossierEvent(String(combatant.id ?? ""), `Round ${game.combat?.round ?? "?"}: ${intent}`);
+    noteDossierEvent(String(combatant.id ?? ""), `Round ${game.combat?.round ?? "?"}: ${settled}`);
 
     // Three of the outcomes take a creature out of the fight for good, on terms the addendum
     // spells out. Recording them is what lets an encounter end without a body count.

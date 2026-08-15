@@ -542,13 +542,20 @@ export function advisories(): Advisory[] {
  */
 function systemSettingAdvisories(): Advisory[] {
   const out: Advisory[] = [];
-  let recharge: unknown;
-  try {
-    recharge = game.settings.get("dnd5e", "autoRecharge");
-  } catch {
-    return out; // A version without the setting. Nothing to advise.
-  }
-  if (String(recharge) === "no") {
+  // Each read is independently guarded and none of them returns early. An absent setting means "a
+  // version that does not have this one", which says nothing about the next one — and the first two of
+  // these were chained, so on any dnd5e without `autoRecharge` the Bloodied warning below could never
+  // be reached. A missing setting must never be able to suppress an unrelated advisory.
+  const setting = (key: string): string | null => {
+    try {
+      return String(game.settings.get("dnd5e", key));
+    } catch {
+      return null;
+    }
+  };
+
+  const recharge = setting("autoRecharge");
+  if (recharge === "no") {
     out.push({
       level: "info",
       title: "Recharge abilities are not rolling themselves",
@@ -564,13 +571,7 @@ function systemSettingAdvisories(): Advisory[] {
   // not merely hide an icon. `updateBloodied` returns before creating the effect, so the STATUS never
   // exists, and every compiled `has_status: bloodied` guard silently reads false. A troll's Loathsome
   // Limbs would then never fire, with nothing anywhere saying why.
-  let bloodied: unknown;
-  try {
-    bloodied = game.settings.get("dnd5e", "bloodied");
-  } catch {
-    return out;
-  }
-  if (String(bloodied) === "none") {
+  if (setting("bloodied") === "none") {
     out.push({
       level: "warn",
       title: "The Bloodied status is switched off in the system",
@@ -579,6 +580,35 @@ function systemSettingAdvisories(): Advisory[] {
         "status being created rather than merely hiding it. Any compiled ability guarded on being " +
         'bloodied will never fire. Turn it back on in Configure Settings, dnd5e, Visibility — "Players" ' +
         "keeps the icon hidden from the party for hostile creatures while the status still exists.",
+    });
+  }
+
+  // A TELEPORT THAT LANDS ON AN OCCUPIED SQUARE IS CANCELLED WITH NO MESSAGE, AND IT IS NOT OURS.
+  //
+  // Read from source rather than inferred, because it was reported as a Noodlr bug. At
+  // `movementAutomation: "full"` dnd5e's `constrainMovementPath` override truncates a path at the first
+  // grid space held by a creature within one size step of the mover
+  // (`canvas/layers/tokens.mjs:isOccupiedGridSpaceBlocking`), and it truncates to the ORIGIN when the
+  // very first step is the blocked one — which for a teleport is the destination, since there are no
+  // intermediate squares. Chris's Premades then calls that as a pre-check and returns early on a path
+  // that goes nowhere (`cat_tokenUtils.mjs:58`) while its `postAnimation` and `postTeleport` passes run
+  // regardless. So the slot is spent, the mist and the sound play at the target square, and the token
+  // stays where it was, with nothing in the console.
+  //
+  // Neither half is wrong on its own and we cannot fix either from here. What we can do is say so —
+  // this is the same doctrine as the scene advisories below, where the cause is also outside the module.
+  // Reported only when a teleporting module is present, so a world that never teleports gets no noise.
+  const teleporters = moduleActive("chris-premades") || moduleActive("gambits-premades");
+  if (setting("movementAutomation") === "full" && teleporters) {
+    out.push({
+      level: "info",
+      title: "A blocked square cancels a teleport silently",
+      detail:
+        "dnd5e's Movement Automation is set to Full, which makes creatures block movement — including " +
+        "the single step of a teleport. A premade Misty Step or Thunder Step whose destination is held " +
+        "by a creature within one size of the caster is refused without a message, after the spell slot " +
+        "has been spent and the visual effects have played. If a teleport spends a slot and nothing " +
+        "moves, that is the cause: pick a clear square, or set Movement Automation to Difficulty Only.",
     });
   }
   return out;

@@ -128,11 +128,45 @@ export async function fireTrigger(
     const capability = binding.capability;
     if (capability.status === "rejected") continue;
 
-    for (let index = 0; index < (capability.rules ?? []).length; index++) {
-      const rule = capability.rules[index];
-      if (rule.trigger?.event !== event) continue;
+    // IF IT CANNOT BE PAID FOR, NONE OF IT HAPPENS. A compiler is free to split one ability into a
+    // `spend_resource` rule and a separate effect rule on the same trigger, and when it does, that
+    // spend is the ONLY thing standing between the sheet's allowance and an unlimited ability — each
+    // rule carries its own `uses`, so the effect rule has no allowance of its own to run out. That is
+    // how a Troll with "4/day" on the sheet summoned a fifth limb: the spend reported an empty pool
+    // and the summon beside it went ahead regardless, silently, with no "N left" line to notice.
+    //
+    // Deliberately narrow. A failed spend is unambiguously "cannot pay"; other failures are not —
+    // a status that was already present must not stop the damage that accompanies it.
+    //
+    // Paying comes first, whatever order the descriptor happens to list its rules in. A stable sort, so
+    // everything else keeps the order it was written in.
+    const firing = (capability.rules ?? [])
+      .map((rule, index) => ({ rule, index }))
+      .filter(({ rule }) => rule.trigger?.event === event)
+      .sort(
+        (a, b) =>
+          Number(b.rule.effect?.kind === "spend_resource") -
+          Number(a.rule.effect?.kind === "spend_resource"),
+      );
+
+    let unpaid = "";
+    for (const { rule, index } of firing) {
+      if (unpaid) {
+        outcomes.push({
+          capability: capability.label,
+          ruleIndex: index,
+          fired: false,
+          reason: `not paid for: ${unpaid}`,
+        });
+        continue;
+      }
       try {
-        outcomes.push(await runRule(capability, rule, index, ctx));
+        const outcome = await runRule(capability, rule, index, ctx);
+        if (!outcome.fired && rule.effect?.kind === "spend_resource") {
+          unpaid = outcome.reason ?? "the resource could not be spent";
+        }
+        outcomes.push(outcome);
+        continue;
       } catch (err) {
         // Rule 3. A broken descriptor is a capability-sheet problem, not a wrecked turn.
         warn(`capability "${capability.label}" rule ${index} threw:`, err);
@@ -316,11 +350,20 @@ async function applyEffect(
       if (created.length === 0) return { ok: false, reason: "nothing could be placed" };
 
       if (effect.initiative !== undefined || (game as any)?.combat?.started) {
-        const placement =
-          effect.initiative === "after_summoner" || effect.initiative === undefined
-            ? { after: findCombatant(self.actor) }
-            : { initiative: Number(effect.initiative) };
-        await addCombatants(created, placement);
+        // ANYTHING THAT IS NOT A NUMBER MEANS "BEHIND ME". `Number("after_summoner")` is NaN, and NaN
+        // reached `createEmbeddedDocuments` as an explicit initiative — which Foundry rejects outright
+        // (`[Combatant5e] validation errors: initiative: must be a number`), so the limb was never
+        // enlisted here at all and the perception sweep enlisted it a moment later with a rolled
+        // initiative instead. The visible symptom was three console errors and a creature that should
+        // act immediately after its summoner turning up in a random slot. `insert_combatant` three
+        // cases below had the `Number.isFinite` guard all along; this branch never got it.
+        const explicit = Number(effect.initiative);
+        await addCombatants(
+          created,
+          Number.isFinite(explicit)
+            ? { initiative: explicit }
+            : { after: findCombatant(self.actor) },
+        );
       }
       return {
         ok: true,

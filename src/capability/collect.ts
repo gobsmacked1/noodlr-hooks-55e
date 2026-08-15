@@ -30,6 +30,7 @@ import { pickNumber, pickString, systemPaths } from "../system/profiles";
 import { validateCapability, type Capability } from "../integration/capability";
 import { requestCompile, type CompileRequestItem } from "../integration/contract";
 import * as cache from "./cache";
+import { plainText, scrubMeta } from "./prose";
 import { bindCapabilities, clearBindings, type Binding } from "./bindings";
 
 /**
@@ -54,34 +55,28 @@ export interface Feature {
   prose: string;
   item: any;
   structured: Record<string, unknown>;
+  /**
+   * Instructions to a human that were taken out of the prose before it was hashed.
+   *
+   * Carried rather than discarded because a silent strip is the same failure as a silent
+   * stand-aside: prose talking about Foundry in the OPEN means an importer or a homebrew author
+   * wrote tooling into the rule text, and the GM is the only person who can decide whether the
+   * sentence mattered. Empty for every sheet dnd5e ships (measured — see `prose.ts`), so this is
+   * quiet until it is interesting.
+   */
+  removed: string[];
 }
 
 /**
- * Prose as a human reads it, with the block structure kept.
+ * Every string a rule could be hiding in, on the item and on each of its activities — with anything
+ * addressed to the reader rather than to the game taken out of it.
  *
- * Newlines matter more here than anywhere else in the module: a stat block's Multiattack and the
- * attacks it refers to are separate paragraphs, and collapsing them into one line is how "makes three
- * attacks" ends up attached to the wrong one.
+ * The scrubbing is `prose.ts`'s and the reasoning lives there. What matters at THIS call site is the
+ * ordering: it happens before `cache.proseHash`, so a note is gone before the wording is keyed, and
+ * editing one correctly invalidates the entry rather than leaving a poisoned descriptor cached
+ * against text that no longer exists.
  */
-export function plainText(html: unknown): string {
-  return String(html ?? "")
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, "\n")
-    .replace(/<li[^>]*>/gi, "• ")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&(?:quot|#34);/gi, '"')
-    .replace(/&(?:apos|#39);/gi, "'")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-/** Every string a rule could be hiding in, on the item and on each of its activities. */
-function proseOf(item: any): string {
+function proseOf(item: any): { prose: string; removed: string[] } {
   const parts: unknown[] = [
     item?.system?.description?.value,
     // Not `description.chatFlavor`, which exists nowhere: the item carries `description.chat` and the
@@ -95,13 +90,16 @@ function proseOf(item: any): string {
   }
   const seen = new Set<string>();
   const out: string[] = [];
+  const removed: string[] = [];
   for (const part of parts) {
-    const text = plainText(part);
+    const scrubbed = scrubMeta(plainText(part));
+    for (const note of scrubbed.removed) if (!removed.includes(note)) removed.push(note);
+    const text = scrubbed.prose;
     if (!text || seen.has(text)) continue;
     seen.add(text);
     out.push(text);
   }
-  return out.join("\n\n");
+  return { prose: out.join("\n\n"), removed };
 }
 
 function activitiesOf(item: any): any[] {
@@ -267,7 +265,7 @@ export function featuresOf(actor: any): Feature[] {
     if (item?.flags?.dnd5e?.cachedFor) continue;
     if (!RULE_BEARING.has(String(item?.type ?? ""))) continue;
 
-    const prose = proseOf(item);
+    const { prose, removed } = proseOf(item);
     if (prose.length < MIN_PROSE) continue;
 
     out.push({
@@ -276,6 +274,7 @@ export function featuresOf(actor: any): Feature[] {
       prose,
       item,
       structured: structuredOf(item),
+      removed,
     });
   }
   return out;
@@ -294,6 +293,8 @@ export interface CollectReport {
   rejected: number;
   /** True when nothing was listening — the ordinary state with no companion module installed. */
   noCompiler: boolean;
+  /** Tooling instructions found in open rule text, as `label` → the sentences taken out. */
+  scrubbed: Record<string, string[]>;
 }
 
 let running: Promise<CollectReport> | null = null;
@@ -322,6 +323,7 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     compiled: 0,
     rejected: 0,
     noCompiler: false,
+    scrubbed: {},
   };
 
   await cache.warm();
@@ -338,11 +340,25 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     perActor.set(actor, features);
     report.features += features.length;
     for (const feature of features) {
+      if (feature.removed.length) report.scrubbed[feature.label] = feature.removed;
       if (cache.has(feature.id)) report.hits++;
       else if (!misses.has(feature.id)) misses.set(feature.id, feature);
     }
   }
   report.distinct = report.hits + misses.size;
+
+  // Said once, to GMs, naming the ability rather than quoting the note — the sentences are on the
+  // report and in the log for whoever wants them. A strip is not an error and must not read as one:
+  // the rule still compiled, and what the GM needs to know is that a sentence of it was addressed to
+  // them rather than to the game.
+  const scrubbed = Object.keys(report.scrubbed);
+  if (scrubbed.length) {
+    warn(
+      `stripped instructions meant for a person out of ${scrubbed.length} ability description(s) ` +
+        `before compiling: ${scrubbed.join(", ")}`,
+      report.scrubbed,
+    );
+  }
 
   // Pass two: buy the misses, once, in one batch. Only the primary GM, and only if asked to.
   if (misses.size > 0 && isPrimaryGM() && isCapabilityCompileEnabled()) {
@@ -603,7 +619,10 @@ export function registerCapabilityCollector(): void {
 /** Diagnostics: what this scene would ask about, without asking. */
 export function surveyScene(): Record<string, unknown> {
   const actors = actorsOn();
-  const distinct = new Map<string, { label: string; cached: boolean; creatures: number }>();
+  const distinct = new Map<
+    string,
+    { label: string; cached: boolean; creatures: number; removed: string[] }
+  >();
   let features = 0;
   for (const actor of actors) {
     for (const feature of featuresOf(actor)) {
@@ -615,6 +634,7 @@ export function surveyScene(): Record<string, unknown> {
           label: feature.label,
           cached: cache.has(feature.id),
           creatures: 1,
+          removed: feature.removed,
         });
     }
   }
@@ -627,6 +647,10 @@ export function surveyScene(): Record<string, unknown> {
     cached: rows.filter((r) => r.cached).length,
     wouldAsk: rows.filter((r) => !r.cached).length,
     compileEnabled: isCapabilityCompileEnabled(),
+    // Abilities whose description told the reader to do something by hand. Empty on stock content.
+    scrubbed: rows
+      .filter((r) => r.removed.length)
+      .map((r) => ({ label: r.label, notes: r.removed })),
     rows,
   };
   log("scene capabilities:", report);
