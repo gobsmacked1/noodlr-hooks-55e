@@ -26,11 +26,13 @@ above the note. **Your Troll needs recompiling to pick this up:** open the capab
 its Loathsome Limbs entry, or purge the cache.
 
 Two things worth knowing about how that works. A hidden section holding real rules is **kept** — a
-monster's curse or disease that the players are not meant to read is still a rule, and a few of those
+monster's curse or disease that the players are not meant to read is still a rule, and 55 of those
 ship with the system. And where an instruction about Foundry turns up in the open, in the middle of
-the rule text itself, the sentence is removed and **you are told about it by name**, because that only
-happens on imported or homebrew sheets and only you can judge whether it mattered. Nothing dnd5e ships
-trips that; it was measured against all 31,905 of its ability descriptions.
+the rule text itself, the sentence is removed and **you are told about it by name**, so you can judge
+whether it mattered. All of it was measured against every one of dnd5e's 31,845 ability descriptions:
+848 hidden sections, of which 793 are authoring notes and every single one opens with the words
+"Foundry Note", and five descriptions carrying a note out in the open (Wild Shape and a fighting-style
+pick, both telling you to drag something onto your sheet).
 
 **Monsters stop bellowing for help within arm's reach of each other.** A creature of animal intelligence
 is *meant* to choose badly — that is what makes it read as an animal rather than a chess engine — but

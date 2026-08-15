@@ -2733,24 +2733,52 @@ upstream to a prompt.
 #### The scrubber, and the two mistakes measured out of it (v0.6.1)
 
 `scripts/census-meta-notes.mjs` (`npm run census:notes`) runs the real predicate over dnd5e 5.3.3's
-`packs/_source`: **31,905 descriptions, 34 hidden sections (30 notes, 4 rules), 0 tooling sentences in
-open prose.** It exists because both of the obvious designs are wrong in a way that is invisible
-without a corpus, and both were live for a while.
+`packs/_source`: **31,845 descriptions, 848 hidden sections (793 notes, 55 rules), 5 descriptions with
+tooling prose in the open (2 distinct sentences, both true positives).** It exists because both of the
+obvious designs are wrong in a way that is invisible without a corpus, and both were live for a while.
 
+- **793 of 848 hidden sections open with the literal words "Foundry Note", and that is ONE distinct
+  opening across the entire corpus.** dnd5e's content team is completely consistent about this, which is
+  what makes the structural half of the scrubber cheap and reliable. It is also the answer to "where did
+  that Troll instruction come from": it is authored, upstream, in the system's own compendium.
 - **Stripping every `<section class="secret">` deletes rules.** The first version did, and it is the
-  reading the section's own name invites. **4 of the 34 are game text** rather than asides — Aberrant
-  Ground's difficult terrain, Intoxicating Touch's whole attack line, Tentacle Disease's entire
-  progression, and Sneak Attack's "Once per turn." Small absolutely and *not* small per creature: it is
-  the whole of what three of those four abilities do. `isMetaAside()` therefore decides per section, and
-  a hidden section holding rules is kept and compiled like any other prose.
-  - The counts are low because dnd5e hides very little; **do not read 34 as the ceiling.** Homebrew and
-    DDB-imported content use hidden sections far more freely, which is the population the per-section
-    test actually protects.
+  reading the section's own name invites. **55 of the 848 are game text** rather than asides — every
+  monster-feature description that uses `[[lookup @name]]` templating, the cursed-item clauses on
+  Berserker Axe and Demon Armor, Aberrant Ground's difficult terrain, Intoxicating Touch's whole attack
+  line, Tentacle Disease's progression, Sneak Attack's "Once per turn." Not small per creature: for
+  several of those it is the whole of what the ability does. `isMetaAside()` therefore decides per
+  section, and a hidden section holding rules is kept and compiled like any other prose.
 - **`compendium` cannot be a tooling word.** It was, and it matched `@UUID[Compendium.dnd5e...]`
   enrichers — which appear in ordinary rule sentences — so the scrubber was classifying legitimate
   hidden sections as notes and dropping them whole. The census is what found it, in the "kept" column,
   and it is the reason that column is printed in full rather than merely counted: **a scrubber can only
-  be checked by looking at what it spared.** Re-read those four by hand after any change to `TOOLING`.
+  be checked by looking at what it spared.** Re-read the kept list by hand after any change to `TOOLING`.
+- **THE CENSUS ITSELF WAS WRONG BY A FACTOR OF 25, AND IT REPORTED A REASSURING NUMBER RATHER THAN AN
+  ERROR (found 2026-08-15).** Its first two runs said 34 hidden sections and zero open-prose hits; the
+  truth is 848 and five. Two file-format faults in the extractor, neither of which touches the shipped
+  scrubber — by the time `prose.ts` runs, Foundry has parsed the YAML and the description is one clean
+  string — so both were the instrument measuring a file format instead of the thing that ships.
+  - **CRLF, and `.` does not match `\r` in JavaScript.** `\r` is a line terminator alongside `\n`, so a
+    folded-scalar continuation of `(?:\1\s+.*\n?)+` matched exactly ONE line and stopped. Every
+    multi-line description — which is nearly all of them, and every single one carrying a hidden
+    section — was truncated to its opening clause. The fix is to normalise line endings before
+    matching, rather than sprinkling `\r?` through the pattern and leaving the next author the trap.
+  - **A folded scalar (`>`) joins with spaces, a literal one (`|`) keeps its newlines.** Leaving the
+    newlines in split sentences mid-clause, so the open-prose hits first appeared as fragments ending
+    in "and" — which is what exposed the bug, because a scrubber cannot produce a fragment.
+  - **The transferable rule: a census that reads a file format is a census of the file format.** This
+    one bundles the real `prose.ts` precisely so it cannot certify its own copy of the predicate, and
+    it still certified nothing for two runs because the *input* was wrong. When a corpus measurement
+    comes back suspiciously clean, cross-check the raw count with `rg` before believing it — `rg -l
+    "Foundry Note"` over the same tree returns 200+ files, against the 34 the census claimed, and that
+    one-line comparison is what should have been run first.
+- **Two known false NEGATIVES in the kept list, both harmless and both left alone.**
+  `items/poison/potion-of-poison.yml` says "you can use these enrichers ([[/damage 2d6 poison]]…) to
+  perform the damage roll", and Deflect Energy's "The Reduce activity can be used to heal yourself".
+  Both are tooling prose that the vocabulary misses. Neither instructs the reader NOT to do something,
+  which is what made the Troll's note destructive, so neither can suppress an effect. Adding `enricher`
+  to `TOOLING` would catch the first with no false-positive risk; `activity` would catch the second and
+  is too common a word to be safe.
 - **The predicate is Foundry's own vocabulary, not the shape of the sentence.** "Manually", "Active
   Effect", "the effects tab", "macro", "midi-qol", "DAE". Not "the DM decides", not "at the GM's
   discretion" — those are *rules* text, they are all over the books, and a wide predicate would eat the

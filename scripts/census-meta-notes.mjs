@@ -68,18 +68,36 @@ function* files(dir) {
 // dependency this module does not otherwise need. What matters for the measurement is the prose,
 // and the folding is whitespace.
 //
-// UN-ESCAPING IS NOT COSMETIC. Many of these values are double-quoted YAML scalars, so the authored
-// `class="secret"` is on disk as `class=\"secret\"` — and the first run of this census reported ONE
-// secret section in the entire corpus because of it, while 27 "Foundry Note" sentences fell through
-// to the vocabulary half. At runtime the YAML has been parsed and the quotes are real, so failing to
-// undo the escaping here measures a file format instead of the thing that ships.
+// TWO FILE-FORMAT TRAPS, both of which made this census report a number far lower than the truth.
+// Neither touches the shipped scrubber — by the time `prose.ts` runs, Foundry has parsed the YAML and
+// the description is one clean string — so both are the instrument measuring the file format instead
+// of the thing being measured. That is the worst kind of bug to have in a census, because it reports
+// a reassuring number rather than an error.
+//
+//  1. CRLF. These files are CRLF, and in JavaScript `.` does not match `\r` (it is a line terminator
+//     alongside `\n`). So a folded-scalar continuation of `(?:\1\s+.*\n?)+` matched exactly ONE line
+//     and stopped, and every multi-line description — which is nearly all of them, and every one
+//     carrying a hidden section — was truncated to its opening clause. Normalising first is the fix;
+//     the alternative of sprinkling `\r?` through the pattern leaves the next author the same trap.
+//  2. Escaping. Many values are double-quoted YAML scalars, so the authored `class="secret"` is on
+//     disk as `class=\"secret\"`, and an earlier run reported ONE secret section in the whole corpus
+//     because of it while the "Foundry Note" sentences fell through to the vocabulary half.
 function descriptions(text) {
   const unescape = (s) => s.replace(/\\"/g, '"').replace(/\\n/g, "\n").replace(/\\\\/g, "\\");
+  const lf = text.replace(/\r\n/g, "\n");
   const found = [];
-  const re = /^(\s*)value:\s*(?:[>|][-+]?\s*)?\n((?:\1\s+.*\n?)+)/gm;
-  for (const match of text.matchAll(re)) found.push(unescape(match[2].replace(/^\s+/gm, " ")));
+  const re = /^([ \t]*)value:[ \t]*(?:([>|])[-+]?[ \t]*)?\n((?:\1[ \t]+[^\n]*\n?)+)/gm;
+  for (const match of lf.matchAll(re)) {
+    // A folded scalar (`>`) turns its newlines into spaces when Foundry parses it; a literal one (`|`)
+    // keeps them. Leaving the newlines in for the folded case splits sentences mid-clause, which is
+    // how three of the four open-prose hits below first showed up as fragments ending in "and".
+    const body = match[3];
+    found.push(
+      unescape(match[2] === "|" ? body.replace(/^[ \t]+/gm, "") : body.replace(/\s*\n\s*/g, " ")),
+    );
+  }
   // The single-line form, for the short ones.
-  for (const match of text.matchAll(/^\s*value:\s*(['"])([\s\S]*?)\1\s*$/gm))
+  for (const match of lf.matchAll(/^[ \t]*value:[ \t]*(['"])([\s\S]*?)\1[ \t]*$/gm))
     found.push(unescape(match[2]));
   return found;
 }
