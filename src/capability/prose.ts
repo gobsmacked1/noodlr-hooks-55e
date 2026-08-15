@@ -38,22 +38,40 @@
 // wrote an instruction into the rule text itself — the case nobody knows about, and the one that will
 // silently poison a descriptor.
 //
-// MEASURED, and the numbers are the argument for the shape above (`npm run census:notes`, 31,905
-// descriptions): 34 carry a hidden section, and **not one line of tooling prose stands in the open
-// anywhere in the shipped corpus.** So on official content the vocabulary half never fires at all —
-// it earns its place against imported and homebrew sheets, which is exactly where nobody is checking.
-// The same run is what retired `compendium` from the vocabulary and what proved a hidden section is
-// not always a note; both are recorded at the definitions below.
+// MEASURED, and the numbers are the argument for the shape above (`npm run census:notes`, 31,845
+// descriptions): **848 carry a hidden section, 793 of which are notes and 55 of which are rules, and
+// 5 descriptions carry tooling prose out in the open** — two distinct sentences, both of them telling
+// the reader to drag something onto a character sheet, so both true positives. The vocabulary half
+// therefore almost never fires on official content; it earns its place against imported and homebrew
+// sheets, which is exactly where nobody is checking. The same run is what retired `compendium` from
+// the vocabulary and what proved a hidden section is not always a note; both are at the definitions
+// below.
+//
+// DO NOT TRUST AN EARLIER RUN OF THAT CENSUS. It was wrong by a factor of 25 for its first two runs —
+// it said 34 hidden sections and zero open-prose hits — because the extractor mishandled CRLF and YAML
+// folded scalars and truncated every multi-line description to its first line. Neither fault touched
+// this file (by the time it runs, Foundry has parsed the YAML and handed over one clean string), and
+// that is the point: **the instrument was measuring a file format instead of the thing that ships,
+// and it reported a reassuring number rather than an error.** The full story is in AGENTS.md; the
+// operational rule is that a suspiciously clean corpus measurement gets cross-checked with `rg`
+// before it is believed or quoted anywhere.
 
 /**
  * A section `enrichHTML` hides from players.
  *
  * **NOT the same thing as a note, which is the trap here and was found by measuring.** The obvious
  * reading is that anything hidden from players is addressed to whoever runs the table, and the
- * census disproves it: of the 34 descriptions in the corpus carrying one of these, several hold
- * ordinary rules text that happens to be a surprise — a doughlike difficult-terrain aura, a curse
- * that lasts an hour, a disease's progression after a minute. Those are exactly the abilities worth
- * compiling, and stripping the section wholesale would have deleted them.
+ * census disproves it: of the 848 descriptions in the corpus carrying one of these, **55 hold
+ * ordinary rules text** that happens to be a surprise — a doughlike difficult-terrain aura, a curse
+ * that lasts an hour, a disease's progression after a minute, Sneak Attack's "Once per turn", and
+ * every monster feature templated with `[[lookup @name]]`. Those are exactly the abilities worth
+ * compiling, and stripping the section wholesale would have deleted them; for several of them the
+ * hidden section is the whole of what the ability does.
+ *
+ * The other 793 are notes, and **all 793 open with the literal words "Foundry Note" — one distinct
+ * opening across the entire corpus.** dnd5e's content team is completely consistent about it, which
+ * is what makes this half of the scrubber cheap and reliable, and it is also the answer to where the
+ * Troll's instruction came from: it is authored upstream, in the system's own compendium.
  *
  * So the section is the unit of granularity and {@link isMetaAside} is the test. Applied before the
  * prose is hashed, which means editing or removing a note correctly invalidates its cache entry.
@@ -75,8 +93,11 @@ export const SECRET =
  * - `compendium` — **the one that would have done real damage, and it was caught by measuring
  *   rather than by review.** It reads as pure tooling and it is not: `@UUID[Compendium.dnd5e.…]`
  *   and `@Embed[Compendium.…]` are how the content team writes a link to a spell, so the word sits
- *   in the middle of thousands of ordinary rules. The census scored 243 hits on it, every one a
- *   sentence like "You can cast @UUID[Compendium.…]{Armor of Shadows}" — i.e. the rule itself.
+ *   in the middle of thousands of ordinary rules. Re-measured 2026-08-15 on a working census: adding
+ *   it takes the open-prose strip from **5 descriptions to 2,469, and from 2 distinct sentences to
+ *   1,334** — every one of them a rule, in the shape "You can cast @UUID[Compendium.…]{Armor of
+ *   Shadows}". It also flips one hidden section from a kept rule to a dropped note. Anyone tempted
+ *   to add it can reproduce that in seven seconds, which is the whole reason the census exists.
  * - `drag` — "the target is dragged 10 feet" is a real grapple rule.
  * - `token` — a Feather Token is an item, and "token" is game vocabulary in this system.
  * - `\bAE\b` — two letters, and a bare abbreviation is not worth the risk when "Active Effect"
