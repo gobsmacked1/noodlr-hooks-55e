@@ -2028,6 +2028,65 @@ descriptor recompiles.
 - Requires a recompile of anything compiled before this release. The hash changes, so an enabled
   compiler does it on the next scene load without being asked.
 
+## The compiler was reading the rulebook off the sheets (v0.6.3, 2026-08-15)
+
+Found in a HAR and console capture of one scene load, taken to answer a different question. The compiler was
+asked to read **123 "abilities" off a single wizard**, spent 292 seconds and real credit, and among what it
+read were `Dash`, `Dodge`, `Hide`, `Ready`, `Stabilize`, `Underwater`, `Unarmed Strike` and `Dagger`. None of
+those is a creature's own ability. They are the 2024 rules glossary, which the PHB content module and
+ddb-importer put on every character sheet as items — so the compiler's premise (a creature's OWN prose is the
+thing nobody has automated) was being violated by its own input. `src/system/dnd5e-glossary.ts` declines them
+in `featuresOf`, and `CollectReport.declined` reports what was skipped and why.
+
+- **THE COST IS THE LESSER PROBLEM, and the reason is worth stating because a cheaper model would hide it
+  rather than fix it.** A compiled `Hide` is a rule firing beside `rules/hide.ts`; a compiled `Underwater` or
+  `Fall` applies consequences nobody asked for; a compiled `Long Rest` mutates the ledger `noteRest()` owns. A
+  general rule is *identical for every creature*, which is exactly why `rules/general.ts` hard-codes the ten
+  worth having and refuses the rest **with reasons** — so compiling one is either a duplicate of shipped code
+  or a re-litigation of a recorded refusal. This is the same boundary `general.ts` draws, enforced one layer
+  earlier.
+- **The two recognition signals are guarded differently, and the asymmetry is the whole safety argument.** A
+  stock `system.identifier` is an assertion by whoever authored the content, so it is trusted on **any** item
+  type — which is the only way `unarmed-strike` is reachable at all, since it ships as `type: weapon`
+  (`equipment24/weapons/unarmed-strike.yml`) and a blanket `feat` gate missed the one glossary entry every
+  creature in the game carries. A bare **name** is a coincidence waiting to happen — "Jump" and "Fall" are
+  plausible titles for a homebrew spell or magic weapon — so a name is believed only on a `feat`. Getting
+  this backwards does not waste a call, it **silently withholds a real ability**, which is the same
+  over-match the rider table's `featOnly` guard exists to prevent. Pinned by `test/economy.test.ts`.
+- **A re-identified item is never matched by name.** Same rule as the rider and declaration tables: a world
+  that gave the item its own identifier has said it is not the general rule.
+- **The thirteen buttons are recognised through `phbActionOf`, not re-matched here.** A second copy of that
+  matching is the divergence the v0.4.1 vision bug was about.
+- `flags.<ns>.compileAnyway` is the escape hatch, and it exists because every judgement in that file is a
+  name or identifier match against content we do not control.
+- **DELIBERATELY NOT DONE: a mundane-gear skip.** `Dagger` looked like the same waste and is not — the stock
+  item's description is **empty**, so `MIN_PROSE` already skips it and stock content needs nothing. What got
+  compiled was an imported dagger carrying a pasted SRD blurb, so any rule would be a guess at what
+  ddb-importer writes. The tempting version (skip `weapon`/`equipment` with `rarity: ''` and no `mgc`
+  property, which IS how dnd5e separates a Dagger from a `rarity: rare` Dagger of Venom) would silently skip
+  a homebrew magic item that never set a rarity. Measure it in a real world first; the reasoning is recorded
+  at the head of `dnd5e-glossary.ts` where somebody would go to add it.
+
+## A DIAGNOSTIC THAT RETURNS AN OBJECT HAS NOT REPORTED ANYTHING (v0.6.3)
+
+v0.6.2 added `guards` to `surveyCapabilities()` precisely so the Troll's missing "while Bloodied" would be
+visible, and **the next capture still could not answer the question** — because a browser console renders a
+nested return value as `Object { selected: 1, report: (1) […] }`, and what gets pasted into a bug report is
+that collapsed line. The one diagnostic in the same capture that arrived intact was `testMove`, which prints
+a string.
+
+- **`renderSurvey` prints a flat block, one line per rule, and `log`s it.** The object is still returned for
+  anything programmatic.
+- **The empty case is printed in as many words: `guards: NONE — fires whenever the trigger does`.** An
+  omitted line reads as a rule that simply has no conditions to show, which is the opposite of the finding.
+- **The general rule for every survey in this module: depth is what costs you.** An object is fine; an object
+  of arrays of objects is a disclosure triangle, and a report that has to be expanded by hand before it says
+  anything will be pasted un-expanded. Prefer a printed string, and put the interesting fact on its own line.
+- `scripts/dig-har.mjs` stays for the case where what was **sent** is in doubt rather than what was stored.
+  With no needle it inventories the capture rather than searching it, deliberately: a HAR is one page load, so
+  the creature in question may not be in there at all, and searching an absent exchange returns zero hits that
+  read exactly like a negative finding.
+
 ## A survey that cannot show a rule's guards cannot diagnose a rule that fires too often (v0.6.2)
 
 `surveyCapabilities()` reported the trigger, the effect, the adjudication, whether the rule runs and

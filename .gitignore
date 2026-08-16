@@ -20,3 +20,7 @@ Thumbs.db
 
 # Scratch notes handed to `gh release create --notes-file`; the real record is changelog.md
 release-notes-*.md
+# Scratch files the release ritual writes so a multi-line message never has to survive a shell quoting
+# round. The message itself lands in the commit and the release; a copy in the tree is noise.
+.commit-msg.txt
+.release-notes.md

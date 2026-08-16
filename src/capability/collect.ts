@@ -27,6 +27,7 @@ import { MODULE_ID, debug, log, warn } from "../constants";
 import { isPrimaryGM } from "../util/gm";
 import { isCapabilityCompileEnabled } from "../settings";
 import { pickNumber, pickString, systemPaths } from "../system/profiles";
+import { generalRuleOf } from "../system/dnd5e-glossary";
 import { validateCapability, type Capability } from "../integration/capability";
 import { requestCompile, type CompileRequestItem } from "../integration/contract";
 import * as cache from "./cache";
@@ -65,6 +66,12 @@ export interface Feature {
    * quiet until it is interesting.
    */
   removed: string[];
+}
+
+/** An ability that was deliberately not read, and why. Reported rather than silently absent. */
+export interface Declined {
+  label: string;
+  why: string;
 }
 
 /**
@@ -256,14 +263,28 @@ function contextOf(actor: any): Record<string, unknown> {
   return context;
 }
 
-/** Every written ability on one creature that is worth compiling. */
-export function featuresOf(actor: any): Feature[] {
+/**
+ * Every written ability on one creature that is worth compiling.
+ *
+ * `declined` is an optional out-parameter rather than a second return value because every caller but
+ * the report wants only the features, and the alternative was three call sites destructuring a tuple
+ * to throw half of it away.
+ */
+export function featuresOf(actor: any, declined?: Declined[]): Feature[] {
   const out: Feature[] = [];
   for (const item of actor?.items ?? []) {
     // The system's own clone of a spell, made to service a feat's "cast" activity. Reading it as well
     // as the feat compiles the same ability twice with the wrong resource attached to one of them.
     if (item?.flags?.dnd5e?.cachedFor) continue;
     if (!RULE_BEARING.has(String(item?.type ?? ""))) continue;
+
+    // A general rule is not this creature's ability, and compiling one is either a duplicate of code
+    // we shipped or a re-litigation of a refusal. See `dnd5e-glossary.ts` for the whole argument.
+    const general = generalRuleOf(item);
+    if (general) {
+      declined?.push({ label: String(item?.name ?? "?").trim() || "?", why: general });
+      continue;
+    }
 
     const { prose, removed } = proseOf(item);
     if (prose.length < MIN_PROSE) continue;
@@ -295,6 +316,8 @@ export interface CollectReport {
   noCompiler: boolean;
   /** Tooling instructions found in open rule text, as `label` → the sentences taken out. */
   scrubbed: Record<string, string[]>;
+  /** General rules that ship as items and were deliberately not read, as `label` → why. */
+  declined: Record<string, string>;
 }
 
 let running: Promise<CollectReport> | null = null;
@@ -324,6 +347,7 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     rejected: 0,
     noCompiler: false,
     scrubbed: {},
+    declined: {},
   };
 
   await cache.warm();
@@ -335,8 +359,9 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
   // Pass one: read every sheet, and note which wordings nobody has compiled yet.
   const perActor = new Map<any, Feature[]>();
   const misses = new Map<string, Feature>();
+  const declined: Declined[] = [];
   for (const actor of actors) {
-    const features = featuresOf(actor);
+    const features = featuresOf(actor, declined);
     perActor.set(actor, features);
     report.features += features.length;
     for (const feature of features) {
@@ -346,6 +371,18 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     }
   }
   report.distinct = report.hits + misses.size;
+  for (const row of declined) report.declined[row.label] = row.why;
+
+  // Debug rather than a warning, and the severity is the decision: on a 2024 character sheet this is
+  // a dozen entries EVERY scene load, and a toast a GM sees every time teaches them to ignore the
+  // channel. Same doctrine as the hidden-note strip, which is silent for the same reason. What makes
+  // it safe to be quiet is that `api.surveyScene()` reports the same list on demand.
+  if (declined.length) {
+    debug(
+      `did not compile ${declined.length} general rule(s) that ship as items on these sheets`,
+      report.declined,
+    );
+  }
 
   // Said once, to GMs, naming the ability rather than quoting the note — the sentences are on the
   // report and in the log for whoever wants them. A strip is not an error and must not read as one:
@@ -624,8 +661,9 @@ export function surveyScene(): Record<string, unknown> {
     { label: string; cached: boolean; creatures: number; removed: string[] }
   >();
   let features = 0;
+  const declined: Declined[] = [];
   for (const actor of actors) {
-    for (const feature of featuresOf(actor)) {
+    for (const feature of featuresOf(actor, declined)) {
       features++;
       const row = distinct.get(feature.id);
       if (row) row.creatures++;
@@ -651,6 +689,8 @@ export function surveyScene(): Record<string, unknown> {
     scrubbed: rows
       .filter((r) => r.removed.length)
       .map((r) => ({ label: r.label, notes: r.removed })),
+    // General rules that ship as items and were deliberately skipped. A dozen on a 2024 sheet.
+    declined,
     rows,
   };
   log("scene capabilities:", report);

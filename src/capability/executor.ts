@@ -598,9 +598,23 @@ function tokenOf(actor: any): any {
   return actor?.token?.object ?? actor?.getActiveTokens?.()?.[0] ?? null;
 }
 
-/** Diagnostics: every capability bound to the selected token, and whether each rule can run. */
+/**
+ * Diagnostics: every capability bound to the selected token, and whether each rule can run.
+ *
+ * PRINTS A FLAT TEXT BLOCK AS WELL AS RETURNING THE OBJECT, and that is not cosmetic. v0.6.2 added
+ * `guards` here precisely so the Troll's missing "while Bloodied" would be visible, and the next
+ * capture still could not answer the question — because a browser console renders a nested return
+ * value as `Object { selected: 1, report: (1) […] }` and what gets pasted into a bug report is that
+ * collapsed line. The one diagnostic in the same capture that arrived intact was `testMove`, which
+ * prints a string.
+ *
+ * The general rule, and it applies to every survey in this module: **a diagnostic whose output has to
+ * be expanded by hand before it says anything has not reported anything.** Depth is what costs you —
+ * an object is fine, an object of arrays of objects is a disclosure triangle.
+ */
 export function surveyCapabilities(): Record<string, unknown> {
   const tokens: any[] = (canvas as any)?.tokens?.controlled ?? [];
+  if (tokens.length === 0) log("select a token first — this reports what is bound to it");
   const report = tokens.map((token) => {
     const actor = token?.actor;
     return {
@@ -632,6 +646,35 @@ export function surveyCapabilities(): Record<string, unknown> {
       })),
     };
   });
-  log("capabilities:", report);
+  log(`capabilities — copy everything below this line:\n${renderSurvey(report)}`);
   return { selected: report.length, report };
+}
+
+/** One line per rule, flat, so nothing has to be expanded to be read. */
+function renderSurvey(report: any[]): string {
+  if (report.length === 0) return "  (nothing selected)";
+  const out: string[] = [];
+  for (const creature of report) {
+    out.push(`${creature.name} — ${creature.capabilities.length} compiled ability/abilities`);
+    if (creature.capabilities.length === 0) {
+      out.push("    (none bound — either nothing compiled, or the cache has not warmed)");
+    }
+    for (const ability of creature.capabilities) {
+      out.push(`  ${ability.label} [${ability.status}]`);
+      for (const [i, rule] of ability.rules.entries()) {
+        const where = rule.runs ? "runs" : rule.standing ? "standing" : "INERT";
+        out.push(`    ${i}. on ${rule.on} -> ${rule.does}  (${where}, ${rule.uses})`);
+        // Printed even when empty, and the empty case is the whole point: "guards: NONE" on a summon
+        // is the Troll bug stated in four characters, whereas an omitted line reads as a rule that
+        // simply has no conditions to show.
+        out.push(
+          rule.guards.length
+            ? `       guards: ${rule.guards.join(" AND ")}`
+            : "       guards: NONE — fires whenever the trigger does",
+        );
+        out.push(`       reads: ${rule.reads}`);
+      }
+    }
+  }
+  return out.join("\n");
 }

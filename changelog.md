@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.6.2
+## 0.6.3
+
+**The rulebook is no longer read off your sheets.** The 2024 rules glossary ships as pressable items — Dash,
+Dodge, Hide, Ready, Stabilize, Jump, Long Rest, Underwater, Unarmed Strike and the rest — and the PHB content
+module and DDB Importer put them on every character. So a single wizard presented 123 "abilities" to be read,
+and reading the general rules cost real time and real credit once per new wording. Worse than the bill: a
+compiled Hide is a rule firing beside the Hide this module already implements, and a compiled Long Rest edits
+a ledger that already has an owner. Those items are now declined before anything is asked, with a line in the
+console saying which and why. A homebrew feature that happens to share one of those names is still read
+normally, and `flags.noodlr-hooks-55e.compileAnyway` forces a reading of anything.
+
+**Diagnostics print instead of returning.** `surveyCapabilities()` gained each rule's conditions last
+release and it made no difference, because a browser console shows a nested result as `Object { … }` and
+what gets copied out of a bug report is that one collapsed line. It now prints a flat block, one line per
+rule, and says **"guards: NONE"** in as many words when a rule has no conditions — which is the whole
+question when something fires at the wrong moment, and an omitted line reads as a rule that simply has none
+to show.
+
 
 **A troll sheds a limb when it is bloodied, and gains the exhaustion for it.** Last release removed the
 GM-only notes that were talking the compiler out of rules; a second kind of tooling text was still getting

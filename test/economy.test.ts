@@ -11,6 +11,7 @@ import {
   isStabilizeActivity,
   phbActionOf,
 } from "../src/system/dnd5e-actions";
+import { generalRuleOf } from "../src/system/dnd5e-glossary";
 import { lightExtraAttackCost } from "../src/system/dnd5e-two-weapon";
 import { notable, slotClaims } from "../src/rules/economy/claims";
 import {
@@ -352,4 +353,72 @@ test("the claims census names the rule that exempted a claim", () => {
   // weapon claiming an Action is ordinary and so is filtered out.
   assert.equal(notable(claims[0]), true);
   assert.equal(notable(claims[1]), false);
+});
+
+/* -------------------------------------------- */
+/*  What never reaches the capability compiler   */
+/* -------------------------------------------- */
+
+test("the general rules that ship as items are declined, and nothing else is", () => {
+  // The thirteen PHB action items, whoever handles them: every one is either intercepted here, billed
+  // here, or a deliberate refusal in general.ts. None of them is a per-creature ability, so none is
+  // worth a model call.
+  assert.ok(generalRuleOf(item({ name: "Dash", type: "feat", identifier: "dash" })));
+  assert.ok(generalRuleOf(item({ name: "Hide", type: "feat", identifier: "hide" })));
+  assert.ok(generalRuleOf(item({ name: "Attack", type: "feat", identifier: "attack" })));
+  assert.ok(generalRuleOf(item({ name: "Ready", type: "feat", identifier: "ready" })));
+
+  // The glossary entries: rules the books state once, for everyone.
+  assert.ok(generalRuleOf(item({ name: "Jump", type: "feat", identifier: "jump" })));
+  assert.ok(generalRuleOf(item({ name: "Long Rest", type: "feat", identifier: "long-rest" })));
+  assert.ok(generalRuleOf(item({ name: "Fall", type: "feat", identifier: "fall" })));
+  assert.ok(generalRuleOf(item({ name: "Underwater", type: "feat", identifier: "underwater" })));
+
+  // A creature's own ability, which is the whole population the compiler exists for.
+  assert.equal(generalRuleOf(item({ name: "Loathsome Limbs", type: "feat" })), null);
+  assert.equal(generalRuleOf(item({ name: "Regeneration", type: "feat" })), null);
+  assert.equal(generalRuleOf(item({ name: "Sneak Attack", type: "feat" })), null);
+});
+
+test("a weapon named after a general rule is never declined", () => {
+  // The guard that matters. "Jump" and "Fall" are plausible names for a homebrew weapon or a spell,
+  // and declining one would withhold a real ability with nothing anywhere saying why — the same
+  // over-match the rider table's featOnly guard exists to prevent.
+  assert.equal(generalRuleOf(item({ name: "Jump", type: "weapon" })), null);
+  assert.equal(generalRuleOf(item({ name: "Fall", type: "spell" })), null);
+  assert.equal(generalRuleOf(item({ name: "Long Rest", type: "consumable" })), null);
+});
+
+test("a re-identified general rule is not declined on the strength of its name", () => {
+  // Same rule as the rider table: a world that deliberately gave this item its own identifier has
+  // said it is not the general rule, and is not overruled by what it happens to be called.
+  assert.equal(generalRuleOf(item({ name: "Jump", type: "feat", identifier: "grasshopper" })), null);
+  // And the escape hatch, for a GM who wants a homebrew Dash read anyway.
+  assert.equal(
+    generalRuleOf(
+      item({
+        name: "Dash",
+        type: "feat",
+        identifier: "dash",
+        flags: { "noodlr-hooks-55e": { compileAnyway: true } },
+      }),
+    ),
+    null,
+  );
+});
+
+test("nothing is declined on another game system", () => {
+  (globalThis as any).game = { system: { id: "pf2e" }, settings: { get: () => true } };
+  assert.equal(generalRuleOf(item({ name: "Dash", type: "feat", identifier: "dash" })), null);
+});
+
+test("Unarmed Strike is declined, and it ships as a weapon rather than a feat", () => {
+  // The reason the identifier is trusted on any type. equipment24/weapons/unarmed-strike.yml is
+  // `type: weapon`, so a blanket feat gate would have missed the one glossary entry every creature
+  // in the game carries.
+  assert.ok(
+    generalRuleOf(item({ name: "Unarmed Strike", type: "weapon", identifier: "unarmed-strike" })),
+  );
+  // Without the stock identifier it is a weapon named after a rule, which is the case that must pass.
+  assert.equal(generalRuleOf(item({ name: "Unarmed Strike", type: "weapon" })), null);
 });
