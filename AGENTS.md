@@ -2161,9 +2161,32 @@ wrote on purpose.
   instrument that undercounts does not fail; it closes the question on a measurement never taken. Same
   class of fault as the meta-notes census reporting 34 hidden sections when there were 848.
 - **`readableActors()` moved to `src/capability/sheets.ts`** when this became its second caller, and its
-  own note carries the caveat every count from it inherits: **compendia are not walked, so every number is
-  a lower bound.** A private second copy is how two diagnostics come to disagree about what the world
-  contains, and here neither would look wrong.
+ own note carries the caveat every count from it inherits: **compendia are not walked, so every number is
+ a lower bound.** A private second copy is how two diagnostics come to disagree about what the world
+ contains, and here neither would look wrong.
+- **IT WAS RUN, AND IT WIDENED EXACTLY ONE ENTRY (v0.6.8, 2026-08-16).** `MISSED` was **4**, and every one
+ of the four was **Unarmed Strike, `type: weapon`, no identifier** — so the population answered the
+ question the shape of the code could not. Unarmed Strike is the sole glossary entry that ships as a
+ weapon (`equipment24/weapons/unarmed-strike.yml`), which makes it the only entry the feat-only name test
+ could never rescue; the full census is eight of them across 557 sheets, **six carrying
+ `identifier: "unarmed-strike"` and two carrying none**, both of those holding prose (188 and 572
+ characters) and therefore being compiled and paid for. **The identifier is usually present, is not
+ reliable, and a sheet that dropped it is indistinguishable from one that kept it.**
+ - **Widened PER ENTRY (`types` on the glossary row), not globally**, and that is the whole safety
+ argument rather than fastidiousness. `test/economy.test.ts` still pins that a **spell** named Unarmed
+ Strike is somebody's homebrew and that a **re-identified** weapon is not declined on the strength of
+ its name. A global widening buys this one case by making every other entry's name believable on any
+ rule-bearing type, which silently withholds a real ability — the failure this file exists to avoid.
+ - The test that asserted the opposite was **deliberately inverted**, which is the point of having
+ written it: the guard could only be removed by somebody arguing with a measurement.
+- **THE FIRST RUN OF THAT SURVEY REPORTED FOUR PROBLEMS WHERE THERE WERE TWO, and the miscount looked
+ like an answer.** `readableActors()` returns a world actor **and** the synthetic actor of every unlinked
+ token standing on a scene, and an **ActorDelta's items keep the base item's id** — so one item on one
+ creature on one scene is reached twice. Deduped by item id (ids are per-document-creation, so two
+ genuinely different items cannot collide), with the occurrence count kept as `sheets` rather than thrown
+ away. Same class of fault as the meta-notes census reporting 34 hidden sections when there were 848:
+ **an instrument that miscounts does not fail, it reports a number, and the number gets quoted.** Any
+ census built on `readableActors()` has to decide whether its unit is the item or the sheet.
 
 ## The cache was reading a key nothing wrote (v0.6.6, 2026-08-16)
 
