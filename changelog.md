@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.7
+
+**Improving how abilities are read now has a way to reach the abilities you already have.** Compiled
+abilities are remembered by their wording, which is what keeps a scene of twenty goblins cheap — but it
+also meant that every improvement to how prose is read was invisible to any sheet that had been read
+once already. `noodlrHooks.recompileWorld()` asks about every wording in the world again.
+
+**It spends money, so nothing calls it for you.** One compile per distinct wording, typed by you when
+you want it, never on a scene load. Anything you locked by hand is left alone; anything that was
+rejected gets another go, which is the point. Progress and the bill are logged before anything is sent.
+
+Also: the previous release's changelog named two console commands that do not exist. They are
+`noodlrHooks.surveyOrphans()` and `noodlrHooks.pruneOrphans()`.
+
+
 ## 0.6.6
 
 **The Troll stops regenerating through fire, and stops shedding limbs at full health.** Both rules had
@@ -17,11 +32,11 @@ so in English instead of quietly firing unguarded, and a rule that would double 
 
 **Housekeeping for the compiled-ability cache.** Abilities you no longer have — a monster deleted, a
 feature renamed, or one of the general rules the module now declines to compile — leave entries behind
-that nothing could ever use. `noodlrHooks.surveyCacheHygiene()` lists them and
-`noodlrHooks.pruneOrphanedCapabilities()` removes them. Nothing is deleted without being asked, and
-anything you locked or rejected by hand is never touched.
+that nothing could ever use. `noodlrHooks.surveyOrphans()` lists them and
+`noodlrHooks.pruneOrphans()` removes them. Nothing is deleted without being asked, and anything you
+locked or rejected by hand is never touched.
 
-New diagnostics: `noodlrHooks.surveyCacheHygiene()`, `noodlrHooks.pruneOrphanedCapabilities()`,
+New diagnostics: `noodlrHooks.surveyOrphans()`, `noodlrHooks.pruneOrphans()`,
 `noodlrHooks.surveyGlossary()`.
 
 

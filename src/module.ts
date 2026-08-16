@@ -93,7 +93,12 @@ import { runCurrentNpcTurn } from "./tactics/npc-turn";
 import { registerDamageLog } from "./capability/damage-log";
 import { surveyPrimitives } from "./capability/primitives";
 import { registerCapabilityExecutor, surveyCapabilities } from "./capability/executor";
-import { collectScene, registerCapabilityCollector, surveyScene } from "./capability/collect";
+import {
+  collectScene,
+  recompileWorld,
+  registerCapabilityCollector,
+  surveyScene,
+} from "./capability/collect";
 import { pruneOrphans, surveyOrphans } from "./capability/hygiene";
 import { surveyStanding } from "./capability/standing";
 import { openCapabilitySheet, registerCapabilitySheet } from "./apps/capability-sheet";
@@ -159,6 +164,7 @@ export interface NoodlrHooksApi {
   surveyOrphans(): unknown;
   pruneOrphans(options?: { includeAbsent?: boolean }): Promise<unknown>;
   compileScene(): Promise<unknown>;
+  recompileWorld(): Promise<unknown>;
   openCapabilities(actor?: unknown): void;
   openRules(page?: string): void;
   surveyOwnership(): unknown;
@@ -321,6 +327,13 @@ const api: NoodlrHooksApi = {
   pruneOrphans: (options?: { includeAbsent?: boolean }) => pruneOrphans(options),
   /** Read the scene now, rather than waiting for the next load. */
   compileScene: () => collectScene(),
+  /**
+   * Ask about every wording in the world again, ignoring the cache. SPENDS ONE COMPILE PER WORDING.
+   *
+   * The only route to a better answer after a doctrine or vocabulary change: the cache key is the
+   * prose, so an improved compiler is invisible to text that has already been read once.
+   */
+  recompileWorld: () => recompileWorld(),
   /** The review window for one creature. Defaults to the selected token, or your own character. */
   openCapabilities: (actor?: unknown) => openCapabilitySheet(actor),
   /** The settings windows: "house", "mechanics" or "combat". */

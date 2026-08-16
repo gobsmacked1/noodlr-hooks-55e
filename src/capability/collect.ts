@@ -32,6 +32,7 @@ import { validateCapability, type Capability } from "../integration/capability";
 import { requestCompile, type CompileRequestItem } from "../integration/contract";
 import * as cache from "./cache";
 import { plainText, scrubMeta } from "./prose";
+import { readableActors } from "./sheets";
 import { bindCapabilities, clearBindings, type Binding } from "./bindings";
 
 /**
@@ -607,6 +608,139 @@ export async function recompileFeatures(actor: any, ids?: string[]): Promise<Rec
   report.rejected = accepted.rejected;
   if (accepted.compiled) await cache.flush();
   rebindActor(actor);
+  return report;
+}
+
+// ---- The whole world, on demand ------------------------------------------------------------------
+
+export interface WorldRecompileReport {
+  actors: number;
+  /** Distinct wordings found across every readable sheet. The bill, before locks are taken out. */
+  distinct: number;
+  /** Left alone because a human has the last word on them. */
+  locked: number;
+  requested: number;
+  compiled: number;
+  rejected: number;
+  /** Over the per-request fuse and not asked about. Run it again for these. */
+  remaining: number;
+  noCompiler: boolean;
+  disabled: boolean;
+}
+
+/**
+ * Ask about every wording in the world again, whatever the cache holds.
+ *
+ * THE REASON THIS HAS TO EXIST AT ALL, and it is not obvious: the cache key is the PROSE, so
+ * improving the doctrine or the vocabulary changes nothing a GM can observe. Every sheet still hashes
+ * to the same key, `collectScene` still reports a hit, and the descriptors go on being the ones the
+ * old prompt produced. There was no route to a better answer for text that had already been read
+ * once — `compileScene()` is cache-first by construction and the capability sheet's Recompile button
+ * is one creature at a time.
+ *
+ * **This spends real credit, once per distinct wording, and is never called by a hook.** It is a
+ * deliberate act after a compiler change, which is why it reports the bill in the log before sending
+ * anything and why `MAX_BATCH` still bounds each request rather than being lifted for this caller.
+ *
+ * Two rules inherited from `recompileFeatures`, both load-bearing:
+ *   * ORDER — an old descriptor is stood down only after a replacement has arrived AND validated.
+ *     Clear-then-ask loses a working cache to a provider outage.
+ *   * `locked` is never touched. A GM who has fixed a bad compile does not lose that to a model
+ *     upgrade. `rejected` IS re-asked, because another go is exactly what a recompile is for.
+ */
+export async function recompileWorld(): Promise<WorldRecompileReport> {
+  const report: WorldRecompileReport = {
+    actors: 0,
+    distinct: 0,
+    locked: 0,
+    requested: 0,
+    compiled: 0,
+    rejected: 0,
+    remaining: 0,
+    noCompiler: false,
+    disabled: false,
+  };
+  if (!isPrimaryGM() || !isCapabilityCompileEnabled()) {
+    report.disabled = true;
+    warn(
+      "recompileWorld needs the primary GM and the capability compiler switched on; nothing was sent.",
+    );
+    return report;
+  }
+
+  await cache.warm();
+
+  // Dedup across every sheet first, for the same reason `collectScene` does: a world with twenty
+  // goblins holds one Pack Tactics, and asking per creature would multiply the bill by the bestiary.
+  const actors = readableActors();
+  report.actors = actors.length;
+  const wordings = new Map<string, Feature>();
+  const owners = new Map<string, any>();
+  for (const actor of actors) {
+    for (const feature of featuresOf(actor)) {
+      if (wordings.has(feature.id)) continue;
+      wordings.set(feature.id, feature);
+      owners.set(feature.id, actor);
+    }
+  }
+  report.distinct = wordings.size;
+
+  const batch: Feature[] = [];
+  for (const feature of wordings.values()) {
+    if (cache.get(feature.id)?.status === "locked") {
+      report.locked++;
+      continue;
+    }
+    batch.push(feature);
+  }
+  if (batch.length === 0) {
+    log(`recompileWorld: nothing to ask about (${report.locked} locked).`);
+    return report;
+  }
+
+  // Chunked rather than sent whole, and the fuse is kept on purpose: a single request carrying every
+  // wording in a large world is one failure away from having bought nothing, whereas a chunk that
+  // fails leaves the earlier ones stored.
+  const chunks: Feature[][] = [];
+  for (let i = 0; i < batch.length; i += MAX_BATCH) chunks.push(batch.slice(i, i + MAX_BATCH));
+  log(
+    `recompileWorld: ${report.distinct} distinct wording(s) on ${report.actors} sheet(s), ` +
+      `${report.locked} locked, asking about ${batch.length} in ${chunks.length} request(s). ` +
+      `This spends one compile per wording.`,
+  );
+
+  for (const [index, chunk] of chunks.entries()) {
+    const asked = new Map(chunk.map((f) => [f.id, f]));
+    const answers = await ask(chunk, owners);
+    if (!answers) {
+      // Nobody is listening. Every later chunk would answer the same way, so stop rather than
+      // logging the same nothing a dozen times.
+      report.noCompiler = true;
+      report.remaining = batch.length - report.requested;
+      break;
+    }
+    report.requested += chunk.length;
+    for (const id of Object.keys(answers)) {
+      if (cache.get(id)?.status !== "locked") cache.remove(id);
+    }
+    const accepted = absorb(answers, asked);
+    report.compiled += accepted.compiled;
+    report.rejected += accepted.rejected;
+    if (accepted.compiled) await cache.flush();
+    log(
+      `recompileWorld: request ${index + 1}/${chunks.length} — ` +
+        `${accepted.compiled} compiled, ${accepted.rejected} rejected.`,
+    );
+  }
+
+  // Whatever is on the canvas now should be running the new descriptors without a scene reload.
+  for (const actor of actorsOn()) rebindActor(actor);
+
+  log("recompileWorld:", report);
+  ui.notifications?.info?.(
+    `Recompiled ${report.compiled} of ${report.requested} ability wording(s).` +
+      (report.rejected ? ` ${report.rejected} were rejected — see the capability sheet.` : ""),
+  );
   return report;
 }
 

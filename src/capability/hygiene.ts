@@ -181,8 +181,10 @@ export function surveyOrphans(): HygieneReport {
       lines.push(`  [${orphan.reason}] ${orphan.label} — ${note}`);
     }
     lines.push(
-      `  api.pruneOrphans() removes the ${report.prunable} certain one(s); ` +
-        `api.pruneOrphans({includeAbsent: true}) removes all ${report.orphans.length}`,
+      // Spelled `noodlrHooks.` and not `api.`, because this line is read at a browser console where
+      // `api` is a ReferenceError. Same trap the standing note in AGENTS.md records.
+      `  noodlrHooks.pruneOrphans() removes the ${report.prunable} certain one(s); ` +
+        `noodlrHooks.pruneOrphans({includeAbsent: true}) removes all ${report.orphans.length}`,
     );
   }
   log(lines.join("\n"));

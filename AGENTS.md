@@ -174,6 +174,25 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 - **`locked` is load-bearing.** Once a GM has fixed a bad compile, a model upgrade or a cache miss
   must never silently overwrite it. `rejected` is remembered for the same reason: re-asking about a
   wording that has already been thrown away spends credit to reach the same answer.
+- **BECAUSE THE KEY IS THE PROSE, IMPROVING THE COMPILER CHANGES NOTHING UNTIL SOMEBODY ASKS AGAIN
+  (`api.recompileWorld()`, v0.6.7).** This is the cache's central economy read as a hazard rather than
+  a saving, and it went unnoticed through three doctrine changes: every sheet still hashes to the same
+  key, `collectScene` still reports a hit, and the descriptors go on being the ones the *old* prompt
+  produced. There was no route to a better answer for text already read once — `compileScene()` is
+  cache-first by construction and the capability sheet's Recompile button is one creature at a time,
+  which for a world of 223 wordings is not a route at all.
+  - **It spends one compile per distinct wording and is called by no hook, ever.** That is the whole
+    reason it is a separate entry point rather than a flag on `collectScene`: a cache-first collect
+    runs on every scene load, and a switch that could make it re-ask is a bill nobody agreed to.
+  - **Order: ask, validate, THEN stand the old one down.** Clear-then-ask trades a working cache for a
+    provider outage. Same rule `recompileFeatures` already followed, and the reason `cache.clear()` is
+    deliberately not on the API — a public "wipe it" is the clear-then-ask mistake with a button.
+  - **Chunked at `MAX_BATCH` rather than sent whole**, so a failed request leaves the earlier chunks
+    stored. A null answer stops the loop rather than repeating the same nothing per chunk, and
+    `remaining` says what was skipped.
+  - `locked` is skipped and counted; `rejected` is re-asked, because another go is what a recompile is
+    for. Bindings for whatever is on the canvas are rebuilt at the end, so the new descriptors run
+    without a scene reload.
 - **The descriptor cache is shareable, and that is a designed property.** Descriptors are mechanics;
   mechanics are not copyrightable. `exportable()` strips `prose`, which is the same boundary
   `assertNoQuotes` enforces at the other end of the corpus pipeline. A GM can publish a compiled
