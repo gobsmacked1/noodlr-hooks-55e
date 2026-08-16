@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.9
+
+**A part-finished world recompile can be finished.** Reading every ability in a world is the expensive
+operation in this pair, and until now a run that lost its last few to a provider refusal could only be
+put right by buying the whole world again. `noodlrHooks.recompileWorld({ since: <time> })` asks only
+about wordings that have not been answered since that moment, so passing the time the run started leaves
+exactly the ones it failed on. It can only ever ask about less than a plain recompile, never more, and
+running it twice costs nothing the second time.
+
 ## 0.6.8
 
 **Unarmed Strike is no longer read as one of your creature's own abilities.** The rules glossary that

@@ -164,7 +164,7 @@ export interface NoodlrHooksApi {
   surveyOrphans(): unknown;
   pruneOrphans(options?: { includeAbsent?: boolean }): Promise<unknown>;
   compileScene(): Promise<unknown>;
-  recompileWorld(): Promise<unknown>;
+  recompileWorld(options?: { since?: number }): Promise<unknown>;
   openCapabilities(actor?: unknown): void;
   openRules(page?: string): void;
   surveyOwnership(): unknown;
@@ -333,7 +333,7 @@ const api: NoodlrHooksApi = {
    * The only route to a better answer after a doctrine or vocabulary change: the cache key is the
    * prose, so an improved compiler is invisible to text that has already been read once.
    */
-  recompileWorld: () => recompileWorld(),
+  recompileWorld: (options?: { since?: number }) => recompileWorld(options),
   /** The review window for one creature. Defaults to the selected token, or your own character. */
   openCapabilities: (actor?: unknown) => openCapabilitySheet(actor),
   /** The settings windows: "house", "mechanics" or "combat". */

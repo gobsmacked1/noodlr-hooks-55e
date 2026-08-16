@@ -2288,6 +2288,29 @@ active (12.8%)** — 32 executable and 49 standing facts.
   `on_save_failed` 24, `on_activity_use` 14, `on_attack_roll` 4, `on_save_succeeded` 4,
   `on_long_rest` 2. The 22 `always` rules in that column are NOT waiting on a hook — they are standing
   claims whose effect kind is outside `STANDING_EFFECTS`, so they are genuinely inert.
+- **THOSE NUMBERS ARE FROM THE PRE-v0.7.2 DOCTRINE AND THE ORDERING ARGUMENT THEY CARRY NO LONGER HOLDS.**
+  A full-world recompile on 2026-08-16 took `on_hit` to **2** and `on_save_failed` to **5** over the same
+  145 wordings, because the v0.7.2 doctrine pushed `adjudication: "engine"` from 137 rules to 29. The three
+  things that release set out to fix all landed (plural guards → 0, unresolvable subjects → 0, restated
+  damage lines 66 → 29); the yield fell fivefold alongside. **Re-measure before ordering Phase 3 work** —
+  the full reasoning, the likely cause and the caveat about the floating model slug are in
+  [noodlr's AGENTS.md](../noodlr-main/AGENTS.md) under "the three fixes cost more than they bought".
+- **`npm run census:subset` exists because the two caches were not the same population.** A recompile
+  answers only for wordings the collector still asks about, and 62 of 1,022 failed on provider 403s, so the
+  post-recompile cache held 1,038 entries of which 78 of the original 223 still carried the OLD descriptor.
+  Censusing that directly compares a doctrine against itself and reports an improvement. It cuts both
+  caches to the ids present in both AND re-read inside `--fresh-hours`, then `census:yield` runs over each.
+  **A before/after census over unequal populations is not a measurement**, and the failure is silent.
+- **`recompileWorld({ since })` exists because a part-finished run had no way to be finished (v0.6.9).**
+  The only tool for those 62 was to buy all 1,022 again, which is why the gap sat open for a day. A
+  wording is asked about unless the cache holds an entry answered at or after `since`, so passing the
+  time the run STARTED leaves exactly what it failed on. Three properties make it safe to reach for:
+  a **missing** entry always asks, which is the half that matters because a first-time compile that
+  failed left nothing behind to look stale; a missing `compiledBy.at` reads as 0, so an entry that
+  cannot say when it was written cannot claim to be fresh; and it can only ever **shrink** the batch,
+  so it cannot cost more than a bare recompile. It is therefore idempotent — run it repeatedly and it
+  converges on the gap, spending nothing on what already landed. **`compiledBy.at` is stamped by
+  `noodlr-main` at answer time**, not by us, so this depends on the compiler having filled it in.
 
 ### The compiler was reading the ability's own damage line back to us (v0.6.6)
 

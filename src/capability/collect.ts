@@ -619,6 +619,8 @@ export interface WorldRecompileReport {
   distinct: number;
   /** Left alone because a human has the last word on them. */
   locked: number;
+  /** Skipped by `since` — already re-read, so already paid for. */
+  fresh: number;
   requested: number;
   compiled: number;
   rejected: number;
@@ -626,6 +628,27 @@ export interface WorldRecompileReport {
   remaining: number;
   noCompiler: boolean;
   disabled: boolean;
+}
+
+export interface WorldRecompileOptions {
+  /**
+   * Skip any wording the cache already answered at or after this time (epoch ms).
+   *
+   * THIS IS HOW A PARTIAL RECOMPILE IS FINISHED, and it exists because one is not a hypothetical: on
+   * 2026-08-16 a run of 1,022 lost its last 62 to provider refusals, and the only tool for the
+   * remainder was to buy all 1,022 again. Pass the time the run STARTED and what is left is exactly
+   * what it failed to answer.
+   *
+   * A wording with no cached entry, or one holding no `compiledBy.at`, always asks — which is the
+   * half that matters, because a FIRST-time compile that failed left nothing behind to be stale. So
+   * this is idempotent: run it repeatedly and it converges on the gap, spending nothing on what has
+   * already landed.
+   *
+   * It can only ever SHRINK the batch, so it cannot cost more than a bare `recompileWorld()`.
+   *
+   *     noodlrHooks.recompileWorld({ since: Date.now() - 6 * 3600_000 })
+   */
+  since?: number;
 }
 
 /**
@@ -648,11 +671,14 @@ export interface WorldRecompileReport {
  *   * `locked` is never touched. A GM who has fixed a bad compile does not lose that to a model
  *     upgrade. `rejected` IS re-asked, because another go is exactly what a recompile is for.
  */
-export async function recompileWorld(): Promise<WorldRecompileReport> {
+export async function recompileWorld(
+  options: WorldRecompileOptions = {},
+): Promise<WorldRecompileReport> {
   const report: WorldRecompileReport = {
     actors: 0,
     distinct: 0,
     locked: 0,
+    fresh: 0,
     requested: 0,
     compiled: 0,
     rejected: 0,
@@ -660,6 +686,7 @@ export async function recompileWorld(): Promise<WorldRecompileReport> {
     noCompiler: false,
     disabled: false,
   };
+  const since = Number(options.since) || 0;
   if (!isPrimaryGM() || !isCapabilityCompileEnabled()) {
     report.disabled = true;
     warn(
@@ -687,14 +714,24 @@ export async function recompileWorld(): Promise<WorldRecompileReport> {
 
   const batch: Feature[] = [];
   for (const feature of wordings.values()) {
-    if (cache.get(feature.id)?.status === "locked") {
+    const held = cache.get(feature.id);
+    if (held?.status === "locked") {
       report.locked++;
+      continue;
+    }
+    // Absent, or answered before the cutoff, means unanswered as far as this run is concerned. A
+    // missing `compiledBy.at` reads as 0 deliberately: an entry that cannot say when it was written
+    // cannot claim to be fresh.
+    if (since && Number(held?.compiledBy?.at ?? 0) >= since) {
+      report.fresh++;
       continue;
     }
     batch.push(feature);
   }
   if (batch.length === 0) {
-    log(`recompileWorld: nothing to ask about (${report.locked} locked).`);
+    log(
+      `recompileWorld: nothing to ask about (${report.locked} locked, ${report.fresh} already re-read).`,
+    );
     return report;
   }
 
@@ -705,7 +742,9 @@ export async function recompileWorld(): Promise<WorldRecompileReport> {
   for (let i = 0; i < batch.length; i += MAX_BATCH) chunks.push(batch.slice(i, i + MAX_BATCH));
   log(
     `recompileWorld: ${report.distinct} distinct wording(s) on ${report.actors} sheet(s), ` +
-      `${report.locked} locked, asking about ${batch.length} in ${chunks.length} request(s). ` +
+      `${report.locked} locked` +
+      (since ? `, ${report.fresh} already re-read since ${new Date(since).toISOString()}` : "") +
+      `, asking about ${batch.length} in ${chunks.length} request(s). ` +
       `This spends one compile per wording.`,
   );
 
