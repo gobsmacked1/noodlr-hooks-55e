@@ -15,7 +15,7 @@
 // a thrown exception mid-turn loses the turn.
 
 import { log } from "../constants";
-import { moveAwayFrom, moveOffField, moveTo, moveToward } from "../core/movement";
+import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
 import { duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
 import { declareReadied } from "../rules/ready";
@@ -173,7 +173,21 @@ export async function useActionAt(
 }
 
 /** Plans whose whole point is that the creature ends up somewhere else. */
-const MOVING_PLANS = new Set(["close", "kite", "hide", "advance", "help", "flee", "escape"]);
+const MOVING_PLANS = new Set([
+  "close",
+  "kite",
+  "hide",
+  "advance",
+  "search",
+  "help",
+  "flee",
+  "escape",
+]);
+
+/** One grid square in scene units. */
+function oneSquare(): number {
+  return Number((canvas as any)?.scene?.grid?.distance ?? 5) || 5;
+}
 
 /** Movement budget left for the mechanical part of the turn, in scene units. */
 function speedOf(plan: TurnPlan): number {
@@ -259,6 +273,19 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         );
         break;
 
+      case "search":
+        // A point, not a token, and that is the whole distinction the search plan exists to keep: the
+        // creature is walking to a remembered spot on the floor rather than homing on somebody it
+        // cannot see. `desired` is 0 because the spot is the destination — there is no reach to stop
+        // short at when there is nothing standing there.
+        if (option.lost) {
+          result.moved = await moveTowardPoint(selfToken, option.lost.point, speedOf(plan), 0, {
+            label: `where ${option.lost.name} was last seen`,
+            elevation: option.lost.elevation,
+          });
+        }
+        break;
+
       case "help":
         result.moved = await moveToward(
           selfToken,
@@ -303,7 +330,11 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
     // Say so when the announcement promised movement and none happened. Silence here is what made the
     // first two attempts at this so hard to diagnose: the chat card described a creature closing 23 ft,
     // the token never budged, and nothing anywhere said the move had been refused.
-    if (MOVING_PLANS.has(option.kind) && result.moved === 0) {
+    // A search that was already standing on the remembered spot is the one movement plan that
+    // legitimately travels nowhere, so it is not a refusal to report. Every other zero is.
+    const meantToTravel =
+      option.kind === "search" ? (option.lost?.distance ?? 0) > oneSquare() : true;
+    if (MOVING_PLANS.has(option.kind) && meantToTravel && result.moved === 0) {
       result.problem = "the token would not move — see the console for which call was refused";
     }
   } catch (err) {

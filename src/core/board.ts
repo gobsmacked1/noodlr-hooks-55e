@@ -38,10 +38,35 @@ export interface BoardActor {
   spellCount: number;
 }
 
+/**
+ * An enemy this creature knows is out there and cannot currently see.
+ *
+ * Deliberately NOT a `BoardActor`: everything a `BoardActor` offers — where it is, how hurt it is,
+ * what it is carrying — is exactly what a creature that has lost sight of somebody does not know, and
+ * making the two interchangeable is how an unseen enemy ends up being attacked. All that survives is
+ * a name and the last place it was seen.
+ */
+export interface UnseenEnemy {
+  tokenId: string;
+  name: string;
+  /** Where it was standing when it was last seen, in canvas pixels. */
+  point: { x: number; y: number };
+  elevation: number;
+  /** How far the acting creature is from that remembered spot, in scene units. */
+  distance: number;
+}
+
 export interface Board {
   self: BoardActor;
+  /** Enemies the creature can actually perceive. See `tactics/awareness.ts`. */
   enemies: BoardActor[];
   allies: BoardActor[];
+  /**
+   * Enemies it knows about but has lost sight of. Empty until `applyAwareness` has run, which is
+   * `readBoard`'s honest default: reading the battlefield is measurement, and deciding who is hidden
+   * from whom is a rules question that belongs a layer up.
+   */
+  unseen: UnseenEnemy[];
   /** Scene distance units ("ft"), for readable log lines. */
   units: string;
   /** How far the acting creature can move this turn, in the same units; null when unknown. */
@@ -150,6 +175,7 @@ export function readBoard(combatant: any): Board | null {
     self,
     enemies,
     allies,
+    unseen: [],
     units: String((canvas as any)?.scene?.grid?.units ?? "ft"),
     speed: locomotion.speed > 0 ? locomotion.speed : pickNumber(combatant.actor, P.speed),
     locomotion,

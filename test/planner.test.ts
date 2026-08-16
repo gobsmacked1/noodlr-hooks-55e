@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { survivalOptions } from "../src/tactics/planner.js";
+import { searchOptions, survivalOptions } from "../src/tactics/planner.js";
 import { type Consideration, tierProfile } from "../src/tactics/tiers.js";
 
 // The floor option, which is the whole of what is testable here without a scene. `planTurn` needs
@@ -13,6 +13,7 @@ function board(over: Record<string, unknown> = {}): any {
     self: { name: "Troll Limb", hpFraction: 1 },
     enemies: [{ name: "Rogwiz Ardue", distance: 60 }],
     allies: [],
+    unseen: [],
     units: "ft",
     speed: 20,
     locomotion: { modes: { walk: 20 }, speed: 20 },
@@ -57,6 +58,50 @@ test("a creature that cannot conceive of calling for help never does", () => {
     unlocks: INSECT.unlocks.filter((u: Consideration) => u !== "callForHelp"),
   };
   assert.equal(survivalOptions(board(), mute, false).length, 0);
+});
+
+const lost = { tokenId: "t1", name: "Rogwiz Ardue", point: { x: 0, y: 0 }, elevation: 0 };
+const HOUND = tierProfile(2);
+
+test("a creature that has lost its quarry goes to look, rather than calling for help", () => {
+  // The bug this closes: `board.enemies` was every hostile in the tracker, so a creature walked
+  // unerringly at somebody it could not see. With the awareness filter the enemy list is empty, and
+  // the FLOOR must not be what fills the gap — "nothing in sight" scores above 1 and would otherwise
+  // beat everything, leaving a hunter bellowing beside the bush its quarry stepped behind.
+  const b = board({ enemies: [], unseen: [{ ...lost, distance: 40 }] });
+  const search = searchOptions(b, HOUND, false)[0];
+  assert.ok(search, "tier 2 is where object permanence starts");
+  assert.equal(search.kind, "search");
+  assert.ok(Number(search.score) > 1, "beats the blind floor, which is what makes it happen");
+  assert.equal(search.lost?.name, "Rogwiz Ardue");
+});
+
+test("…and does not, once it is standing on the spot", () => {
+  // Not zero: it still beats nothing at all, and a creature milling about where the trail went cold
+  // reads correctly. What it must not do is outscore a genuine option.
+  const b = board({ enemies: [], unseen: [{ ...lost, distance: 5 }] });
+  const search = searchOptions(b, HOUND, false)[0];
+  assert.ok(Number(search.score) < 1);
+  assert.match(String(search.reasons?.[0]), /right about here/);
+});
+
+test("an ambush is not a search: nothing is offered for an enemy it never saw", () => {
+  // `applyAwareness` drops an unseen enemy with no remembered sighting instead of adding it to
+  // `unseen`, so there is nothing here to look for and nothing to give the ambush away.
+  assert.equal(searchOptions(board({ enemies: [] }), HOUND, false).length, 0);
+});
+
+test("a mind with no object permanence does not search", () => {
+  const b = board({ enemies: [], unseen: [{ ...lost, distance: 40 }] });
+  assert.equal(searchOptions(b, INSECT, false).length, 0);
+});
+
+test("the blind floor knows the difference between an empty field and a lost quarry", () => {
+  // `blind` gates on BOTH lists. Reading only `enemies` would score "nothing in sight" above 1 in
+  // exactly the case a search exists for, and win.
+  const b = board({ enemies: [], unseen: [{ ...lost, distance: 40 }] });
+  const call = survivalOptions(b, HOUND, true).find((o) => o.kind === "call");
+  assert.equal(call, undefined, "it can see nothing, but it knows perfectly well where to look");
 });
 
 test("fleeing competes on merit and is not suppressed by the floor rule", () => {

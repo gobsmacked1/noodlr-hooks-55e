@@ -69,6 +69,12 @@ function describeIntent(plan: TurnPlan): string {
     // GM most needs to see, and it was invisible.
     case "advance":
       return `${me} ${travel.advance} ${target}, still too far to strike.`;
+    // Deliberately names nobody, the same rule the readied action follows. Who a monster has lost is
+    // the hider's information: a card reading "searches for Rogwiz" tells the whole table that the
+    // rogue is the one it cannot find, which is most of what the hide was bought for. The GM gets the
+    // name in the reasoning footnote.
+    case "search":
+      return `${me} ${travel.advance} the spot where it last saw its quarry, searching.`;
     case "heal-self":
       return `${me} uses ${o.itemName} on itself.`;
     case "heal-ally":
@@ -107,7 +113,7 @@ function describeIntent(plan: TurnPlan): string {
  * `close` and `kite` are deliberately absent: they end in a real item use, so the swing is the news and
  * the distance already rides in the sentence from `option.approach`.
  */
-const TRAVEL_ONLY = new Set<PlanKind>(["advance", "help"]);
+const TRAVEL_ONLY = new Set<PlanKind>(["advance", "search", "help"]);
 
 /**
  * The intent again, now that it is known how far the creature actually got.

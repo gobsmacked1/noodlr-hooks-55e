@@ -21,7 +21,8 @@
 import { pickNumber, systemPaths, type SystemPaths } from "../system/profiles";
 import { readActions, type CreatureAction } from "./actions";
 import { isMercifulSort, partyHasCeasedAggression, partyIsDefeated } from "./encounter";
-import { readBoard, type Board, type BoardActor } from "../core/board";
+import { readBoard, type Board, type BoardActor, type UnseenEnemy } from "../core/board";
+import { applyAwareness } from "./awareness";
 import { findConcealment, type Spot } from "../core/positioning";
 import { findWayOut, hazardsUnder } from "../core/hazards";
 import { turnRandom } from "../core/random";
@@ -42,6 +43,7 @@ export type PlanKind =
   | "call"
   | "close"
   | "advance"
+  | "search"
   | "kite"
   | "hide"
   | "help"
@@ -69,6 +71,14 @@ export interface PlanOption {
   approach?: number;
   /** Where the creature ends up, when the option involves going somewhere specific. */
   spot?: Spot;
+  /**
+   * For `search`: the enemy it has lost, and the last place it saw them.
+   *
+   * Deliberately not a `target`, which every other movement option carries: a `BoardActor` knows where
+   * the creature IS, and the whole point of this option is that it does not. Anything reading
+   * `option.target` to aim at would defeat the hide it exists to respect.
+   */
+  lost?: UnseenEnemy;
   /** Whose eyes the spot was chosen against. */
   observer?: string;
   /**
@@ -505,6 +515,47 @@ function hideOptions(
 }
 
 /**
+ * Going to look where the quarry went.
+ *
+ * The other half of the awareness fix: filtering an unseen enemy off the board stops a creature walking
+ * straight to a rogue it cannot see, and on its own it leaves that creature with nothing to do — which
+ * at the table reads as the hide having switched the monsters off rather than having worked. So it goes
+ * to the last place it saw them, which is what a thing that has lost sight of its quarry does, and is
+ * also the movement most likely to restore line of sight and end the hide honestly.
+ *
+ * Offered only when nothing is visible, `advance`'s rule and for `advance`'s reason: a creature with
+ * somebody in front of it should fight that, not go looking for the one that got away.
+ *
+ * NOTHING HERE KNOWS WHERE THE HIDER IS. The option carries a remembered point, the execution layer
+ * walks to a point, and if the rogue moved after breaking sight then the creature searches an empty
+ * patch of floor — which is the correct outcome and the entire value of having hidden.
+ */
+export function searchOptions(board: Board, p: TierProfile, hasBetter: boolean): PlanOption[] {
+  if (hasBetter || !can(p, "searchLastSeen")) return [];
+  if (board.enemies.length > 0) return [];
+  const lost = board.unseen[0];
+  if (!lost || board.speed === null || board.speed <= 0) return [];
+
+  // Already standing on the spot: there is nothing left to search, and walking a step to arrive where
+  // it already is would burn the turn reporting movement that never happened.
+  const square = Number((globalThis as any).canvas?.scene?.grid?.distance) || 5;
+  const arrived = lost.distance <= square;
+
+  return [
+    {
+      kind: "search",
+      lost,
+      // Above the call-for-help floor and below a real attack, which it can never compete with anyway
+      // — this is only generated when there are no attacks to be had.
+      score: arrived ? 0.8 : 1.1,
+      reasons: arrived
+        ? [`lost ${lost.name} right about here`]
+        : [`lost sight of ${lost.name}`, `last seen ${Math.round(lost.distance)} ${board.units} away`],
+    },
+  ];
+}
+
+/**
  * Getting out of something that is burning you.
  *
  * Scored above a routine attack but not above self-preservation, and only offered when a way out was
@@ -580,7 +631,11 @@ export function survivalOptions(board: Board, p: TierProfile, hasAny: boolean): 
   // Nothing in sight is the case this option exists for, and there it is the best thing available
   // rather than a floor — so it is offered on its own terms even though something else may have been
   // generated (a hazard to step out of, an ally to help).
-  const blind = board.enemies.length === 0;
+  //
+  // A creature that has merely LOST somebody is not in that case: it knows where to look, and searching
+  // is the better answer. Without this the bellow at 1.2 outscores the search at 1.1 and the fix above
+  // would present as the monsters standing around shouting instead of pursuing.
+  const blind = board.enemies.length === 0 && board.unseen.length === 0;
   if (can(p, "callForHelp") && (blind || !hasAny)) {
     options.push({
       kind: "call",
@@ -664,8 +719,11 @@ function coverIntent(
  * creature has no conceivable option), which the caller reports rather than silently skipping.
  */
 export function planTurn(combatant: any): TurnPlan | null {
-  const board = readBoard(combatant);
-  if (!board) return null;
+  const raw = readBoard(combatant);
+  if (!raw) return null;
+  // The tracker is omniscient and the creature is not. Everything below plans against what this one
+  // can actually perceive — see `awareness.ts`.
+  const board = applyAwareness(raw);
 
   const P = systemPaths();
   const actor = combatant.actor;
@@ -689,6 +747,7 @@ export function planTurn(combatant: any): TurnPlan | null {
   const real = [
     ...offensive,
     ...advanceOptions(board, kit, offensive.length > 0),
+    ...searchOptions(board, profile, offensive.length > 0),
     ...readyOptions(board, kit, profile, offensive.length > 0, readyRand),
     ...healingOptions(board, kit, profile),
     ...controlOptions(board, kit, profile),

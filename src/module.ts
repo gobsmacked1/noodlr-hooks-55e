@@ -35,6 +35,7 @@ import {
   getCombatAutomation,
 } from "./settings";
 import { announceRuling, proposeRuling, requestBehavior, PROTOCOL } from "./integration/contract";
+import { surveyAwareness } from "./tactics/awareness";
 import { registerDossierCleanup } from "./tactics/dossier";
 import { toggleSelectedCombatantAutomation } from "./tactics/control";
 import { registerAutomationCleanup } from "./tactics/registry";
@@ -132,6 +133,7 @@ export interface NoodlrHooksApi {
   surveyDying(): unknown;
   surveyConcentration(): unknown;
   surveyHide(): unknown;
+  surveyAwareness(): unknown;
   hide(opts?: { force?: boolean }): Promise<void>;
   surveyJump(): unknown;
   jump(): Promise<void>;
@@ -251,6 +253,7 @@ const api: NoodlrHooksApi = {
   surveyConcentration: () => surveyConcentration(),
   /** Whether each selected token may hide where it stands, and what it would cost. */
   surveyHide: () => surveyHide(),
+  surveyAwareness: () => surveyAwareness(),
   /** Take the Hide action with every selected token. `force` skips prerequisites and the cost. */
   hide: (opts) => hideSelected(opts),
   /** What the selected token can leap, with and without the run-up it currently has. */

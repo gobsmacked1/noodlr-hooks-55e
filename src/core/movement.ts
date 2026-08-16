@@ -401,11 +401,38 @@ export async function moveToward(
   budget: number,
   desired: number,
 ): Promise<number> {
+  const goal = centerOf(target);
+  if (!goal) {
+    log(`movement: ${describe(token?.document ?? token)} cannot step toward a target with no position`);
+    return 0;
+  }
+  return moveTowardPoint(token, goal, budget, desired, {
+    label: describe(target?.document ?? target),
+    elevation: reachableElevation(token, target),
+  });
+}
+
+/**
+ * Step toward a place rather than a creature, stopping once within `desired` scene units of it.
+ *
+ * The whole of `moveToward` except for reading the goal off a token, split out for the searching
+ * creature: an enemy that has broken line of sight is not a token the planner may aim at any more —
+ * that is the entire point of it having hidden — so what remains is a remembered point on the floor.
+ * Two copies of the fan, the sub-square guard and the pixel conversion would be two chances to fix a
+ * measurement bug in one of them, which is the mistake `measureBetween` exists to have stopped making.
+ */
+export async function moveTowardPoint(
+  token: any,
+  goal: Point,
+  budget: number,
+  desired: number,
+  intent: { label?: string; elevation?: number } = {},
+): Promise<number> {
   const who = describe(token?.document ?? token);
   const origin = centerOf(token);
-  const goal = centerOf(target);
-  if (!origin || !goal) {
-    log(`movement: ${who} cannot step toward a target with no position`);
+  const label = intent.label ?? "that spot";
+  if (!origin) {
+    log(`movement: ${who} cannot step anywhere without a position of its own`);
     return 0;
   }
   if (!(budget > 0)) {
@@ -428,9 +455,8 @@ export async function moveToward(
   // unable to touch it — and there the honest answer is that the grid offers nothing nearer.
   if (isGridded() && wanted < unitsPerSquare()) {
     log(
-      `movement: ${who} is ${Math.round(separation)} from ${describe(target?.document ?? target)} ` +
-        `and needs to close only ${wanted.toFixed(1)} — less than one square, so there is no nearer ` +
-        `square to stand in`,
+      `movement: ${who} is ${Math.round(separation)} from ${label} and needs to close only ` +
+        `${wanted.toFixed(1)} — less than one square, so there is no nearer square to stand in`,
     );
     return 0;
   }
@@ -438,13 +464,10 @@ export async function moveToward(
   const bearing = Math.atan2(goal.y - origin.y, goal.x - origin.x);
   const wantedPixels = wanted * pixelsPerUnit(origin, goal, separation);
 
-  return stepTo(
-    token,
-    origin,
-    approaches(origin, bearing, wantedPixels),
-    `toward ${describe(target?.document ?? target)}`,
-    { budget, elevation: reachableElevation(token, target) },
-  );
+  return stepTo(token, origin, approaches(origin, bearing, wantedPixels), `toward ${label}`, {
+    budget,
+    elevation: intent.elevation,
+  });
 }
 
 /** How far off the direct line a creature will step to get past something. */

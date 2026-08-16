@@ -32,6 +32,12 @@ export type Consideration =
   /** Break off and run when badly wounded. Instinct, not reasoning — a cornered rat flees. */
   | "fleeWhenHurt"
   /**
+   * Go and look where its quarry went. A dog does this, so it sits at tier 2 — but tier 1 does not
+   * get it, and the line is object permanence rather than tactics: something that hunts by smell
+   * alone has nothing to search FOR once the thing it was chasing stops being there.
+   */
+  | "searchLastSeen"
+  /**
    * Step out of ground that is hurting it — fire, poison, blades. Instinct rather than tactics, and
    * deliberately withheld from tier 1: a mindless thing burns where it stands, and moths fly into
    * flames. Everything with an animal's nervous system leaves.
@@ -121,7 +127,7 @@ const LADDER: Array<{ descriptor: string; adds: Consideration[]; noise: number; 
       descriptor: "Animal instincts only",
       // Fleeing moved down from tier 3 (user, 2026-08-02): running from pain is instinct, not
       // reasoning. A cornered rat manages it.
-      adds: ["targetApparentWeakest", "fleeWhenHurt", "understandsHazards"],
+      adds: ["targetApparentWeakest", "fleeWhenHurt", "understandsHazards", "searchLastSeen"],
       noise: 0.7,
       breadth: 4,
     },

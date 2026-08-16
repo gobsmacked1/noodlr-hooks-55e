@@ -9,26 +9,9 @@
 // chose to sneak has chosen not to fight, and a system that opened combat on the players' own eyeballs
 // would make stealth impossible (user, 2026-08-04). Nothing here ever tests a player as the spotter.
 //
-// The hard part is asking "can that monster see that player" at all. Three layers of trap, all verified:
-//
-//   1. `token.isVisible` and `canvas.visibility.testVisibility` both answer a DIFFERENT question —
-//      whether the current user can see it. Core's method iterates the vision sources initialized on
-//      this client, and short-circuits to `game.user.isGM` when there are none, so on an automation
-//      client it is a very confident "yes" to everything. Neither can be scoped to an arbitrary token.
-//   2. An uncontrolled NPC has no vision source on a GM's client at all: `Token#_isVisionSource()`
-//      refuses for a GM unless the token is controlled. So one has to be built by hand — initialized
-//      but deliberately never `add()`ed, because adding it would change what the GM's own screen shows.
-//      `DetectionMode#testVisibility(visionSource, mode, config)` takes the source as a PARAMETER,
-//      which is what makes per-creature perception possible at all.
-//   3. dnd5e never maps a stat block's senses onto Foundry detection modes, and NPC tokens ship with
-//      `sight.enabled` false (its character template sets it; its NPC template has no prototype token
-//      block). A monster with "Darkvision 60 ft." therefore has NO detection modes whatsoever, and a
-//      pure vision test silently returns false for the entire bestiary. This is the single most likely
-//      way for the feature to look broken, so a creature with no usable modes falls back to its stated
-//      senses plus a wall check, and one with no way to perceive anything at all says so in the console.
-//
-// Both the throwaway-source technique and the detection-mode loop are what Patrol and vision-5e do in
-// production against Foundry 14. Behaviour was the reference; the code is ours.
+// The hard part — asking "can that monster see that player" at all, and the three silent traps in
+// doing so — moved to `sight.ts` on 2026-08-16. This file is the policy that sits on top of it: when a
+// yes starts a fight, who gets dragged in, who is surprised, and who is recorded as having found whom.
 //
 // A quiet period after every fight guards the obvious way this turns hostile: survivors who can still
 // see the party would otherwise restart the encounter the instant the GM ended it.
@@ -46,7 +29,17 @@ import {
   isSurpriseEnabled,
 } from "../settings";
 import { SURPRISED_STATUS } from "../system/dnd5e-stealth";
+import { forgetSightings } from "../tactics/awareness";
 import { initiativeSettled } from "../tactics/hooks";
+import {
+  enabledModes,
+  forgetEvasionNotices,
+  perceives,
+  releaseVision,
+  separation,
+  sightOf,
+  type VisionCache,
+} from "./sight";
 import {
   describeSenses,
   describeStealth,
@@ -56,6 +49,8 @@ import {
   noteSpotted,
   passivePerception,
 } from "./stealth";
+
+export { observersWhoSee } from "./sight";
 
 /** Interval between sweeps: one combat round of real time (user's spec, 2026-08-04). */
 const POLL_MS = 6000;
@@ -71,18 +66,6 @@ const PEACE_MS = 60_000;
 /** How long the players are given to roll their own initiative before the fight starts without them. */
 const INITIATIVE_WAIT_MS = 60_000;
 
-/** Sight range assumed for a creature whose token has vision switched off and no stated senses. */
-const ASSUMED_SIGHT = 60;
-
-/** Senses that let a creature notice someone, whatever the light is doing. */
-const SENSES = ["darkvision", "blindsight", "truesight", "tremorsense"];
-
-/** Creatures already warned about having no way to perceive anything, so the log stays readable. */
-const warnedBlind = new Set<string>();
-
-/** Pairings already reported as "would have been spotted, but they are hidden". */
-const announced = new Set<string>();
-
 let timer: number | null = null;
 let sweeping = false;
 let quietUntil = 0;
@@ -90,7 +73,8 @@ let quietUntil = 0;
 export function registerPerceptionWatch(): void {
   Hooks.on("deleteCombat", () => {
     quietUntil = Date.now() + PEACE_MS;
-    announced.clear();
+    forgetEvasionNotices();
+    forgetSightings();
     if (isPrimaryGM()) void clearSurprise();
   });
 
@@ -137,7 +121,7 @@ async function sweep(): Promise<void> {
   // One vision source per spotter, reused across the party and across both passes below. Building the
   // source runs a full wall sweep, which is the entire cost of this feature; testing an extra target
   // against an existing one is arithmetic. Never build inside an inner loop.
-  const vision = new Map<string, any>();
+  const vision: VisionCache = new Map();
   try {
     const combat = activeCombat();
     const already = combat?.started ? enlisted(combat) : new Set<string>();
@@ -177,13 +161,7 @@ async function sweep(): Promise<void> {
     log("perception sweep failed:", err);
   } finally {
     // These are ours and were never registered with the canvas; leaving them would leak polygons.
-    for (const source of vision.values()) {
-      try {
-        source?.destroy?.();
-      } catch {
-        /* a source that will not tidy up is not worth failing a sweep over */
-      }
-    }
+    releaseVision(vision);
     sweeping = false;
   }
 }
@@ -199,11 +177,7 @@ async function sweep(): Promise<void> {
  * Only runs when somebody is actually hiding, which is nearly never, so the cost of building a vision
  * source per hostile is not paid by an ordinary fight.
  */
-async function maintainSpotted(
-  hostiles: any[],
-  party: any[],
-  cache: Map<string, any>,
-): Promise<void> {
+async function maintainSpotted(hostiles: any[], party: any[], cache: VisionCache): Promise<void> {
   if (!isStealthEnabled() || hostiles.length === 0) return;
 
   for (const target of party) {
@@ -266,262 +240,6 @@ function isPlayerToken(token: any): boolean {
   return Boolean(token?.actor?.hasPlayerOwner) && alive(token);
 }
 
-function separation(a: any, b: any): number {
-  const grid: any = (canvas as any)?.grid;
-  try {
-    const measured = grid?.measurePath?.([a.center, b.center]);
-    if (measured?.distance !== undefined) return Number(measured.distance);
-  } catch {
-    /* gridless scenes and older shapes fall through to pixels */
-  }
-  return Math.hypot(b.center.x - a.center.x, b.center.y - a.center.y);
-}
-
-/**
- * Can `spotter` see `target` right now?
- *
- * Runs the creature's own detection modes — which is what gets darkness, darkvision, blindsight,
- * tremorsense and invisibility right without us reimplementing any of them. A creature whose token has
- * no usable modes (the common case, see the header) is judged on its stat block instead.
- *
- * Elevation is not considered beyond what core's own modes do: Foundry's vision is largely planar, and
- * modelling a creature's vertical arc of sight would be inventing precision we do not have.
- */
-function perceives(spotter: any, target: any, cache: Map<string, any>): boolean {
-  const { seen, useModes } = sightOf(spotter, target, cache);
-
-  if (!seen) return false;
-  if (!isStealthEnabled()) return true;
-
-  // A clear line of sight is Foundry's answer, not 5e's. Ask the dice too.
-  const evaded = evades(spotter, target, separation(spotter, target), useModes);
-  if (evaded) {
-    announceEvasion(spotter, target, evaded);
-    return false;
-  }
-
-  // Being found used to lift the hide outright, here, for everybody. It does not any more: `maintainSpotted`
-  // records that THIS watcher has them and leaves the hide standing against everyone else. The universal
-  // reveal is still right for the things that deserve it — attacking, casting aloud, invisibility ending —
-  // and those all still call `reveal` from `rules/stealth.ts`. `live` is no longer consulted for that
-  // reason: this function is pure again, which is what the diagnostic survey always needed it to be.
-  return true;
-}
-
-/**
- * Can `spotter` SEE `target`, before anything either of them is doing about it?
- *
- * This is the vision half of `perceives`, split out because two callers want the question stopped at
- * different points. The sweep wants the whole thing: eyes first, then the dice. The Hide prerequisite
- * wants ONLY this half, and the reason is circularity — `evades` reads what the target is doing to hide,
- * so a creature that is already hiding would be invisible to the very test deciding whether it may hide
- * again, and every re-hide would pass unconditionally.
- *
- * Reports `useModes` alongside the answer because the caller cannot otherwise tell whether it got the
- * real detection-mode verdict or the stat-block fallback, and `evades` needs to know which.
- */
-function sightOf(
-  spotter: any,
-  target: any,
-  cache: Map<string, any>,
-): { seen: boolean; useModes: boolean } {
-  const id = String(spotter?.id ?? "");
-  if (!cache.has(id)) cache.set(id, buildVision(spotter));
-  const source = cache.get(id);
-
-  const modes = source ? enabledModes(spotter) : [];
-  const useModes = Boolean(source) && modes.length > 0;
-  let seen = false;
-
-  if (useModes) {
-    const config = testConfig(target);
-    for (const [modeId, mode] of modes) {
-      const detector: any = (globalThis as any).CONFIG?.Canvas?.detectionModes?.[modeId];
-      if (typeof detector?.testVisibility !== "function") continue;
-      try {
-        if (detector.testVisibility(source, mode, config)) {
-          seen = true;
-          break;
-        }
-      } catch (err) {
-        log(`detection mode ${modeId} threw for ${spotter?.name}:`, err);
-      }
-    }
-    // Its senses are properly configured and none of them found the target. That is an answer, not a
-    // gap — falling through to the stat block here would quietly undo darkness and invisibility.
-  } else {
-    seen = withinSenses(spotter, target) && hasLineOfSight(spotter, target);
-  }
-  return { seen, useModes };
-}
-
-/**
- * Which of `observers` can currently see `target`, by token id.
- *
- * Exists so the Hide prerequisite in `rules/hide.ts` answers "out of any enemy's line of sight" with the
- * SAME machinery that decides whether a fight starts. Before v0.4.1 those were two unrelated tests: the
- * sweep ran detection modes, ranges, light and darkness, while Hide counted wall-blocked corner rays and
- * nothing else — so nine hostiles a hundred feet away in the dark, whom no sweep would ever let notice
- * anybody, were reported as having the rogue "in plain view". Two answers to one question is a bug
- * whichever of them is right, and this is the one that is right.
- *
- * Pure, and owns the lifecycle of the vision sources it builds: they were never registered with the
- * canvas, so leaving them behind leaks polygons and could not be tidied up by anyone else.
- *
- * An observer whose visibility cannot be worked out is reported as SEEING, because the caller's failure
- * direction has to be refusing a hide rather than granting one nobody has earned.
- */
-export function observersWhoSee(observers: any[], target: any): Set<string> {
-  const seen = new Set<string>();
-  const vision = new Map<string, any>();
-  try {
-    for (const observer of observers) {
-      const id = String(observer?.id ?? "");
-      try {
-        if (sightOf(observer, target, vision).seen) seen.add(id);
-      } catch (err) {
-        log(`could not work out whether ${observer?.name} can see ${target?.name}:`, err);
-        seen.add(id);
-      }
-    }
-  } finally {
-    for (const source of vision.values()) {
-      try {
-        source?.destroy?.();
-      } catch {
-        /* a source that will not tidy up is not worth failing the question over */
-      }
-    }
-  }
-  return seen;
-}
-
-/**
- * Say once, per pair, that a fight did not start because someone was hidden.
- *
- * The failure this guards against is silence: a stale hidden state suppressing every encounter forever
- * while the GM wonders why automatic engagement stopped working. Repeating it every six seconds would
- * be its own kind of useless, so each pairing is announced once and reset when a fight ends.
- */
-function announceEvasion(spotter: any, target: any, why: string): void {
-  const key = `${spotter?.id}:${target?.id}`;
-  if (announced.has(key)) return;
-  announced.add(key);
-  log(`perception: ${spotter?.name} would have spotted ${target?.name}, but they are ${why}`);
-}
-
-/**
- * The spotter's enabled detection modes as [id, mode] pairs.
- *
- * v14 keeps `detectionModes` as a Record keyed by id; v13 and earlier keep an Array of objects carrying
- * their own `id`. Both shapes are handled because the difference is silent — the wrong one yields an
- * empty list rather than an error, and an empty list looks exactly like a blind monster.
- */
-function enabledModes(spotter: any): Array<[string, any]> {
-  const raw: any = spotter?.document?.detectionModes;
-  const pairs: Array<[string, any]> = Array.isArray(raw)
-    ? raw.map((m: any) => [String(m?.id ?? ""), m])
-    : Object.entries(raw ?? {});
-  return pairs.filter(([id, mode]) => id && mode?.enabled);
-}
-
-/**
- * The visibility test config a detection mode expects: a set of points, each with its own LOS memo.
- *
- * Core builds this in `_createVisibilityTestConfig`, which is internal, so it is used when present and
- * hand-rolled when not — the shape is small and stable enough that a fallback is cheaper than a
- * hard dependency on a protected method. v14 takes an array of points and offers the token's own test
- * points; earlier versions take one point and jitter it by a tolerance.
- */
-function testConfig(target: any): any {
-  const v14 = Number((game as any)?.release?.generation ?? 13) >= 14;
-  const doc = target?.document;
-  const points =
-    v14 && typeof doc?.getVisibilityTestPoints === "function"
-      ? doc.getVisibilityTestPoints()
-      : target.center;
-
-  const visibility: any = (canvas as any)?.visibility;
-  if (typeof visibility?._createVisibilityTestConfig === "function") {
-    try {
-      return visibility._createVisibilityTestConfig(points, {
-        object: target,
-        tolerance: v14 ? 0 : 2,
-      });
-    } catch (err) {
-      log("core's visibility test config threw; using our own:", err);
-    }
-  }
-
-  const elevation = Number(doc?.elevation ?? 0) || 0;
-  const list = Array.isArray(points) ? points : [points];
-  return {
-    object: target,
-    tests: list.map((p: any) => ({
-      point: { x: p.x, y: p.y, elevation: Number(p.elevation ?? elevation) || 0 },
-      los: new Map(),
-    })),
-  };
-}
-
-/**
- * A vision source for a token nobody is controlling.
- *
- * `initialize()` computes the polygons; `add()` would register the source with the canvas and change
- * what the GM actually sees on screen, so it is never called. Built even when `sight.enabled` is false,
- * because the detection-mode loop is what decides whether it is useful.
- */
-function buildVision(token: any): any {
-  try {
-    const cls: any = (globalThis as any).CONFIG?.Canvas?.visionSourceClass;
-    if (!cls || typeof token?.document?._getVisionSourceData !== "function") return null;
-    const source = new cls({ sourceId: token.sourceId, object: token });
-    source.initialize(token.document._getVisionSourceData());
-    return source;
-  } catch (err) {
-    log("could not build a vision source:", err);
-    return null;
-  }
-}
-
-/**
- * Fallback for creatures with no detection modes: the senses their stat block claims.
- *
- * dnd5e 5.3 moved these under `senses.ranges`; the flat path still resolves through a deprecation shim,
- * so both are read. A creature with neither modes nor stated senses is assumed to have ordinary sight,
- * and is named in the console once — an empty capability read is a misconfiguration until proven
- * otherwise, and silence here is what would make the whole feature look dead.
- */
-function withinSenses(spotter: any, target: any): boolean {
-  const attributes: any = spotter?.actor?.system?.attributes?.senses ?? {};
-  const ranges: any = attributes?.ranges ?? attributes;
-  let radius = Number(spotter?.document?.sight?.range) || 0;
-  for (const sense of SENSES) radius = Math.max(radius, Number(ranges?.[sense]) || 0);
-
-  if (radius <= 0) {
-    radius = ASSUMED_SIGHT;
-    const id = String(spotter?.id ?? "");
-    if (!warnedBlind.has(id)) {
-      warnedBlind.add(id);
-      log(
-        `perception: ${spotter?.name} has no detection modes and no stated senses — assuming ${ASSUMED_SIGHT} ft of ordinary sight. Enable vision on the token, or install a senses module, for anything better.`,
-      );
-    }
-  }
-  return separation(spotter, target) <= radius;
-}
-
-function hasLineOfSight(spotter: any, target: any): boolean {
-  try {
-    if (typeof spotter?.checkCollision === "function") {
-      return !spotter.checkCollision(target.center, { type: "sight", mode: "any" });
-    }
-  } catch (err) {
-    log("line-of-sight test threw; assuming the view is clear:", err);
-  }
-  return true;
-}
-
 /**
  * Report, for every hostile-and-player pairing on this scene, who can see whom and why.
  *
@@ -532,7 +250,7 @@ function hasLineOfSight(spotter: any, target: any): boolean {
 export async function surveyPerception(): Promise<Record<string, unknown>> {
   const hostiles = tokensOnScene().filter(isHostile);
   const party = tokensOnScene().filter(isPlayerToken);
-  const vision = new Map<string, any>();
+  const vision: VisionCache = new Map();
   const rows: Array<Record<string, unknown>> = [];
 
   try {
@@ -553,13 +271,7 @@ export async function surveyPerception(): Promise<Record<string, unknown>> {
       }
     }
   } finally {
-    for (const source of vision.values()) {
-      try {
-        source?.destroy?.();
-      } catch {
-        /* nothing worth failing a report over */
-      }
-    }
+    releaseVision(vision);
   }
 
   const report = {
@@ -782,7 +494,7 @@ async function applySurprise(joining: any[]): Promise<void> {
   const party = tokensOnScene().filter(isPlayerToken);
   if (party.length === 0) return;
 
-  const vision = new Map<string, any>();
+  const vision: VisionCache = new Map();
   const caught: any[] = [];
   try {
     for (const token of joining) {
@@ -791,13 +503,7 @@ async function applySurprise(joining: any[]): Promise<void> {
       caught.push(token);
     }
   } finally {
-    for (const source of vision.values()) {
-      try {
-        source?.destroy?.();
-      } catch {
-        /* nothing worth failing an engagement over */
-      }
-    }
+    releaseVision(vision);
   }
   if (caught.length === 0) return;
 

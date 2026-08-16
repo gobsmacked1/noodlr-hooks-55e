@@ -2171,7 +2171,73 @@ vision bug below**: one question with two implementations, the cheap local copy 
  switch for the whole world and it takes effect without a reload. Worth knowing before telling anybody
  to edit eighteen scenes.
 
+## The tracker is omniscient and the creature is not (v0.6.5, 2026-08-16)
+
+Reported as pursuit: the rogue re-hid, broke line of sight, and the hostiles walked straight to him
+anyway, "as if the Player Rogue never hid". Nothing was broken in the hiding layer — `evades` was
+answering per-watcher correctly, `maintainSpotted` was dropping watchers that lost sight, the survey
+said so. **The planner never asked.** `readBoard` builds `board.enemies` from the combat tracker, and
+the tracker holds every combatant wherever they are standing, so `planTurn` picked the nearest one and
+`moveToward` walked at it. The behaviour was correct for the board it was given, and the board was a lie.
+
+`src/tactics/awareness.ts` is the filter, applied in `planTurn` between `readBoard` and any scoring.
+
+- **THE TWO QUESTIONS COST DIFFERENT AMOUNTS, and that asymmetry is the whole shape of the file.**
+ `evades` is arithmetic (concealment layers, then a banked DC against passive Perception) and is asked
+ about **every** enemy, because it is what catches an invisible one as well as a hidden one. `sightOf`
+ casts rays and is asked **only** about creatures deliberately hiding. Asking `sightOf` about everybody
+ is the tempting version and it **regresses ordinary combat**: a token with vision switched off and a
+ stat block stating no senses falls back to an ASSUMED 60 ft, so on a large map every archer would
+ abruptly stop being able to see what it had been shooting at all fight. Nobody hiding means no vision
+ source is ever built, so an ordinary fight pays nothing.
+- **Stated rather than left to be found: a creature that has NOT hidden is still tracked through a
+ wall.** That is unchanged behaviour and is not what was reported — somebody who never tried to be
+ unfindable has not earned being unfindable — and fixing it needs a per-creature sight model whose
+ fallback is trustworthy, not a wider filter here.
+- **It READS the sweep's `spotted` set and never WRITES to it.** `maintainSpotted` runs only inside the
+ perception sweep, which is gated on auto-engagement; so a watcher recorded from the planner on a table
+ with auto-engagement off would never be cleared by anything. Reading a stale set costs a monster that
+ keeps tracking; writing to an unmaintained one costs a rogue who can never hide again.
+- **Fails toward SEEING at every level** — a thrown vision test, an unreadable token, stealth switched
+ off. Granting free invisibility to something that never earned it is the destructive failure; a
+ monster that fights normally is the status quo.
+- **An enemy it never saw is DROPPED, not remembered.** `board.unseen` is populated only where `seenAt`
+ holds a sighting, which is what makes an ambush an ambush. Sightings are in memory and per client, for
+ the same reason the per-encounter registry is: an actor flag would follow every future copy of that
+ goblin, and a creature that remembers a session-three sighting is worse than one that remembers
+ nothing. Cleared on `deleteCombat`.
+
+### And then it has to DO something, or the filter reads as the bug it fixed
+
+A creature that loses its quarry and has no plan for it falls through to the survival floor — and
+"nothing in sight" scores above 1 deliberately, so the fix on its own would have produced a hunter
+bellowing for help beside the bush the rogue stepped behind. Worse to watch than the pursuit.
+
+- **`PlanKind: "search"`** walks to the remembered spot. `PlanOption.lost` carries an `UnseenEnemy`
+ rather than the `target` every other movement option uses, and that is load-bearing: a `BoardActor`
+ knows where the creature IS, and anything reading `option.target` to aim at would defeat the hide.
+- **Gated at tier 2 (`searchLastSeen`), and the line is object permanence rather than tactics.** A dog
+ does this. Tier 1 does not get it: something hunting by smell alone has nothing to search FOR once the
+ thing it was chasing stops being there.
+- **`blind` in `survivalOptions` gates on BOTH lists.** Reading `enemies` alone scores the floor above
+ 1 in exactly the case a search exists for, and wins. Pinned by a test.
+- **The public announcement names nobody** — "searches the spot where it last saw its quarry" — because
+ the roster leak rule applies here as much as it does to a refused Hide. The GM sees the name in the log.
+- Already standing on the spot scores 0.8 rather than 0: milling about where the trail went cold reads
+ correctly, it just must not outscore a real option. `execute.ts` skips the did-not-move complaint in
+ that case, since it never meant to travel.
+- Diagnostic: `api.surveyAwareness()` — flat, one line per hostile, `SEES`/`lost` plus the hiding state,
+ so "the planner still thinks it can see the rogue" is one command rather than an inference.
+
 ## Two parts of one module answering "can X see Y" differently (v0.4.1, 2026-08-14)
+
+**`src/rules/sight.ts` is where that one implementation now lives** (extracted v0.6.5): `sightOf`,
+`perceives`, `observersWhoSee`, the vision-source builder and cache, `withinSenses`, `hasLineOfSight`
+and `separation`. It was carved out of `perception.ts` because the awareness filter needed it and
+`perception.ts` imports the tactics layer, so a planner asking the vision question would have closed an
+import cycle. It is a **leaf** — geometry and detection modes, nothing about starting a fight — and
+anything that needs to know whether one creature can see another imports it rather than reimplementing.
+`perception.ts` keeps the policy half: sweeping, engaging, surprise, `maintainSpotted`.
 
 Reported from the first five seconds of a player smoke-test: a rogue pressed Argon's Hide button and was
 refused, *"in plain view of Beholder Zombie, Dire Wolf, Dire Wolf, Archpriest, Archmage, Bandit Captain,

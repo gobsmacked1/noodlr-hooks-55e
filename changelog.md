@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.5
+
+**Monsters no longer track a hidden creature through a wall.** A rogue who hid, broke line of sight and
+moved was still pursued square by square. The hiding rules were working the whole time — it was the
+turn planner that never consulted them, because it reads the combat tracker, and the tracker knows
+where everybody is standing. A creature now plans against what it can actually perceive.
+
+**A creature that loses its quarry goes and looks where it last saw them.** Anything with the wits of a
+dog or better; below that, losing you means losing you. The announcement deliberately does not name who
+it is looking for, so watching a monster search gives nothing away. A creature that never saw you in the
+first place does not come looking at all, which is what makes an ambush an ambush.
+
+**A creature that is not hiding is still tracked normally.** This changes nothing for ordinary combat,
+and costs nothing in a fight where nobody is sneaking.
+
+New diagnostic: `noodlrHooks.surveyAwareness()` prints, for the selected creature, every hostile in the
+tracker and whether it can see them.
+
+
 ## 0.6.4
 
 **Creatures close to melee again.** A monster would walk to within one square of its target, stop, and
