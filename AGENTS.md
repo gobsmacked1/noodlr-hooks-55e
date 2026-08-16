@@ -630,6 +630,19 @@ lists the whole surface. Not `api`: a one-word global belongs to whoever assigns
 Two of them need something selected and say so rather than failing: `explainTurn()` wants a controlled
 token in an active combat, `testMove()` wants a controlled token.
 
+**An agent can run all of them without a human, through the GM harness** at
+`C:\Project\noodlr-vtt\harness\` (`npm run watch`, then
+`curl -s -X POST --data-raw "noodlrHooks.surveyEconomy()" http://127.0.0.1:3111/eval`). It answers with
+the console output the call produced as well as the return value, which matters here because most of
+these surveys PRINT a flat block and hand back a count — see the flat-output note under v0.6.3. Full
+reasoning, the security constraint and the Playwright traps are in
+[noodlr's AGENTS.md](../noodlr-main/AGENTS.md) under "The GM harness".
+
+**Nothing this module logs reaches the Foundry server**, so `journalctl` is not an alternative: module
+code is browser-only ESM. The one server-side channel that carries our own output is the **chat log**,
+because chat messages are documents in the world database — the *"could not carry that out (the token
+would not move)"* card that finally pinned the melee-movement bug was recoverable from there all along.
+
 ## Research method: the corpus, subagents, and not losing the work
 
 Every "nobody automates this" finding in this file came from reading source, never from asking a model
@@ -2121,6 +2134,43 @@ into a wall and giving up the pursuit.
 - The fan is deterministic rather than seeded, so identical creatures all break the same way round the same
  obstacle. Cheap to change (`positioning.ts` has the seeded-bearing precedent) and not obviously worth it.
 
+## Two parts of one module answering "how far is that" differently (v0.6.4, 2026-08-16)
+
+The melee stall, found with the GM harness rather than by reasoning, and it is **the same shape as the
+vision bug below**: one question with two implementations, the cheap local copy quietly wrong.
+`core/board.ts` asked Foundry's `grid.measurePath`, which honours the scene's diagonal rule.
+`core/movement.ts` did its own `Math.hypot`. On a square grid those disagree about every diagonal.
+
+- **`measureBetween` in `core/positioning.ts` is the one answer now**, and both callers go through it.
+ The general rule is already in this file twice; this is the third instance, so treat *any* second
+ implementation of a spatial question as a bug on sight.
+- **The reported symptom needed BOTH halves to explain it, which is why neither was found alone.**
+ The world was set to Foundry's **EXACT** diagonal rule (world setting, `core.gridDiagonals`), under
+ which a diagonally adjacent creature is **7.07 ft** away — genuinely out of a 5 ft reach, so the
+ planner correctly said "close the distance", and `moveToward` correctly computed a **2.07 ft** step.
+ There is no square 2 ft away. Every one of the eight fan candidates snapped back to the square the
+ creature already held, each costing a real `move()` round trip with a stall watchdog behind it, and
+ the creature stood next to its target for the rest of the fight.
+- **A gap smaller than one square is now refused once, in words, instead of attempted eight times.**
+ That is the durable guard: the diagonal setting was the trigger, but any reach that does not land on
+ a multiple of the grid distance reaches the same dead end. It says the grid has nothing nearer,
+ which is true and is what a GM needs to hear.
+- **The same-square guard sits in `stepTo`, before `occupied()`**, because a destination that snaps
+ onto the creature's own square would otherwise be rejected as "square already taken" — a message
+ that sends the reader looking for a token that is not there. Elevation is part of the comparison: a
+ flyer rising within its own square IS going somewhere.
+- **Pixels are converted along the BEARING, not by the grid scale** (`pixelsPerUnit`). At the
+ EQUIDISTANT default a diagonal square costs 5 ft and spans 212 px, so the flat conversion undershoots
+ every diagonal approach by 30% — the creature closes two thirds of what it meant to and the shortfall
+ reads as a wall. This one only became visible *after* the diagonal fix, because under EXACT the two
+ conversions agree exactly.
+- **`moveTo` reports the distance travelled through the same measurement**, since that number is what
+ v0.6.1's "advances N ft" card prints. A diagonal square announced as 7 ft rather than 5 makes a
+ correct move read as a rules error.
+- **Every scene stores `null` for `grid.diagonals` and inherits the world setting**, so this is one
+ switch for the whole world and it takes effect without a reload. Worth knowing before telling anybody
+ to edit eighteen scenes.
+
 ## Two parts of one module answering "can X see Y" differently (v0.4.1, 2026-08-14)
 
 Reported from the first five seconds of a player smoke-test: a rogue pressed Argon's Hide button and was
@@ -3216,19 +3266,24 @@ Recorded because they will be reported again.
 
 ## Open items carried over from noodlr
 
-- **OPEN BUG — melee-only hostiles still move oddly (reported 2026-08-05, v0.4.36 test).** The user saw
-  "unusual movement behaviour" from melee-only creatures during an otherwise clean encounter and had no
-  time to characterise it: not whether they stall, overshoot, path badly or refuse to close. Start with
-  `api.explainTurn()` on a misbehaving creature and `api.testMove()` on its token — between them those
-  report the planner's scoring and every stage of what core did with the move. Prime suspects:
-  `reachableElevation` and the 3D `separation` check in `planner.attackOptions`, and the `maxCost`
-  constraint, which refuses a path costing more than the creature's Speed rather than moving it as far as
-  it can. **The v13 theory is dead** (census, 2026-08-07): the host is 14.365, so `maxCost` exists there.
-  The same census settles the other half — all four movement-veto modules are active in that world:
-  `NotYourTurn@4.0.0`, `tokenwarp@14.365.2`, `Rideable@5.0.17` and `monks-active-tiles@14.01`.
-  **"Disable NotYourTurn first" was wrong advice and has been withdrawn (2026-08-11):** it exempts the
-  current combatant, which is the only token a planned turn moves, so it can never have caused this.
-  Suspect Token Warp and Rideable first, then our own `maxCost` and `reachableElevation`.
+- ~~**OPEN BUG — melee-only hostiles still move oddly (reported 2026-08-05).**~~ **DIAGNOSED and fixed in
+ v0.6.4** — it was the two answers to "how far is that", above. Three notes that stood here for ten days
+ were all wrong and are worth knowing about as a category:
+ - **"All four movement-veto modules are active in that world" was read off a census and is FALSE as of
+ 2026-08-15.** Measured live through the harness: `Rideable`, `monks-active-tiles`, `tokenwarp` and
+ `NotYourTurn` are all **installed and disabled**. A census records what is installed; only a runtime
+ read says what is running, and ten days of suspicion pointed at four modules that could not have
+ been involved.
+ - **The prime suspects named here (`reachableElevation`, the 3D separation check, `maxCost`) were all
+ innocent.** None of them was ever measured; they were the plausible candidates, and writing plausible
+ candidates into a durable note turns them into received facts. Name what was measured.
+ - The one still-live residue: **`movement: core allowed X's move but its position was stripped before
+ saving`** appeared in the same logs with all four documented culprits off, so that message's advice
+ ("grappled, mounted, or on a teleport cooldown?") is incomplete. Active modules that touch movement
+ in that world are `terrainmapper@14.0.1`, `patrol@4.0.3`, `about-face@3.29.1`, `item-piles@3.3.4`
+ and `routinglib@1.1.0` — **suspect Terrain Mapper first**, since it is the one with region
+ behaviours that intercept a move. Not yet reproduced since the measurement fix, and it may simply
+ have been the sub-square step being refused in a second way.
 - **UNVERIFIED CONFLICT — `wm5e` (Weapon Mastery 5e) versus our Push mastery.** Active in the user's world
   at 14.533.6, a version scheme matching AC5e's, so probably the same author. `system/dnd5e-forced-movement.ts`
   implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`) and

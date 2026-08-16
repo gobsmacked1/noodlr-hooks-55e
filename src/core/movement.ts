@@ -16,7 +16,14 @@
 import { log } from "../constants";
 import { getMoveSpeed } from "../settings";
 import { actionFor, readLocomotion } from "./locomotion";
-import { blocked, centerOf, insideScene, occupied, type Point } from "./positioning";
+import {
+  blocked,
+  centerOf,
+  insideScene,
+  measureBetween,
+  occupied,
+  type Point,
+} from "./positioning";
 
 /** Optional detail a caller knows and `moveTo` cannot work out for itself. */
 export interface MoveIntent {
@@ -32,6 +39,25 @@ function gridSize(): number {
 
 function unitsPerSquare(): number {
   return Number((canvas as any)?.grid?.distance) || 5;
+}
+
+/** False on a gridless scene, where any distance is a legal destination. */
+function isGridded(): boolean {
+  return Number((canvas as any)?.grid?.type ?? 0) !== 0;
+}
+
+/**
+ * Canvas pixels per scene unit ALONG ONE PARTICULAR LINE.
+ *
+ * The flat `toPixels` conversion is only correct on an orthogonal move. At the EQUIDISTANT default a
+ * diagonal square costs 5 ft and spans 212 px, so converting a wanted distance by the grid scale alone
+ * undershoots every diagonal approach by 30% — the creature closes two thirds of what it meant to and
+ * then reports the shortfall as if a wall had stopped it. Dividing the real pixel span by the measured
+ * cost gives the right ratio for whichever bearing is in play, including the gridless case.
+ */
+function pixelsPerUnit(from: Point, to: Point, measured: number): number {
+  if (!(measured > 0)) return gridSize() / unitsPerSquare();
+  return Math.hypot(to.x - from.x, to.y - from.y) / measured;
 }
 
 /** Scene units → canvas pixels. */
@@ -224,7 +250,10 @@ export async function moveTo(token: any, point: Point, intent: MoveIntent = {}):
   if (Math.hypot(after.x - before.x, after.y - before.y) > 1) {
     await settleAnimation(doc);
     const landed = centerOf(token) ?? point;
-    return Math.round(toUnits(Math.hypot(landed.x - origin.x, landed.y - origin.y)));
+    // Measured the way the scene measures it, not by Pythagoras: this number is what the "advances
+    // N ft" card prints, and a diagonal square reported as 7 ft rather than 5 makes a correct move
+    // read as a rules error.
+    return Math.round(measureBetween(origin, landed));
   }
 
   reportRefusal(doc, completed, waypoint);
@@ -384,18 +413,35 @@ export async function moveToward(
     return 0;
   }
 
-  const separation = Math.hypot(goal.x - origin.x, goal.y - origin.y);
-  const stopShort = toPixels(Math.max(desired, 0));
-  // How far along the line we would LIKE to travel: enough to be in range, no further.
-  const wanted = Math.min(toPixels(budget), Math.max(0, separation - stopShort));
-  if (wanted < gridSize() * 0.25) return 0;
+  // Measured the way the planner measured it when it decided this creature was out of reach. These
+  // used to be two different answers — see `measureBetween`.
+  const separation = measureBetween(origin, goal);
+  // How far we would LIKE to travel: enough to be in range, no further.
+  const wanted = Math.min(budget, Math.max(0, separation - Math.max(desired, 0)));
+  if (wanted <= 0) return 0;
+
+  // A gap smaller than one square has nowhere to stand in the middle of it, so every candidate would
+  // snap back to the square the creature already holds and be refused. Saying so once is honest;
+  // attempting it eight times, each behind a stall watchdog, is what a creature "stuck in place next
+  // to its target" actually looked like. Only reachable on a scene whose diagonal rule disagrees with
+  // its reaches — Foundry's EXACT setting makes a diagonal neighbour 7.07 ft away and a 5 ft reach
+  // unable to touch it — and there the honest answer is that the grid offers nothing nearer.
+  if (isGridded() && wanted < unitsPerSquare()) {
+    log(
+      `movement: ${who} is ${Math.round(separation)} from ${describe(target?.document ?? target)} ` +
+        `and needs to close only ${wanted.toFixed(1)} — less than one square, so there is no nearer ` +
+        `square to stand in`,
+    );
+    return 0;
+  }
 
   const bearing = Math.atan2(goal.y - origin.y, goal.x - origin.x);
+  const wantedPixels = wanted * pixelsPerUnit(origin, goal, separation);
 
   return stepTo(
     token,
     origin,
-    approaches(origin, bearing, wanted),
+    approaches(origin, bearing, wantedPixels),
     `toward ${describe(target?.document ?? target)}`,
     { budget, elevation: reachableElevation(token, target) },
   );
@@ -490,12 +536,26 @@ async function stepTo(
   intent: string,
   move: MoveIntent = {},
 ): Promise<number> {
-  const who = describe(token?.document ?? token);
+  const doc = token?.document ?? token;
+  const who = describe(doc);
+  const here = sourcePosition(doc);
+  const height = elevationOf(doc);
   const rejected: string[] = [];
 
   for (const { label, point } of candidates) {
     if (!insideScene(point)) {
       rejected.push(`${label}: outside the scene`);
+      continue;
+    }
+    // A destination that snaps back to the square the creature already holds is not a move, and asking
+    // core to perform it costs a real `move()` round trip with a stall watchdog behind it to be told so.
+    // Elevation is part of the test: a flyer rising within its own square IS going somewhere.
+    const { point: corner } = cornerFor(token, point);
+    const climbing =
+      Number.isFinite(move.elevation as number) &&
+      Math.abs((move.elevation as number) - height) > VERTICAL_TOLERANCE;
+    if (!climbing && Math.hypot(corner.x - here.x, corner.y - here.y) < 1) {
+      rejected.push(`${label}: snaps back to the square it is already in`);
       continue;
     }
     if (occupied(point, token)) {
@@ -540,9 +600,11 @@ export async function moveAwayFrom(
     return 0;
   }
 
-  const separation = Math.hypot(origin.x - threat.x, origin.y - threat.y) || 1;
-  const needed = Math.max(0, toPixels(desired) - separation);
-  const distance = Math.min(toPixels(budget), needed || toPixels(budget));
+  const separation = measureBetween(threat, origin);
+  const needed = Math.max(0, desired - separation);
+  // Nothing to gain means "just go", which is what a rout is; the budget is the whole answer there.
+  const distance =
+    Math.min(budget, needed || budget) * pixelsPerUnit(threat, origin, separation || 1);
   if (distance < gridSize() * 0.25) return 0;
 
   const base = Math.atan2(origin.y - threat.y, origin.x - threat.x);

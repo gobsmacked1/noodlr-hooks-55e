@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.4
+
+**Creatures close to melee again.** A monster would walk to within one square of its target, stop, and
+spend the rest of the fight standing there — the commonest thing this module does, and it had been
+broken by two halves of the module measuring distance differently. One asked Foundry, which honours
+your scene's diagonal rule; the other used Pythagoras. On a square grid they disagree about every
+diagonal, so the planner would judge a creature out of reach and the mover would then try to close a
+two-foot gap that has no square in it. Everything measures distance the one way now.
+
+**A gap smaller than one square is refused once, out loud.** Previously it was attempted eight times
+in eight directions, every one of them landing back on the square the creature already occupied. If
+your world uses the "Exact (√2)" diagonal rule, a diagonally adjacent creature really is 7 ft away and
+genuinely cannot be reached with a 5 ft reach; the log now says the grid has nothing nearer instead of
+falling silent. The default "Equidistant" rule has no such gap.
+
+**A move announced as "advances 7 ft" for one diagonal square now says 5 ft**, or whatever your scene
+says a diagonal costs.
+
+
 ## 0.6.3
 
 **The rulebook is no longer read off your sheets.** The 2024 rules glossary ships as pressable items — Dash,

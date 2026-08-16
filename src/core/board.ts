@@ -12,6 +12,7 @@
 import { readHp } from "./tracker";
 import { pickNumber, systemPaths } from "../system/profiles";
 import { readLocomotion, type Locomotion } from "./locomotion";
+import { measureBetween } from "./positioning";
 
 export interface BoardActor {
   combatantId: string;
@@ -64,30 +65,12 @@ function centerOf(token: any): { x: number; y: number } | null {
   return { x: x + (grid * w) / 2, y: y + (grid * h) / 2 };
 }
 
-/**
- * Distance between two tokens in scene units. Prefers Foundry's own measurement (which honors grid
- * type and diagonal rules) and falls back to straight-line pixels converted by the grid scale.
- */
+/** Distance between two tokens in scene units, through the one shared measurement. */
 function measure(a: any, b: any): number {
   const p1 = centerOf(a);
   const p2 = centerOf(b);
   if (!p1 || !p2) return Number.POSITIVE_INFINITY;
-
-  const grid: any = (canvas as any)?.grid;
-  try {
-    if (typeof grid?.measurePath === "function") {
-      const result = grid.measurePath([p1, p2]);
-      const d = Number(result?.distance ?? result);
-      if (Number.isFinite(d)) return d;
-    }
-  } catch {
-    // fall through to the geometric estimate
-  }
-
-  const px = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-  const size = Number(grid?.size) || 100;
-  const perSquare = Number(grid?.distance) || 5;
-  return (px / size) * perSquare;
+  return measureBetween(p1, p2);
 }
 
 /** Hostility is read from the token's disposition, which is what the GM actually set. */

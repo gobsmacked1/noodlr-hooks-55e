@@ -108,6 +108,36 @@ export function centerOf(token: any): Point | null {
   };
 }
 
+/**
+ * Distance between two points in scene units, the way the scene itself measures it.
+ *
+ * THE ONE ANSWER to "how far apart are these", and it has to stay that way. `board.ts` asked Foundry
+ * (which honours the grid type and the diagonal rule) while `movement.ts` did its own `Math.hypot`, so
+ * on a square grid the two disagreed about every diagonal — by 41% at the EQUIDISTANT default, where
+ * core calls a diagonal step 5 ft and Pythagoras calls it 7.07. The planner would judge a creature in
+ * reach and the mover would still try to close a two-foot gap that has no square to land in, which at
+ * the table looked like a creature standing next to its target refusing to attack (reported 2026-08-15).
+ * Same lesson as the two answers to "can X see Y": one question, one implementation.
+ *
+ * Falls back to straight-line pixels when the grid API is unreadable, which is also the honest answer
+ * on a gridless scene — there `measurePath` returns the Euclidean distance anyway.
+ */
+export function measureBetween(a: Point, b: Point): number {
+  const grid: any = (canvas as any)?.grid;
+  try {
+    if (typeof grid?.measurePath === "function") {
+      const result = grid.measurePath([a, b]);
+      const d = Number(result?.distance ?? result);
+      if (Number.isFinite(d)) return d;
+    }
+  } catch {
+    // fall through to the geometric estimate
+  }
+  const size = Number(grid?.size) || 100;
+  const perSquare = Number(grid?.distance) || 5;
+  return (Math.hypot(b.x - a.x, b.y - a.y) / size) * perSquare;
+}
+
 export function insideScene(point: Point): boolean {
   const rect: any = (canvas as any)?.dimensions?.sceneRect;
   if (!rect) return true;
