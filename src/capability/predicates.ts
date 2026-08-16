@@ -26,8 +26,20 @@ export interface Subject {
 export interface EvalContext {
   self: Subject;
   target?: Subject;
-  /** Whoever caused the trigger — the attacker on `on_hit`, the damager on `on_damage_taken`. */
+  /**
+   * Whoever swung. On `on_damage_taken` that is the other creature; on `on_hit` it is `self`, because
+   * these fire from the ATTACKER's side — the creature carrying the rule is the one attacking.
+   */
   attacker?: Subject;
+  /**
+   * The creature the event is ABOUT, where that is neither of the above by default.
+   *
+   * Exists because `attacker` and `trigger` collapse onto the same creature the moment an event fires
+   * from the attacker's side, and the fallback below would then resolve `trigger` to the attacker —
+   * the opposite of what it means everywhere else. Nothing sets it but the attack dispatch, so every
+   * older call site keeps the behaviour it had.
+   */
+  trigger?: Subject;
   spellLevel?: number;
   combat?: any;
   combatant?: any;
@@ -57,7 +69,7 @@ const RESOLVE: Record<SubjectName, (ctx: EvalContext) => Subject | undefined> = 
   self: (ctx) => ctx.self,
   target: (ctx) => ctx.target,
   attacker: (ctx) => ctx.attacker,
-  trigger: (ctx) => ctx.attacker ?? ctx.target,
+  trigger: (ctx) => ctx.trigger ?? ctx.attacker ?? ctx.target,
 };
 
 function subjectFor(who: unknown, ctx: EvalContext): Subject | undefined {

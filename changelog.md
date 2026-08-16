@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.1
+
+**A compiled ability that does something when it hits now does it.** This is the largest group of
+compiled rules there is - a bite that poisons, a claw that grapples, a tentacle that restrains - and
+until now every one of them was stored, badged as working, and silently inert. They fire against each
+creature the attack hit, once, after any reaction has been answered, so a Shield that turned the hit
+aside takes the poison with it. Misses fire their own rules the same way.
+
+**A rule that merely restates the weapon's own damage is refused rather than doubling it.** Many
+compiled abilities describe the damage the system already rolls; applying that again would quietly
+deal twice as much. Such a rule is declined at the moment it would fire, and the capability sheet says
+so and why. A genuine extra damage rider on the same weapon is unaffected.
+
+**These are only offered by the creature doing the hitting.** A rule of the shape "when a creature hits
+me, it takes fire damage" is understood and stored but does not yet fire, because the two readings need
+opposite handling and running them together would apply the effect to the wrong creature.
+
+**The settings windows now say when on-hit rules cannot fire.** They ride on the automatic damage layer,
+which is the only thing that knows whether an attack connected - so if automatic damage is off, or Midi
+QoL is applying damage instead, a warning appears rather than the rules simply doing nothing.
+
 ## 0.7.0
 
 **Abilities that recharge on a rest now do.** A compiled rule saying "regains its uses after a short

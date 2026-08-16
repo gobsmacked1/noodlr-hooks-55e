@@ -211,11 +211,13 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 Diagnostics: `api.surveyPrimitives()`, `api.surveyCapabilities()`, `api.surveyScene()` (what this
 scene WOULD ask about and what the cache already answers), `api.compileScene()`, `api.openCapabilities()`.
 
-### Seven of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
+### Nine of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
 
 `registerCapabilityExecutor()` attaches a hook to `on_damage_taken`, `on_zero_hp`, `on_turn_start`,
-`on_turn_end`, `on_activity_use` and — since v0.7.0 — `on_short_rest` and `on_long_rest`. The other ten
-never fire. That is fine and was always the design — the compiler is offered all seventeen because "the cloak recharges on a long rest" is a true
+`on_turn_end` and `on_activity_use`; v0.7.0 added `on_short_rest` and `on_long_rest`, and v0.7.1 added
+`on_hit` and `on_miss`, which are dispatched from `capability/attack.ts` rather than from a hook of their
+own because nothing in dnd5e reports a hit. The other eight never fire. That is fine and was always the
+design — the compiler is offered all seventeen because "the cloak recharges on a long rest" is a true
 reading whether or not this build listens for one, and a vocabulary that hid the unheard events would
 teach the model to mis-file rules rather than skip them.
 
@@ -317,6 +319,61 @@ recorded, correctly, that the *listener* is not GM-gated, and never asked what h
 - Why it is worth wiring at all, given the yield: `on_long_rest` is **9** runnable rules in the
  whole-world census, not the 2 the biased subset suggested. Small, real, and the cheapest confirmation
  available that the dispatch path works before the expensive triggers are built on it.
+
+### `on_hit` / `on_miss`, and the word the vocabulary has only one of (v0.7.1, 2026-08-16)
+
+The largest trigger in the cache — **181 `on_hit` rules and 6 `on_miss`**, `npm run census:trigger -- <cache>
+on_hit on_miss` — and it is dispatched from `capability/attack.ts`, called by `rules/damage.ts` once an attack
+has settled. It exists as its own file rather than four lines at the call site because the event is ambiguous
+in a way nothing on the descriptor resolves.
+
+- **"ON A HIT" IS TRUE OF THE CREATURE SWINGING AND OF THE CREATURE BEING HIT, AND THE COMPILER HAS ONE WORD
+ FOR BOTH.** A bite that poisons and a cloak that burns whoever strikes it compile to the same
+ `trigger.event`, with opposite subjects. So the direction is decided once, here, **on evidence**: 44 of the
+ 47 engine-adjudicated `on_hit` rules point `effect.target` at `target`, and not one guard in the whole set
+ names `attacker`. Every one reads "when I hit something, do this to what I hit". **These fire from the
+ attacker's side and only from the attacker's side.**
+- **The defender's reading is NOT implemented, deliberately, and it is not a wider dispatch of the same
+ event.** It inverts every subject, so running both off one trigger would make `target` mean the attacker on
+ some rules and the defender on others with nothing to tell them apart — plausible nonsense rather than an
+ error, the same failure mode as a behavior verb narrated without its `incoming` flag. It needs `on_hit_by`,
+ or an `incoming` flag of the shape `noodlrHooks.behavior` already carries. Until then such a rule compiles,
+ binds, and never fires, which the capability sheet shows.
+- **`EvalContext.trigger` was added for this and is the subtle half.** All four subjects resolve, and three
+ were already right; `trigger` means "the creature this event is about" everywhere else, and its old
+ `attacker ?? target` fallback resolves to the ATTACKER the moment an event fires from the attacker's side —
+ which is `self`. A guard reading `who: "trigger"` would have tested the biter's hit points instead of the
+ bitten creature's, silently and in the plausible direction. Nothing but this dispatch sets it, so every
+ older call site keeps the behaviour it had.
+- **`ctx.activity` IS NOT OPTIONAL ON THIS PATH.** `duplicatesActivityDamage` is the only thing standing
+ between a compiled "on a hit, deal 1d10 fire" and a cantrip's damage being rolled twice — and it can only
+ refuse when the activity is in hand. Dispatching without it doubles the damage of every attack in the
+ world, in arithmetic, with nothing thrown and nothing logged. 45 of the 71 pre-doctrine `on_hit` rules were
+ exactly that restated damage line, so this is the common case rather than the corner.
+- **Ordered after the reaction window and before the gate flag.** After, so a Shield that turned a hit into a
+ miss has already moved the creature between the two lists and the rider follows the verdict rather than the
+ die. Before, so every mutation a rider causes has landed by the time the Damage button is released.
+- **THE IDEMPOTENCY GUARD IS THE ONLY ONE, which is worth knowing before deciding it is redundant.**
+ `consider()` marks a message `handled` on the damage and healing branches and **not** on the attack branch,
+ so a second render of the same attack — routine under midi, and produced by any flag write on the card —
+ re-reads the verdict and reaches `settleAttack` again. Everything else down that path is idempotent by
+ construction; a rider is not, because applying a poison twice spends two uses and stacks two effects.
+- **It is coupled to auto-damage, and `capabilityAdvisories()` says so.** Reading whether an attack connected
+ is what dispatches these, and that reading exists in exactly one place — dnd5e decides it in its chat
+ card's RENDERER and stores the answer nowhere. So switching auto-damage off, or letting midi own damage,
+ takes the attack riders with it while they stay bound and badged as running. A second parallel hit reading
+ to decouple them would be two answers to "did that connect", which is the divergence this repo keeps
+ finding. The coupling is real; being silent about it is what would not be acceptable. Same doctrine as
+ greying "Behavioral automation".
+- **A test that certifies nothing is the risk here, and one nearly shipped.** The refusal specimen originally
+ wrote its damage as `effect.formula`, which the schema does not have — so the rule resolved to no amount,
+ applied nothing, and the "duplicate damage is refused" assertion passed for entirely the wrong reason.
+ Every damage specimen in `test/attack.test.ts` runs `validateCapability` first for that reason.
+- Parked rather than done: five `tokenOf` helpers answer "a token for this actor" across `executor.ts`,
+ `board.ts`, `candidates.ts`, `ready-events.ts` and `standing.ts`, differing in whether they return the
+ placeable or the document and in their `getActiveTokens` arguments. That is a real duplication and a
+ different question from `speakerToken`, which this dispatch uses. Consolidating it touches perception and
+ readying and is not required by anything here.
 
 ### What the enabled-module audit gave the compiler (2026-08-11)
 

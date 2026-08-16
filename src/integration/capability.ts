@@ -116,6 +116,12 @@ const WIRED: Partial<Record<TriggerEvent, RunsOn>> = {
   // what that client has rights to.
   on_short_rest: "acting-client",
   on_long_rest: "acting-client",
+  // Dispatched from `rules/damage.ts` once the attack's verdict has settled, which is already primary-GM
+  // only — it is the same client that reads the verdict, applies the damage and writes the gate flag.
+  // See `capability/attack.ts` for why they fire from the attacker's side and for the settings this
+  // therefore inherits.
+  on_hit: "primary-gm",
+  on_miss: "primary-gm",
 };
 
 export const WIRED_TRIGGERS: readonly TriggerEvent[] = Object.keys(WIRED) as TriggerEvent[];

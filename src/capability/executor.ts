@@ -78,7 +78,11 @@ const MAX_STANDING = 8;
 export interface TriggerContext extends EvalContext {
   /** Populated on `on_damage_taken`, so a rule can react to what actually landed. */
   damage?: { amount: number; types: string[] };
-  /** Populated on `on_activity_use`. */
+  /**
+   * Populated on `on_activity_use`, and on `on_hit`/`on_miss` — where it is load-bearing rather than
+   * informational, because `duplicatesActivityDamage` below cannot refuse a restated damage line
+   * without it. Dispatching an attack trigger with this unset silently doubles every weapon's damage.
+   */
   activity?: any;
 }
 
@@ -108,7 +112,7 @@ function subjectOf(which: unknown, ctx: TriggerContext): Subject | undefined {
     case "attacker":
       return ctx.attacker;
     case "trigger":
-      return ctx.attacker ?? ctx.target;
+      return ctx.trigger ?? ctx.attacker ?? ctx.target;
     default:
       return undefined;
   }

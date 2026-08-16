@@ -36,6 +36,7 @@ import {
   type HpSnapshot,
 } from "../system/dnd5e-damage";
 import { grazeDamage } from "../system/dnd5e-graze";
+import { fireAttackTriggers } from "../capability/attack";
 import { offerReaction } from "./offer";
 import { considerBarbs } from "./barbs";
 import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
@@ -48,6 +49,7 @@ import {
   originatingId,
   readHits,
   rollType,
+  speakerToken,
   targetsOf,
   tokenFromActorUuid,
   type DamagePart,
@@ -235,7 +237,11 @@ function keysOf(message: any): string[] {
  */
 async function reactionWindow(message: any, reading: HitReading): Promise<void> {
   if (reading.hits.length === 0) return;
-  const attacker = tokenFor(message);
+  // `speakerToken` rather than a local reader: the attack-trigger dispatch asks the same question a
+  // moment later, and two answers to "which token rolled this" is how a rider ends up on the wrong
+  // creature. It is also the better answer — it falls back to the actor's sole token on the scene when
+  // the speaker carries no token id, which a bare scene lookup does not.
+  const attacker = speakerToken(message?.speaker);
 
   await barbsWindow(message, reading, attacker);
   if (reading.hits.length === 0) return;
@@ -317,9 +323,15 @@ async function barbsWindow(message: any, reading: HitReading, attacker: any): Pr
  * or against a target nobody could resolve, comes back as — the module has no reading, so it says so and
  * hands the decision to the human rather than inventing a miss. Locking on "I do not know" is the one
  * behaviour that would make this feature a liability.
+ *
+ * The compiled riders go off HERE, between the two, and both sides of that are deliberate. After the
+ * reaction window, so a Shield that turned a hit into a miss has already moved the creature and the
+ * poison follows the verdict rather than the die. Before the flag, so everything a rider does has landed
+ * by the time the Damage button opens.
  */
 async function settleAttack(message: any, reading: HitReading): Promise<void> {
   const grazed = await applyGraze(message, reading);
+  await fireAttackTriggers(message, reading);
 
   let verdict: GateVerdict = "open";
   if (reading.hits.length > 0) verdict = "hit";
@@ -354,13 +366,6 @@ async function applyGraze(message: any, reading: HitReading): Promise<boolean> {
 
 function masteryNote(): string {
   return game.i18n.localize("NOODLRHOOKS.Combat.Gate.Graze");
-}
-
-/** The token that rolled a card, for naming the thing a reaction is being taken against. */
-function tokenFor(message: any): any {
-  const speaker = message?.speaker;
-  const scene = (game as any).scenes?.get?.(String(speaker?.scene ?? ""));
-  return scene?.tokens?.get?.(String(speaker?.token ?? "")) ?? null;
 }
 
 interface Resolution {

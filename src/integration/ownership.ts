@@ -26,6 +26,7 @@ import {
   COMBAT_SETTINGS,
   GENERAL_SETTINGS,
   MODULE_ID,
+  SETTINGS,
   SPLIT_COMBAT_SETTINGS,
   audienceKey,
 } from "../constants";
@@ -523,9 +524,53 @@ export function advisories(): Advisory[] {
     });
   }
 
+  out.push(...capabilityAdvisories());
   out.push(...systemSettingAdvisories());
   out.push(...sceneAdvisories());
 
+  return out;
+}
+
+/**
+ * Compiled rules that cannot fire because something they ride on is switched off.
+ *
+ * `on_hit` and `on_miss` are dispatched from inside the auto-damage layer, because that is the only
+ * place in the world that knows whether an attack connected — dnd5e decides it in its chat card's
+ * RENDERER and stores the answer nowhere. So switching auto-damage off takes the attack riders with
+ * it: a bite compiled to poison on a hit is bound, badged as running on the capability sheet, and
+ * never fires.
+ *
+ * That is a real coupling rather than an oversight, and the alternative was worse — a second, parallel
+ * hit reading purely to feed the triggers, which is two answers to "did that connect" and the exact
+ * divergence this repo keeps finding. What is NOT acceptable is it being silent, which is the same
+ * doctrine as greying "Behavioral automation" and as the ownership resolver: a capability that
+ * switches itself off has to say so in the interface.
+ */
+function capabilityAdvisories(): Advisory[] {
+  const out: Advisory[] = [];
+  try {
+    // Read through this file's own `settingOn` rather than `settings.ts`'s accessors: `settings.ts`
+    // reaches this module through `apps/pages.ts`, so importing back would close a cycle for two
+    // one-line reads.
+    if (!settingOn(SETTINGS.compileCapabilities)) return out;
+    const damages = AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.autoDamage, a)));
+    if (damages && !midiOwnsDamage()) return out;
+    out.push({
+      level: "warn",
+      title: "Compiled on-hit rules will not fire",
+      detail: midiOwnsDamage()
+        ? "Midi QoL is applying damage, so this module never reads whether an attack connected — and " +
+          "that reading is what dispatches a compiled ability's on-hit and on-miss rules. They stay " +
+          "bound and inert. Everything else a compiled ability does (turn start and end, damage " +
+          "taken, dropping to 0, rests, standing facts) is unaffected."
+        : "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
+          "is what dispatches a compiled ability's on-hit and on-miss rules. A bite compiled to " +
+          "poison the creature it hits will not fire. Turn triggers, damage-taken, rests and " +
+          "standing facts are unaffected.",
+    });
+  } catch {
+    // Reading a setting is not worth taking the advisory list down for.
+  }
   return out;
 }
 
