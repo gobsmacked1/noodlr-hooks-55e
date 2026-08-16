@@ -412,15 +412,26 @@ test("nothing is declined on another game system", () => {
   assert.equal(generalRuleOf(item({ name: "Dash", type: "feat", identifier: "dash" })), null);
 });
 
-test("Unarmed Strike is declined, and it ships as a weapon rather than a feat", () => {
+test("Unarmed Strike is declined on a weapon with or without the stock identifier", () => {
   // The reason the identifier is trusted on any type. equipment24/weapons/unarmed-strike.yml is
   // `type: weapon`, so a blanket feat gate would have missed the one glossary entry every creature
   // in the game carries.
   assert.ok(
     generalRuleOf(item({ name: "Unarmed Strike", type: "weapon", identifier: "unarmed-strike" })),
   );
-  // Without the stock identifier it is a weapon named after a rule, which is the case that must pass.
-  assert.equal(generalRuleOf(item({ name: "Unarmed Strike", type: "weapon" })), null);
+  // WIDENED ON EVIDENCE, and this line used to assert the opposite. `surveyGlossary()` on a real world
+  // found eight Unarmed Strikes, two of which state no identifier while carrying enough prose to be
+  // compiled — so the identifier is usually there, is not reliable, and this is the one entry whose type
+  // puts it out of the name test's reach. The entry widens itself (`types`) rather than the test
+  // widening for everybody, which is what keeps the case below intact.
+  assert.ok(generalRuleOf(item({ name: "Unarmed Strike", type: "weapon" })));
+  // And it is still an entry-by-entry allowance: a spell called Unarmed Strike is somebody's homebrew.
+  assert.equal(generalRuleOf(item({ name: "Unarmed Strike", type: "spell" })), null);
+  // A re-identified one is still not declined on the strength of its name.
+  assert.equal(
+    generalRuleOf(item({ name: "Unarmed Strike", type: "weapon", identifier: "fists-of-fury" })),
+    null,
+  );
 });
 
 test("the glossary survey cannot silently undercount what it is measuring", () => {

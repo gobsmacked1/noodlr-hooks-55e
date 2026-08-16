@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.8
+
+**Unarmed Strike is no longer read as one of your creature's own abilities.** The rules glossary that
+gets stamped onto every sheet is skipped, because those rules are the same for every creature and are
+already built in - but Unarmed Strike is the one glossary entry that arrives as a weapon rather than a
+feature, so it was only skipped on sheets that happened to keep its stock identifier. Measured on a real
+world: eight of them, and two had lost the identifier, so both were being read and paid for.
+
+**`noodlrHooks.surveyGlossary()` counts each item once.** It was reaching an item through the world
+actor and again through its token on a scene, so two of these read as four.
+
 ## 0.6.7
 
 **Improving how abilities are read now has a way to reach the abilities you already have.** Compiled

@@ -51,7 +51,15 @@ const OVERRIDE = "compileAnyway";
  * Each of these was seen in the capture. Every one is a rule about the world rather than about the
  * creature holding it, and `rules/general.ts` is where a decision about any of them belongs.
  */
-const GLOSSARY: { id: string; name: RegExp; why: string }[] = [
+/**
+ * `types` is which item types a bare NAME may be believed on, and it defaults to `feat` alone.
+ *
+ * Per entry rather than global, because the risk is per entry: "Jump" and "Fall" are plausible titles
+ * for a homebrew spell or a magic weapon, and "Unarmed Strike" is a fixed phrase out of the rules that
+ * nobody names anything else. Widening the test globally would trade the second case's certainty for
+ * the first case's silence, which is the failure this file exists to avoid.
+ */
+const GLOSSARY: { id: string; name: RegExp; why: string; types?: readonly string[] }[] = [
   { id: "check-cover", name: /^\s*check\s+cover\s*$/i, why: "simplecover5e owns cover; see pages.ts" },
   { id: "fall", name: /^\s*fall(ing)?\s*$/i, why: "core models no falling; refused in general.ts" },
   { id: "underwater", name: /^\s*underwater\s*$/i, why: "environmental; refused in general.ts" },
@@ -73,17 +81,27 @@ const GLOSSARY: { id: string; name: RegExp; why: string }[] = [
     name: /^\s*two[-\s]weapon\s+fighting\s*$/i,
     why: "built deterministically in system/dnd5e-two-weapon.ts",
   },
-  // Ships as `type: weapon` (equipment24/weapons/unarmed-strike.yml), so it is reachable only by
-  // identifier — see the asymmetry in generalRuleOf. Every creature in the game has one, its Grapple and
-  // Shove halves are `rules/forced.ts`'s already, and in the capture it was one of only two features the
-  // model could not compile at all: it read the contest as needing a human, which is correct and is a
-  // repair round spent to be told so.
+  // Ships as `type: weapon` (equipment24/weapons/unarmed-strike.yml), so it is THE ONE ENTRY the
+  // `feat`-only name test could never rescue. Every creature in the game has one, its Grapple and Shove
+  // halves are `rules/forced.ts`'s already, and in the capture it was one of only two features the model
+  // could not compile at all: it read the contest as needing a human, which is correct and is a repair
+  // round spent to be told so.
+  //
+  // MEASURED BEFORE WIDENING (`surveyGlossary()` on the user's world, 2026-08-16): eight Unarmed Strike
+  // items across 557 sheets, SIX carrying `identifier: "unarmed-strike"` and TWO carrying none — and
+  // those two hold 188 and 572 characters of prose, so both were being compiled. That is the shape of
+  // the risk in one line: the identifier is usually present, is not reliable, and a sheet that dropped
+  // it is indistinguishable from one that kept it. So `weapon` is added HERE and to nothing else.
   {
     id: "unarmed-strike",
     name: /^\s*unarmed\s+strike\s*$/i,
     why: "every creature has one; the shove and grapple are rules/forced.ts's",
+    types: ["feat", "weapon"],
   },
 ];
+
+/** Which item types a bare name is believed on. `feat` is the type the PHB glossary actually uses. */
+const NAMED_ON: readonly string[] = ["feat"];
 
 /**
  * Is this item a general rule rather than this creature's own ability?
@@ -103,8 +121,8 @@ export function generalRuleOf(item: any): string | null {
   // item type — which is the only way `unarmed-strike` is reachable at all, since it ships as a weapon.
   // A NAME is a coincidence waiting to happen: "Jump" and "Fall" are plausible titles for a homebrew
   // spell or a magic weapon, and skipping one of those would silently withhold a real ability rather
-  // than merely save a call. So a bare name is believed only on a `feat`, the type the PHB glossary
-  // actually uses. Same reasoning and same order as the rider table.
+  // than merely save a call. So a bare name is believed only on a `feat` — the type the PHB glossary
+  // actually uses — unless the entry itself widens that. Same reasoning and same order as the rider table.
   const type = String(item?.type ?? "");
   const identifier = String(item?.system?.identifier ?? "")
     .trim()
@@ -122,7 +140,8 @@ export function generalRuleOf(item: any): string | null {
       if (identifier === rule.id) return `a general rule — ${rule.why}`;
       continue; // A re-identified item has said it is not this rule; its name does not overrule that.
     }
-    if (type === "feat" && name && rule.name.test(name)) return `a general rule — ${rule.why}`;
+    const named = rule.types ?? NAMED_ON;
+    if (named.includes(type) && name && rule.name.test(name)) return `a general rule — ${rule.why}`;
   }
   return null;
 }
@@ -153,6 +172,8 @@ interface GlossaryRow {
   declined: boolean;
   /** Enough prose to have been compiled at all — a missed item with no description costs nothing. */
   prose: number;
+  /** How many sheets this one item was reached through. See the dedup note in `surveyGlossary`. */
+  sheets: number;
 }
 
 /**
@@ -187,7 +208,14 @@ export function surveyGlossary(): Record<string, unknown> {
     return { system: String((game as any).system?.id ?? "?"), rows: [], missed: [] };
   }
 
-  const rows: GlossaryRow[] = [];
+  // DEDUPED BY ITEM ID, and the reason is that the first run of this reported four problems where there
+  // were two. `readableActors()` returns a world actor AND the synthetic actor of every unlinked token
+  // on it, and an ActorDelta's items keep the base item's id — so one item on one creature standing on
+  // one scene is reached twice. Ids are generated per document creation, so two genuinely different
+  // items cannot collide here, and the occurrence count is kept as `sheets` rather than thrown away.
+  // Same class of fault as the meta-notes census: an instrument that miscounts reports a number rather
+  // than an error, and the number gets quoted.
+  const found = new Map<string, GlossaryRow>();
   const specs = glossaryPatterns();
   const actors = readableActors();
 
@@ -197,7 +225,13 @@ export function surveyGlossary(): Record<string, unknown> {
       if (!name) continue;
       const spec = specs.find((candidate) => candidate.name.test(name));
       if (!spec) continue;
-      rows.push({
+      const key = String(item?.id ?? item?.uuid ?? `${actor?.uuid}:${name}`);
+      const already = found.get(key);
+      if (already) {
+        already.sheets++;
+        continue;
+      }
+      found.set(key, {
         actor: String(actor?.name ?? "?"),
         item: name,
         type: String(item?.type ?? ""),
@@ -207,9 +241,11 @@ export function surveyGlossary(): Record<string, unknown> {
         // Read raw rather than through `plainText`: this asks whether there is text at all, and going
         // through the scrubber would make the count depend on a second thing under active change.
         prose: String(item?.system?.description?.value ?? "").length,
+        sheets: 1,
       });
     }
   }
+  const rows = [...found.values()];
 
   // The whole point of the survey. Named separately from `declined` because "caught by identifier" and
   // "caught by name" are the two halves of the asymmetry and only one of them has a hole in it.
