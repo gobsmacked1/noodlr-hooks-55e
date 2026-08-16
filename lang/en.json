@@ -11,6 +11,8 @@
   "NOODLRHOOKS.Capabilities.Sheet.Inert": "not run",
   "NOODLRHOOKS.Capabilities.Sheet.InertCount": "{count} understood but not run",
   "NOODLRHOOKS.Capabilities.Sheet.InertHint": "Understood, but nothing in this module acts on it — it is either left to you or left to the story. It is shown so you know it was not missed.",
+  "NOODLRHOOKS.Capabilities.Sheet.Refused": "would double",
+  "NOODLRHOOKS.Capabilities.Sheet.RefusedHint": "This rule repeats damage the game already rolls for this ability, so it is skipped rather than dealt twice. Edit or reject it if the ability really does deal extra damage of the same dice.",
   "NOODLRHOOKS.Capabilities.Sheet.Locked": "Locked, so it was left alone.",
   "NOODLRHOOKS.Capabilities.Sheet.Lock": "Lock",
   "NOODLRHOOKS.Capabilities.Sheet.NoActor": "Select a token, or open this from a character sheet.",

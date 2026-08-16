@@ -44,6 +44,7 @@ import {
   summonerKey,
   usesRemaining,
 } from "./primitives";
+import { duplicatesActivityDamage, duplicatesItemDamage } from "./duplicate";
 import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
@@ -185,6 +186,9 @@ export async function fireTrigger(
   return outcomes;
 }
 
+/** One warning per rule per session; the fault is in the descriptor, not in the turn. */
+const reportedDoubles = new Set<string>();
+
 async function runRule(
   capability: Capability,
   rule: CapabilityRule,
@@ -213,6 +217,23 @@ async function runRule(
   if (!isExecutable(rule)) return no("no executor for this effect or one of its guards");
   if (!POSTHUMOUS.includes(rule.trigger?.event as TriggerEvent) && isDefeated(ctx.self)) {
     return no("the creature is out of the fight");
+  }
+
+  // Checked before any state is read or spent, because this refusal is about the RULE rather than the
+  // moment: an ability that restates its own printed damage will do so on every hit for as long as the
+  // descriptor exists, and a use spent on it would be spent for nothing.
+  if (ctx.activity) {
+    const doubled = duplicatesActivityDamage(rule, ctx.activity);
+    if (doubled) {
+      // Warned, once, because this is a compile fault rather than table state and it is invisible in
+      // play: the arithmetic simply comes out right, which is the whole reason the guard exists.
+      const seen = `${capability.id}:${index}`;
+      if (!reportedDoubles.has(seen)) {
+        reportedDoubles.add(seen);
+        warn(`capability "${label}" restates damage the platform already rolls: ${doubled}`);
+      }
+      return no(doubled);
+    }
   }
 
   const actor = ctx.self.actor;
@@ -639,6 +660,10 @@ export function surveyCapabilities(): Record<string, unknown> {
           // because this survey could show that a summon was bound and running and could not show
           // that its "while Bloodied" had gone missing in compilation.
           guards: (rule.condition ?? []).map(describePredicate),
+          // Reported here rather than only at the moment of refusal: this one is a compile fault that
+          // does not show up as an error at the table, it shows up as an ability hitting twice as hard
+          // as the book says, so it has to be visible to anybody reading the compiled ability.
+          doubles: duplicatesItemDamage(rule, binding.item) ?? undefined,
           // In English, because a reviewer skims twenty of these looking for the wrong one. Same
           // renderer as the capability sheet, so the console and the window cannot disagree.
           reads: describeRule(rule),
@@ -672,6 +697,7 @@ function renderSurvey(report: any[]): string {
             ? `       guards: ${rule.guards.join(" AND ")}`
             : "       guards: NONE — fires whenever the trigger does",
         );
+        if (rule.doubles) out.push(`       REFUSED: ${rule.doubles}`);
         out.push(`       reads: ${rule.reads}`);
       }
     }

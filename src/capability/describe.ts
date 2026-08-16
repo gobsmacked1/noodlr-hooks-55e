@@ -21,6 +21,7 @@ import type {
   Quantity,
 } from "../integration/capability";
 import { isExecutable, isStanding } from "../integration/capability";
+import { duplicatesItemDamage } from "./duplicate";
 
 const TRIGGERS: Record<string, string> = {
   on_hit: "when it hits",
@@ -281,9 +282,18 @@ export interface RuleView {
   /** Neither fired nor readable: the only state that is honestly wasted money. */
   inert: boolean;
   note: string;
+  /**
+   * Why the executor will decline this at runtime, when it can be known without a turn.
+   *
+   * Today that is one thing: a damage rule restating damage the platform already rolls. It belongs on
+   * this sheet rather than only in a console, because the failure it prevents is arithmetic — an
+   * ability that hits twice as hard as the book says, with nothing thrown and nothing logged — so a
+   * refusal nobody can see reads as the rule having stopped working.
+   */
+  refused: string;
 }
 
-export function describeCapability(capability: Capability): RuleView[] {
+export function describeCapability(capability: Capability, item?: unknown): RuleView[] {
   return (capability.rules ?? []).map((rule, index) => {
     const runs = isExecutable(rule);
     const standing = isStanding(rule);
@@ -298,6 +308,8 @@ export function describeCapability(capability: Capability): RuleView[] {
       standing,
       inert: !runs && !standing,
       note: String(rule.note ?? ""),
+      // Only askable when the caller has the feature in hand. Absent is "not checked", never "clear".
+      refused: item ? (duplicatesItemDamage(rule, item) ?? "") : "",
     };
   });
 }

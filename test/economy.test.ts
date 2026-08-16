@@ -11,7 +11,7 @@ import {
   isStabilizeActivity,
   phbActionOf,
 } from "../src/system/dnd5e-actions";
-import { generalRuleOf } from "../src/system/dnd5e-glossary";
+import { generalRuleOf, glossaryPatterns } from "../src/system/dnd5e-glossary";
 import { lightExtraAttackCost } from "../src/system/dnd5e-two-weapon";
 import { notable, slotClaims } from "../src/rules/economy/claims";
 import {
@@ -421,4 +421,26 @@ test("Unarmed Strike is declined, and it ships as a weapon rather than a feat", 
   );
   // Without the stock identifier it is a weapon named after a rule, which is the case that must pass.
   assert.equal(generalRuleOf(item({ name: "Unarmed Strike", type: "weapon" })), null);
+});
+
+test("the glossary survey cannot silently undercount what it is measuring", () => {
+  // `surveyGlossary()` exists to answer one question — does imported content drop the identifier, so
+  // that the feat-only name test is all that is left — and the answer decides whether the guard above
+  // gets widened. It reads both source tables BY SHAPE (`action.spec.name`, `rule.name`), so a rename in
+  // either yields a shorter list, no error, and the reassuring answer: nothing missed. That is the one
+  // failure a reader of the output could not detect, hence a test rather than a comment.
+  const names = glossaryPatterns();
+  const ids = new Set(names.map((entry) => entry.id));
+  const matches = (name: string): boolean => names.some((entry) => entry.name.test(name));
+
+  // Both tables reached, not just whichever one is spread first.
+  assert.ok(ids.has("dash"), "the PHB action table is not being read");
+  assert.ok(ids.has("fall"), "the glossary table is not being read");
+  // Every pattern is a live regex against its own canonical spelling, which is what a shape change
+  // would break without changing the count.
+  for (const spelling of ["Dash", "Hide", "Attack", "Jump", "Long Rest", "Underwater"]) {
+    assert.ok(matches(spelling), `no pattern matches ${spelling}`);
+  }
+  // And it is still a name test rather than a substring sweep: a real ability must not be counted.
+  assert.equal(matches("Loathsome Limbs"), false);
 });

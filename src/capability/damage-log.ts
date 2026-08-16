@@ -23,7 +23,11 @@
 
 import { debug, log } from "../constants";
 
-export type DamageWindow = "this_turn" | "since_last_turn" | "this_round" | "ever";
+// Re-exported rather than declared, because the vocabulary is what closes it: `window` is a required
+// parameter of a predicate in the closed set, so its legal values belong beside the kinds they qualify.
+// Leaving it declared here was how the cache came to hold three spellings of one window.
+export type { DamageWindow } from "../integration/capability";
+import type { DamageWindow } from "../integration/capability";
 
 export interface DamageEntry {
   /** Monotonic within a session, so windows are comparisons rather than timestamp arithmetic. */

@@ -28,8 +28,10 @@
 // case is common. Measure it in a real world before building it.
 
 import { isDnd5e } from "./dnd5e-rewards";
-import { phbActionOf } from "./dnd5e-actions";
+import { PHB_ACTIONS, phbActionOf } from "./dnd5e-actions";
 import { hasFlag } from "../util/flags";
+import { readableActors } from "../capability/sheets";
+import { log } from "../constants";
 
 /**
  * Force a compile of something this file would skip: `flags.<ns>.compileAnyway` on the item.
@@ -123,4 +125,118 @@ export function generalRuleOf(item: any): string | null {
     if (type === "feat" && name && rule.name.test(name)) return `a general rule — ${rule.why}`;
   }
   return null;
+}
+
+// ---- Measuring the hole before widening it ------------------------------------------------------
+//
+// The `featOnly` asymmetry above has a knowable cost and an unknowable one. The knowable one: an item
+// whose name is a glossary entry, whose type is NOT `feat`, and which states no identifier, is missed
+// and gets compiled. Whether that population is empty or is most of a DDB-imported sheet is a question
+// about somebody else's importer, and the only honest instrument is a real world.
+//
+// WHY THIS IS A SURVEY RATHER THAN A WIDER MATCH. Widening the name test to every rule-bearing type is
+// two lines and would have been written on the first report. What it costs is silent: a homebrew feature
+// legitimately called "Fall", or a magic weapon called "Jump", stops being compiled with nothing saying
+// so — the failure this whole file is written to avoid, arriving from the other direction. So the match
+// is widened only if there is something to catch, and this is what says whether there is.
+
+/** One item whose NAME is a glossary entry, and what the two recognition signals say about it. */
+interface GlossaryRow {
+  actor: string;
+  item: string;
+  type: string;
+  /** Empty is the finding: with no identifier, only the name is left, and the name is `feat`-only. */
+  identifier: string;
+  /** What the glossary entry would be, had it been reachable. */
+  matches: string;
+  /** Does `generalRuleOf` actually decline it today? */
+  declined: boolean;
+  /** Enough prose to have been compiled at all — a missed item with no description costs nothing. */
+  prose: number;
+}
+
+/**
+ * Every name a glossary entry answers to, the thirteen buttons included.
+ *
+ * Exported only so a test can pin it. An instrument that undercounts here does not fail loudly — it
+ * reports the reassuring answer, "nothing missed", and the widening question is closed on a number that
+ * was never measured. Both source tables are read by shape, so a rename in either would do exactly that.
+ */
+export function glossaryPatterns(): { id: string; name: RegExp }[] {
+  return [
+    ...PHB_ACTIONS.map((action) => ({ id: action.spec.id, name: action.spec.name })),
+    ...GLOSSARY.map((rule) => ({ id: rule.id, name: rule.name })),
+  ];
+}
+
+/**
+ * Does imported content drop `system.identifier`?
+ *
+ * Prints one line per item whose name is a general rule, with the type and identifier that decide
+ * whether it is caught. **The number to read is `missed`**: items a name match would catch and the
+ * `feat`-only guard does not. Zero means the asymmetry costs nothing on this world and must not be
+ * widened; anything else names the exact items and the widening can be argued from them.
+ *
+ * A lower bound, because `readableActors()` does not walk compendia — see its own note.
+ */
+export function surveyGlossary(): Record<string, unknown> {
+  // Gated for the same reason `generalRuleOf` is: off dnd5e nothing is ever declined, so every match
+  // would be reported as MISSED and the one number this exists to produce would read as a catastrophe.
+  if (!isDnd5e()) {
+    log("glossary: not a dnd5e world, so nothing here is declined and nothing is missed");
+    return { system: String((game as any).system?.id ?? "?"), rows: [], missed: [] };
+  }
+
+  const rows: GlossaryRow[] = [];
+  const specs = glossaryPatterns();
+  const actors = readableActors();
+
+  for (const actor of actors) {
+    for (const item of actor?.items ?? []) {
+      const name = String(item?.name ?? "").trim();
+      if (!name) continue;
+      const spec = specs.find((candidate) => candidate.name.test(name));
+      if (!spec) continue;
+      rows.push({
+        actor: String(actor?.name ?? "?"),
+        item: name,
+        type: String(item?.type ?? ""),
+        identifier: String(item?.system?.identifier ?? "").trim(),
+        matches: spec.id,
+        declined: generalRuleOf(item) !== null,
+        // Read raw rather than through `plainText`: this asks whether there is text at all, and going
+        // through the scrubber would make the count depend on a second thing under active change.
+        prose: String(item?.system?.description?.value ?? "").length,
+      });
+    }
+  }
+
+  // The whole point of the survey. Named separately from `declined` because "caught by identifier" and
+  // "caught by name" are the two halves of the asymmetry and only one of them has a hole in it.
+  const missed = rows.filter((row) => !row.declined);
+  const byImporter = new Map<string, number>();
+  for (const row of missed) {
+    const key = `${row.type || "(no type)"} / ${row.identifier ? "has identifier" : "NO identifier"}`;
+    byImporter.set(key, (byImporter.get(key) ?? 0) + 1);
+  }
+
+  const out: string[] = [
+    `glossary: ${rows.length} items on ${actors.length} readable sheets whose name is a general rule`,
+    `  caught today: ${rows.length - missed.length}   MISSED: ${missed.length}`,
+  ];
+  for (const [shape, count] of [...byImporter.entries()].sort((a, b) => b[1] - a[1])) {
+    out.push(`  missed shape: ${shape} × ${count}`);
+  }
+  for (const row of missed) {
+    out.push(
+      `  MISSED ${row.actor} / "${row.item}" — type ${row.type || "?"}, ` +
+        `identifier ${row.identifier || "NONE"}, matches ${row.matches}, ${row.prose} chars of prose`,
+    );
+  }
+  if (!missed.length) {
+    out.push("  nothing missed: the feat-only name test costs this world nothing — do not widen it");
+  }
+  log(out.join("\n"));
+
+  return { system: String((game as any).system?.id ?? "?"), rows, missed };
 }

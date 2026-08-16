@@ -67,7 +67,13 @@
                         {{localize "NOODLRHOOKS.Capabilities.Sheet.Inert"}}
                       </span>
                     {{/if}}
+                    {{#if this.refused}}
+                      <span class="noodlr-badge inert" data-tooltip="{{localize 'NOODLRHOOKS.Capabilities.Sheet.RefusedHint'}}">
+                        {{localize "NOODLRHOOKS.Capabilities.Sheet.Refused"}}
+                      </span>
+                    {{/if}}
                   </span>
+                  {{#if this.refused}}<p class="notes">{{this.refused}}</p>{{/if}}
                   {{#if this.note}}<p class="notes">{{this.note}}</p>{{/if}}
                 </li>
               {{/each}}

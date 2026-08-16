@@ -68,7 +68,9 @@ function rowsFor(actor: any): Row[] {
     if (seen.has(feature.id)) continue;
     seen.add(feature.id);
     const capability = cache.get(feature.id);
-    const rules = capability ? describeCapability(capability) : [];
+    // The feature is passed so a rule restating the item's own damage is badged here rather than only
+    // refused at the moment it fires — see `RuleView.refused`.
+    const rules = capability ? describeCapability(capability, feature.item) : [];
     const status = String(capability?.status ?? "uncompiled");
     rows.push({
       id: feature.id,

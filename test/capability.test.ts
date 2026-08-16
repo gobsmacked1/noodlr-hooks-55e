@@ -8,6 +8,8 @@ import {
   isExecutable,
   isQuantity,
   isTerminal,
+  normalizeCapability,
+  normalizeDamageWindow,
   validateCapability,
 } from "../src/integration/capability";
 import type { Capability, CapabilityRule } from "../src/integration/capability";
@@ -57,11 +59,146 @@ test("negate is accepted on any predicate, and is not an invented parameter", ()
       },
     ],
   };
-  assert.deepEqual(validateCapability(negated), { ok: true, errors: [] });
+  assert.deepEqual(validateCapability(negated), { ok: true, errors: [], warnings: [] });
 });
 
-test("a well-formed capability validates", () => {
-  assert.deepEqual(validateCapability(regeneration), { ok: true, errors: [] });
+test("a well-formed capability validates, and needs no repair", () => {
+  assert.deepEqual(validateCapability(regeneration), { ok: true, errors: [], warnings: [] });
+});
+
+// ---- Repairing what a compiler hands back --------------------------------------------------------
+//
+// The census that motivated all of this: 576 of 693 compiled guards were filed under `conditions`,
+// plural, and read by nothing. These tests pin the recovery AND the reporting, because the reporting is
+// what turns the next rename from a two-release mystery into a line in the log.
+
+test("guards filed under the plural are read, and the alias is reported", () => {
+  const { capability, notes } = normalizeCapability({
+    ...regeneration,
+    rules: [
+      {
+        trigger: { event: "on_turn_start" },
+        conditions: [
+          {
+            kind: "damage_taken",
+            window: "since_last_turn",
+            damageTypes: ["acid", "fire"],
+            negate: true,
+          },
+        ],
+        effect: { kind: "heal", amount: { value: 15 } },
+        adjudication: "engine",
+      },
+    ],
+  });
+  const rule = capability.rules[0] as unknown as CapabilityRule & Record<string, unknown>;
+  assert.equal(rule.condition?.length, 1, "the guard the Troll's regeneration turns on");
+  assert.equal(rule.condition?.[0].negate, true, "and the negation that makes fire stop it");
+  assert.equal(rule.conditions, undefined, "the alias is consumed, not left beside its replacement");
+  assert.match(notes.join("\n"), /used "conditions" for its guards/);
+});
+
+test("both keys MERGE rather than one winning, because a dropped guard is the bug", () => {
+  // ANDed, so merging can only make a rule fire less often. Preferring either one silently loses a
+  // guard, which is precisely the failure mode this layer exists to end.
+  const { capability } = normalizeCapability({
+    ...regeneration,
+    rules: [
+      {
+        trigger: { event: "on_turn_start" },
+        condition: [{ kind: "hp_at_least", amount: { value: 1 } }],
+        conditions: [{ kind: "in_combat" }],
+        effect: { kind: "heal", amount: { value: 15 } },
+        adjudication: "engine",
+      },
+    ],
+  });
+  assert.deepEqual(
+    capability.rules[0].condition?.map((c) => c.kind),
+    ["hp_at_least", "in_combat"],
+  );
+});
+
+test("a free-text damage window is read, and says what it was read as", () => {
+  // All three of these were live in one cache at once, for the same two rules.
+  const { capability, notes } = normalizeCapability({
+    ...regeneration,
+    rules: [
+      {
+        trigger: { event: "on_turn_start" },
+        condition: [
+          { kind: "damage_taken", window: "since the start of its previous turn" },
+          { kind: "damage_taken", window: "this turn" },
+          { kind: "damage_taken", window: "This Round" },
+        ],
+        effect: { kind: "heal", amount: { value: 15 } },
+        adjudication: "engine",
+      },
+    ],
+  });
+  assert.deepEqual(
+    capability.rules[0].condition?.map((c) => c.window),
+    ["since_last_turn", "this_turn", "this_round"],
+  );
+  assert.equal(notes.length, 3, "each repair is reported, not just the first");
+});
+
+test("an unreadable window is LEFT ALONE, so the guard fails closed and names itself", () => {
+  // Guessing `ever` here would widen the guard: for Regeneration that is the difference between a troll
+  // that stops burning and one that never regenerates again for the rest of the campaign.
+  const { capability, notes } = normalizeCapability({
+    ...regeneration,
+    rules: [
+      {
+        trigger: { event: "on_turn_start" },
+        condition: [{ kind: "damage_taken", window: "whenever the moon is full" }],
+        effect: { kind: "heal", amount: { value: 15 } },
+        adjudication: "engine",
+      },
+    ],
+  });
+  assert.equal(capability.rules[0].condition?.[0].window, "whenever the moon is full");
+  assert.match(notes.join("\n"), /is not a known window; the guard will not evaluate/);
+});
+
+test("normalising twice changes nothing, which is what lets the cache and the validator both do it", () => {
+  const once = normalizeCapability({
+    ...regeneration,
+    rules: [
+      {
+        trigger: { event: "on_turn_start" },
+        conditions: [{ kind: "damage_taken", window: "this turn" }],
+        effect: { kind: "heal", amount: { value: 15 } },
+        adjudication: "engine",
+      },
+    ],
+  });
+  const twice = normalizeCapability(once.capability);
+  assert.deepEqual(twice.capability, once.capability);
+  assert.deepEqual(twice.notes, [], "and the second pass has nothing left to report");
+});
+
+test("an unrecognised rule key is WARNED about, never fatal", () => {
+  // The guard that would have caught `conditions` on day one. Rejecting would throw away a descriptor
+  // whose trigger, guards and effect are all fine, and spend a repair round to be told the same thing.
+  const { ok, warnings } = validateCapability({
+    ...regeneration,
+    rules: [{ ...regeneration.rules[0], whenever: "the moon is full" }],
+  });
+  assert.equal(ok, true);
+  assert.match(warnings.join("\n"), /unrecognised key "whenever"/);
+});
+
+test("normalizeDamageWindow is conservative about what it recognises", () => {
+  assert.equal(normalizeDamageWindow("since_last_turn"), "since_last_turn");
+  assert.equal(normalizeDamageWindow("SINCE-LAST-TURN"), "since_last_turn");
+  // "since ... turn" must not be read as "this turn" just because it contains the word.
+  assert.equal(normalizeDamageWindow("since the end of its last turn"), "since_last_turn");
+  assert.equal(normalizeDamageWindow("during the current turn"), "this_turn");
+  assert.equal(normalizeDamageWindow("at any point this round"), "this_round");
+  assert.equal(normalizeDamageWindow("ever"), "ever");
+  assert.equal(normalizeDamageWindow(""), null);
+  assert.equal(normalizeDamageWindow(undefined), null);
 });
 
 test("an invented parameter is rejected, which is the whole point of closing the level", () => {
@@ -162,6 +299,89 @@ test("an unevaluable guard makes the rule inert rather than firing unguarded", (
   // But it must not run. A monster that regenerates when it should not is invisible at the table.
   assert.equal(isExecutable(guarded), false);
   assert.equal(isExecutable(regeneration.rules[0]), true);
+});
+
+test("a subject the resolver cannot name is an error, not a near miss", () => {
+  // The live cache holds `who: "hit target"`, `"saving creature"`, `"owner"`, `"familiar"` and a
+  // player character's proper name. Each of those resolves to nobody, so the guard refuses and takes
+  // its rule with it — a descriptor that validated cleanly and can never fire on any turn.
+  for (const key of ["who", "whom", "of"]) {
+    const rule = {
+      trigger: { event: "on_turn_start" },
+      condition: [{ kind: "hp_at_least", amount: { value: 1 }, [key]: "the owner" }],
+      effect: { kind: "heal", amount: { value: 15 } },
+      adjudication: "engine",
+    } as unknown as CapabilityRule;
+    const { ok, errors } = validateCapability({ ...regeneration, rules: [rule] });
+    assert.equal(ok, false, key);
+    assert.match(errors.join("\n"), /the owner/, key);
+  }
+  const named = {
+    trigger: { event: "on_turn_start" },
+    condition: [{ kind: "hp_at_least", amount: { value: 1 }, who: "target" }],
+    effect: { kind: "heal", amount: { value: 15 } },
+    adjudication: "engine",
+  } as unknown as CapabilityRule;
+  assert.equal(validateCapability({ ...regeneration, rules: [named] }).ok, true);
+});
+
+test("a status this world cannot apply is an error, because lacks_status would fail OPEN", () => {
+  const prior = (globalThis as Record<string, unknown>).CONFIG;
+  (globalThis as Record<string, unknown>).CONFIG = {
+    statusEffects: [{ id: "prone" }, { id: "poisoned" }],
+  };
+  try {
+    const invented = (kind: string, extra: Record<string, unknown>): CapabilityRule =>
+      ({
+        trigger: { event: "on_turn_start" },
+        condition: kind === "lacks_status" ? [{ kind, status: "sheathed in booming energy" }] : [],
+        effect:
+          kind === "lacks_status"
+            ? { kind: "heal", amount: { value: 1 } }
+            : { kind, status: "sheathed in booming energy", ...extra },
+        adjudication: "engine",
+      }) as unknown as CapabilityRule;
+
+    // On the effect: a status nothing recognises is applied to nobody.
+    assert.equal(
+      validateCapability({ ...regeneration, rules: [invented("apply_status", {})] }).ok,
+      false,
+    );
+    // On the guard, which is the unsafe direction: nobody HAS an invented status, so "lacks" is true
+    // of everyone and the rule fires unconditionally with nothing reporting why.
+    assert.equal(
+      validateCapability({ ...regeneration, rules: [invented("lacks_status", {})] }).ok,
+      false,
+    );
+    // A real one passes, and the reserved ones stay valid-but-inert so the sheet can show the reading.
+    const prone = {
+      trigger: { event: "on_turn_start" },
+      condition: [],
+      effect: { kind: "apply_status", status: "Prone" },
+      adjudication: "engine",
+    } as unknown as CapabilityRule;
+    assert.equal(validateCapability({ ...regeneration, rules: [prone] }).ok, true);
+    const dead = {
+      trigger: { event: "on_turn_start" },
+      condition: [],
+      effect: { kind: "apply_status", status: "slain" },
+      adjudication: "engine",
+    } as unknown as CapabilityRule;
+    assert.equal(validateCapability({ ...regeneration, rules: [dead] }).ok, true);
+  } finally {
+    (globalThis as Record<string, unknown>).CONFIG = prior;
+  }
+});
+
+test("an unreadable status list is permission, or every census and test rejects everything", () => {
+  assert.equal((globalThis as Record<string, unknown>).CONFIG, undefined);
+  const rule = {
+    trigger: { event: "on_turn_start" },
+    condition: [],
+    effect: { kind: "apply_status", status: "whatever the module registered" },
+    adjudication: "engine",
+  } as unknown as CapabilityRule;
+  assert.equal(validateCapability({ ...regeneration, rules: [rule] }).ok, true);
 });
 
 test("a compiled rule may not kill, whatever it read", () => {
@@ -289,7 +509,7 @@ test("summoning has a home, with the count and placement the Troll needs", () =>
       },
     ],
   };
-  assert.deepEqual(validateCapability(limbs), { ok: true, errors: [] });
+  assert.deepEqual(validateCapability(limbs), { ok: true, errors: [], warnings: [] });
   assert.equal(isExecutable(limbs.rules[0]), true);
 });
 

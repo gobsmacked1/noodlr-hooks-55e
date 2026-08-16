@@ -9,13 +9,14 @@
 // the table: the numbers look plausible, the fight is simply wrong. A rule that never fires shows up
 // on the capability sheet as needing a human, which is a bug report rather than a mystery.
 
-import type { Predicate } from "../integration/capability";
+import type { Predicate, SubjectName } from "../integration/capability";
+import { normalizeDamageWindow } from "../integration/capability";
 import { hasStatus } from "../system/dnd5e-conditions";
-import { damageTakenBy, type DamageWindow } from "./damage-log";
+import { damageTakenBy } from "./damage-log";
 import { asQuantity, resolveQuantitySync } from "./quantity";
 
 /** Who a predicate is asking about. `self` is the creature carrying the capability. */
-export type Who = "self" | "target" | "attacker" | "trigger";
+export type Who = SubjectName;
 
 export interface Subject {
   actor?: any;
@@ -47,19 +48,20 @@ function unknown(reason: string): Verdict {
   return { evaluable: false, value: false, reason };
 }
 
+/**
+ * Resolve `who`. A Record rather than a switch so its keys are checked against `SUBJECTS` at compile
+ * time: the vocabulary declares that list to whoever compiles for us, and a resolver that quietly
+ * knew a fifth value — or stopped knowing a fourth — would make the declaration a lie.
+ */
+const RESOLVE: Record<SubjectName, (ctx: EvalContext) => Subject | undefined> = {
+  self: (ctx) => ctx.self,
+  target: (ctx) => ctx.target,
+  attacker: (ctx) => ctx.attacker,
+  trigger: (ctx) => ctx.attacker ?? ctx.target,
+};
+
 function subjectFor(who: unknown, ctx: EvalContext): Subject | undefined {
-  switch (String(who ?? "self")) {
-    case "self":
-      return ctx.self;
-    case "target":
-      return ctx.target;
-    case "attacker":
-      return ctx.attacker;
-    case "trigger":
-      return ctx.attacker ?? ctx.target;
-    default:
-      return undefined;
-  }
+  return RESOLVE[String(who ?? "self") as SubjectName]?.(ctx);
 }
 
 function hpOf(actor: any): { value: number; max: number } | null {
@@ -213,7 +215,14 @@ function evaluateInner(predicate: Predicate, ctx: EvalContext): Verdict {
 
     case "damage_taken": {
       const uuid = String(actor?.uuid ?? "");
-      const window = String(predicate.window) as DamageWindow;
+      // Resolved, never cast. The cast this replaces is what let three spellings of one window into
+      // the cache and read every one of them as a window the ledger had never heard of — which
+      // `damageTakenBy` answered honestly and nothing above it reported. An unreadable window is
+      // unevaluable, which fails the guard closed and names the offending string on the sheet.
+      const window = normalizeDamageWindow(predicate.window);
+      if (window === null) {
+        return unknown(`"${String(predicate.window)}" is not a damage window this can read`);
+      }
       const minimum = resolveQuantitySync(asQuantity(predicate.minimum), { actor });
       const answer = damageTakenBy(uuid, {
         window,

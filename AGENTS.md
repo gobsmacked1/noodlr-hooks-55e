@@ -264,12 +264,24 @@ From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from 
   set-to-max, wrong for "regain 1d4 uses".
 - **DAE is trending legacy and must not be leaned on.** Foundry v14 absorbed the expiry model
   (`CONST.ACTIVE_EFFECT_EXPIRY_EVENTS`, plus `start.combatant` so source-turn versus target-turn is
-  expressible natively), and DAE v14 is down to two corrective libWrapper patches whose own comments
-  defer further to dnd5e 6.0. What it still uniquely supplies is the change-key vocabulary
+  expressible natively). What it still uniquely supplies is the change-key vocabulary
   (`macro.*`, `ATL.*`, `StatusEffect`) that DDB-imported items depend on — which is the DDB finding
   already recorded below, seen from the other end. It does **not** manage exhaustion
   (`DAEdnd5e.ts:382` deletes it from its own base-value handling), so our
   `flags.dnd5e.<condition>Level` encoding is uncontested.
+  - **CORRECTED 2026-08-16: "down to two corrective libWrapper patches" was wrong by a factor of
+    six, and the way it was wrong is the lesson.** Two is the count in `patching.ts`, which is the
+    file *named* for patching; the real total across `dae/src` is **twelve registrations and zero
+    unregisters**, with `ActiveEffect.applyChange` (`DAEdnd5e.ts:551`) wrapped on the hot path of
+    every effect application. Counting a category by reading the file whose name matches it is how a
+    plausible number gets written down and then quoted. Full census with what each patch corrects:
+    [`_research/_audit/mech-04-change-key-vocabulary.md`](../_research/_audit/mech-04-change-key-vocabulary.md) §3.
+  - **`specialDuration` is midi's, not DAE's, and that inverts what it means for us.** DAE registers
+    the vocabulary only `if (game.modules.get("midi-qol")?.active)` (`DAEdnd5e.ts:632`) and checks
+    exactly two values itself (`combatEnd`, `joinCombat`); every one of the ~40 interesting ones
+    (`isHit`, `isDamaged.<type>`, `isSaveFailure.<abl>`, `1Attack`, `zeroHP`, `isMoved`) is checked
+    inside midi. So a DDB-imported item whose rider expires "when the target is next hit" is inert
+    on this table twice over, and DAE alone would not save it.
 - Convenient Effects 9.2.5 does **not** override `CONFIG.statusEffects` or the token HUD, and applies
   nothing without the separate `dfreds-triggers` module, which is not installed. Its exhaustion code is
   gated on its own `ceEffectId`, so a status we write natively never reaches it. Automated Evocations,
@@ -752,6 +764,34 @@ a five-minute check instead of a five-hour audit. Full report and the citations 
   but defaults off" — the enforcement toggles mostly ship ON; the real problem is that the automation is
   narrower than its name. The genuine off-by-default exceptions worth knowing: `encumbrance` (`"none"`)
   and `autoRecharge` (`"no"`).
+- **A CLEAN DEPRECATION CONSOLE PROVES NOTHING ON A dnd5e WORLD (2026-08-16).** `dnd5e.mjs:66-69`
+ pushes **fourteen regexes** into `CONFIG.compatibility.excludePatterns` at `init`, and that collection
+ is core's **global** suppression list — so this silences those warnings for every module in the world,
+ not just for the system. Three of the fourteen cover API families we use throughout:
+ `/MeasuredTemplate/` and `/MeasuredTemplateDocument/` (unanchored, so they match any message
+ containing the substring) and `/CONST\.ACTIVE_EFFECT_MODES/`. Also `Scene#templates`, `core.rollMode`,
+ `core.gridTemplates` and `core.coneTemplateType`.
+ - **We are not drifting today, and the distinction matters:** `core/screens.ts:75` and
+ `core/hazards.ts:44` read `canvas.templates.placeables`, the canvas **layer**, which is not
+ deprecated; the suppressed `Scene#templates` is the document **collection**. But the placeables we
+ iterate are `MeasuredTemplate` instances, so a future core that renames the class tells us nothing.
+ - **Consequence for the method above: a deprecation audit of our own code cannot be run on a dnd5e
+ world.** Check against `_research\ftypes14\` or a system-less world instead. This is the same trap
+ as reading a clone's committed manifest for its version — a plausible-looking clean result that
+ invites no second look.
+- **Five Active Effect change keys are rewritten with NO warning** (`documents/active-effect.mjs:66-72`):
+ `system.attributes.movement.speed` → `movement.walk`, and the four flat senses paths
+ (`senses.darkvision` and friends) → `senses.ranges.*`. `_applyChangeShim` has a working
+ `if (shim.warning)` branch and none of the five populates it. **Our own reads are correct either way**
+ — `sheetSenses` reads the prepared `senses.ranges.*` — so this is a forecast about the operator's
+ content rather than a bug of ours: every DDB-imported effect written against the old flat key works
+ now and dies silently when the shims are removed in **6.0/6.1**. It is a second reason to build the
+ change-key classifier already parked in `IDEAS.md`, since nothing else in the world will warn.
+- **Nothing in dnd5e's open 6.0/6.1 milestones collides with any rule layer here** — no action economy,
+ reactions, cover, range, Speed, hiding, dying or forced movement. The one to watch is **#5559 Aura
+ Effects**. Weak evidence though, and stated as such: "What's Next" has not been published since 5.0.0,
+ and the two items from that list we care most about (action tracking, range/reach/cover) never became
+ milestone issues at all.
 - **Disproved, so don't bother:** `lang/en.json` contains essentially no "we will not do this" vocabulary
   (the closest is one "at your DM's discretion" about optional class features), and no limitations or
   "what is automated" page was found on the dnd5e wiki. Core states its position only in the positive, in
@@ -2080,6 +2120,170 @@ in `featuresOf`, and `CollectReport.declined` reports what was skipped and why.
   a homebrew magic item that never set a rarity. Measure it in a real world first; the reasoning is recorded
   at the head of `dnd5e-glossary.ts` where somebody would go to add it.
 
+### `api.surveyGlossary()` exists so the feat-only guard is widened on evidence or not at all (v0.6.6)
+
+The asymmetry above has one knowable hole: an item whose **name** is a glossary entry, whose type is not
+`feat`, and which states **no identifier**, is missed and gets compiled. Widening the name test to every
+rule-bearing type is two lines, and it was the obvious first move. It is also the one change in this file
+that cannot be checked by reading the diff, because **what it costs is silent in the direction this whole
+file exists to avoid**: a homebrew feature legitimately called "Fall", or a magic weapon called "Jump",
+stops being compiled with nothing anywhere saying so. `test/economy.test.ts` pins that case deliberately
+(`a weapon named after a general rule is never declined`), so widening means deleting a guard somebody
+wrote on purpose.
+
+- **The number to read is `MISSED`.** Zero means the asymmetry costs this world nothing and the test must
+  **not** be widened. Anything else names the exact items, their type and their identifier, so the
+  widening can be argued from the population rather than from the shape of the code.
+- **Gated on `isDnd5e()`, because off dnd5e nothing is ever declined** and every match would be reported
+  as missed — the instrument would report a catastrophe on a world it has no opinion about.
+- **`glossaryPatterns()` is exported solely so a test can pin it, and that test is the load-bearing one.**
+  Both source tables are read by shape (`action.spec.name` from `PHB_ACTIONS`, `rule.name` from
+  `GLOSSARY`), so a rename in either yields a shorter list, no error, and **the reassuring answer**. An
+  instrument that undercounts does not fail; it closes the question on a measurement never taken. Same
+  class of fault as the meta-notes census reporting 34 hidden sections when there were 848.
+- **`readableActors()` moved to `src/capability/sheets.ts`** when this became its second caller, and its
+  own note carries the caveat every count from it inherits: **compendia are not walked, so every number is
+  a lower bound.** A private second copy is how two diagnostics come to disagree about what the world
+  contains, and here neither would look wrong.
+
+## The cache was reading a key nothing wrote (v0.6.6, 2026-08-16)
+
+The Troll's Regeneration ignoring fire, and Loathsome Limbs firing at full health, were reported five
+times across three releases and diagnosed wrongly every time — as a prompt problem, then as a model
+that had misread the rule, then as prose contamination. **The descriptors were correct on disk the
+whole time.** A census of the live cache (`scripts/census-guards.mjs`) settled it: **576 of 693 guards
+were filed under `conditions`, plural, and `CapabilityRule` declares `condition`, singular.** The
+executor read an empty guard array, and an empty guard array means "fires unconditionally".
+
+- **THE PATTERN IN THE FAILURE IS THE WHOLE LESSON, and it is about the doctrine rather than the
+  model.** Every key the prompt names in dotted form — `trigger.event`, `effect.kind`, `effect.amount`
+  — was correct **100%** of the time. The one key named only as an English noun ("the conditions under
+  which it fires") was correct **26%** of the time. The model was writing down what it was asked for in
+  the words it was asked in. **Name a field by its literal path or expect its literal path back at
+  chance.**
+- **A closed vocabulary only closes what it NAMES.** `validateCapability` checked `trigger.event`
+  against a list and checked effect parameter *names*, and had no opinion whatever about a top-level
+  key it did not recognise — so `conditions` validated cleanly, stored cleanly, and read as nothing.
+  Unknown keys are now **reported and not rejected**: rejecting would throw away rules that are
+  otherwise fine, and reporting is what catches the next rename on the day it happens.
+- **`damage_taken.window` was required with its legal values never enumerated**, and that was the
+  second half of the same bug. The two cached Regenerations said `"since_last_turn"` and `"since the
+  start of its previous turn"`; one was readable. `DAMAGE_WINDOWS` is now declared beside the predicate
+  that takes it — `damage-log.ts` re-exports rather than declaring, because a type living away from the
+  vocabulary that closes it is how three spellings of one window got in.
+- **An unreadable window is UNEVALUABLE, never a guess.** `normalizeDamageWindow` returns null and the
+  guard fails closed with the operator's own string on the capability sheet. Widening it to `ever` is
+  the tempting default and it is the difference between a troll that stops burning and one that never
+  regenerates again.
+- **The repair lives at the cache boundary, in `admit()`, and that is deliberately not at the
+  consumers.** One door into `memory` means a shard read, a fresh compile, a GM edit and an imported
+  cache are all normalised identically, and there is exactly one answer to "what shape is a cached rule
+  in". It is idempotent, so validating a normalised copy and then storing it costs nothing.
+- **Merging both keys rather than preferring one**: guards are ANDed, so merging can only make a rule
+  fire *less* often. Preferring one and dropping the other is the branch that loses a guard, which is
+  the failure this whole layer exists to undo.
+- **A normaliser is a guard, not a substitute for fixing the prompt.** The doctrine gains a literal
+  example rule object in Phase 2 and the recompile follows; this exists so that descriptors already
+  paid for do not have to be bought again, and so that a prompt cannot be *relied* on.
+
+### A cache is a record of what was once asked, not of what currently runs (v0.6.6)
+
+Same investigation, second finding, and it invalidated a number two audit documents had built on.
+`Hide`, `Dash`, `Influence`, `Unarmed Strike` and `Stabilize` were all in the cache, which both
+documents read as evidence that v0.6.3's glossary skip was not working. It works — `generalRuleOf` sits
+ahead of `proseOf` in `featuresOf`, so a declined item is never collected and never bound. Those are
+compiles from **before** the skip existed, in a cache nothing had ever swept, and they were being
+counted in the 12.4% yield baseline as though they ran.
+
+`src/capability/hygiene.ts` answers it. **The two reasons an entry is unreachable are not equally
+certain and that asymmetry is the design:**
+
+- **`declined`** — the collector refuses this wording wherever it appears. That is a property of our own
+  code, true on every sheet in every world, so it is safe to remove and `pruneOrphans()` removes it.
+- **`absent`** — no sheet this sweep can see produces it. That is a guess: the sweep walks world actors
+  and every scene's tokens but **deliberately not compendia**, because walking every pack means loading
+  every pack. So a compendium creature's descriptor looks exactly like a dead one, and it is reported
+  and left alone unless the GM passes `includeAbsent`.
+- **BINDING ANYWHERE OUTRANKS BEING DECLINED SOMEWHERE.** "Unarmed Strike" is the PHB glossary item on a
+  character sheet and a real ability on a monster carrying the same wording. Reading `declined` first
+  deletes a working descriptor to tidy up its duplicate — silently, discoverable only by the ability
+  stopping working. `classifyCache` is split out of the sweep solely so `test/hygiene.test.ts` can pin
+  that ordering.
+- **`locked` and `rejected` are kept whatever their reason.** Those statuses mean a human had the last
+  word, and a sweep that deletes a GM's correction because the monster is off-scene is worse than the
+  clutter it removes.
+- **Nothing runs automatically.** A sweep on scene load would eventually delete something paid for, and
+  quietly. The GM presses the button having read what it would take.
+
+### The honest baseline, and the two ways 12.4% was wrong at once (v0.6.6)
+
+`npm run census:yield -- <cache-dir>` is the measurement everything in the roadmap is scored against,
+and it exists because the number it replaces was quoted for three releases while being wrong in **both
+directions simultaneously** — too low because 576 guards were unread, too high as a denominator because
+55 rules belonged to descriptors nothing can bind. Re-run on the swept cache: **631 reachable rules, 81
+active (12.8%)** — 32 executable and 49 standing facts.
+
+- **THE BADGE DID NOT MOVE, AND THAT IS THE FINDING RATHER THAN A DISAPPOINTMENT.** 32 rules scored
+  executable before the guard fix and 32 after, because an absent guard array is *vacuously true* — so
+  `isExecutable` had always called these runnable and always would. The recovery is at **evaluation**
+  time, which no static count can see: 326 rules gained guards and **ten of them are rules that
+  actually run**, including `Regeneration — heal` and both halves of `Loathsome Limbs`. The two oldest
+  open bug reports in this repo are in that list of ten. **A yield census measures what is wired, never
+  what is correct**, and reading a flat number as progress is how this was missed for three releases.
+- **`other` is counted independently of every other bucket, deliberately.** An exclusive tally hid 136
+  of them behind `adjudication: "gm"` and reported zero, which would have made the Phase 2 recompile
+  unmeasurable — `other` going down is the *only* honest evidence a doctrine change paid for itself.
+  Same for unresolvable subjects: **105 predicates in 83 rules**, and the histogram is what makes it
+  actionable — `"caster"` x20 is the single commonest, and it means `self` every time.
+- **The glossary exclusion is matched by LABEL and the output says so in as many words.**
+  `generalRuleOf` reads an item's type, identifier and flags; a cache holds a label. So the offline
+  count is a lower bound and `api.surveyOrphans()` is the authority. Stating the limit in the report is
+  the point: an approximation that does not announce itself becomes a fact by being quoted.
+- **It bundles the shipped predicates rather than reimplementing them**, for the reason
+  `census-meta-notes.mjs` learned the expensive way — a census carrying its own copy of `isExecutable`
+  measures its own copy. What this script owns is the counting and nothing else.
+- The Phase 3 yield is printed per trigger, which is the ordering argument in one block: `on_hit` 36,
+  `on_save_failed` 24, `on_activity_use` 14, `on_attack_roll` 4, `on_save_succeeded` 4,
+  `on_long_rest` 2. The 22 `always` rules in that column are NOT waiting on a hook — they are standing
+  claims whose effect kind is outside `STANDING_EFFECTS`, so they are genuinely inert.
+
+### The compiler was reading the ability's own damage line back to us (v0.6.6)
+
+Third finding of the same census, and the one that had to be fixed before `on_hit` could be wired at
+all: **45 of 71 `on_hit` rules were the ability's OWN printed damage.** Fire Bolt compiled to "on a hit,
+deal 1d10 fire" — which dnd5e has rolled off `damage.parts` since long before any of this existed. So
+dispatching the trigger without a guard would have doubled the damage of every attack cantrip in the
+world, and **the doubling is arithmetic rather than an error**: nothing throws, nothing logs, and a table
+just watches a ten-damage cantrip deal twenty.
+
+- **The doctrine now states the platform boundary and `src/capability/duplicate.ts` exists anyway,
+  because A PROMPT CANNOT BE RELIED ON NEVER TO RE-EMIT SOMETHING AND A GUARD CAN.** Same instinct as
+  failing closed on `other` and `custom`, and the same reason `RESERVED_STATUSES` sits beside a doctrine
+  that already forbids a rule from killing.
+- **AN EXACT FORMULA MATCH, AND THE STRICTNESS IS THE SAFETY ARGUMENT.** A refused rider is damage a
+  player is owed with no way to see it was declined, so anything short of certainty has to pass: a
+  different amount passes, a different damage type passes (1d8 piercing beside a longsword's 1d8
+  slashing is a rider that happens to roll the same dice), and an activity whose damage cannot be read
+  is **permission rather than suspicion** — "I could not tell" is not evidence of duplication. Same rule
+  as `knownStatuses()`.
+- **The item's base damage needs no separate lookup and adding one would double-count.**
+  `AttackActivityData#prepareFinalData` unshifts `item.system.damage.base` into `damage.parts` when
+  `includeBase` is set (`attack-data.mjs:200-205`), so a longsword's 1d8 is already in the list on any
+  prepared activity — which is every activity reachable from a hook.
+- **Checked before any state is read or spent**, because the refusal is about the RULE rather than the
+  moment: a restated damage line will restate it on every hit for as long as the descriptor exists, and a
+  limited use spent on it would be spent for nothing.
+- **THE SAME QUESTION IS ASKED STATICALLY, AND THAT IS WHAT MAKES THE GUARD FINDABLE.**
+  `duplicatesItemDamage` runs the check against the FEATURE with no turn in progress, so
+  `surveyCapabilities()` prints `REFUSED:` and the capability sheet badges it "would double" with the
+  reason underneath. A refusal that only ever appears mid-combat, once, in a console is a rule a reader
+  will report as having stopped working — the same doctrine as greying "Behavioral automation" and as the
+  ownership resolver, applied to a compile fault instead of a stand-aside.
+- Formulas are canonicalised by what they roll rather than by how they are typed (case, spaces, and term
+  order, since the compiler writes a sum in whatever order the sentence did). `types` is a `Set` on a
+  prepared activity and an `Array` in raw source data; both are read, because a descriptor may be
+  compared against an activity loaded from source.
+
 ## A DIAGNOSTIC THAT RETURNS AN OBJECT HAS NOT REPORTED ANYTHING (v0.6.3)
 
 v0.6.2 added `guards` to `surveyCapabilities()` precisely so the Troll's missing "while Bloodied" would be
@@ -3157,8 +3361,35 @@ now this).
  re-rolling damage from an old card would be impossible on every client at once. `relented` handles
  the same case live by forcing a re-render when the wait runs out; the age test handles it for cards
  nobody was watching when the clock ran.
+- **AND WE DECORATE ONE PASS TOO EARLY, which is safe today by accident (found 2026-08-16).** All five
+  of our chat decorators — `gate.ts:82`, `damage.ts:109`, `forced.ts:107`, `dying.ts:754`,
+  `encounter.ts:75` — listen on core's `renderChatMessageHTML`, and `ChatMessage5e#renderHTML` fires
+  that inside `super.renderHTML()` at `chat-message.mjs:119` **before** its own five passes at
+  `:121-133` (`_displayChatActionButtons`, `_highlightCriticalSuccessFailure`, `_enrichChatCard`,
+  `_collapseTrays`, `activateChatListeners`). Nothing breaks because `_displayChatActionButtons` only
+  sets `button.hidden = true` (`:187-193`) and replaces no nodes, so our `disabled`, classes and
+  capture-phase listener survive — **but that is dnd5e's current implementation, not a contract**, and
+  a future pass that rebuilt `.card-buttons` would erase the lock and leave a button that looks
+  pressable. **dnd5e fires its own `dnd5e.renderChatMessage` (`:142`) after all five passes and listens
+  to no core chat hook**; that is the safer point and it is where dnd5e draws its own legendary-
+ resistance button. Two consequences of the ordering, both invisible from our source: our Unlock
+ button is appended before dnd5e's visibility loop iterates `.card-buttons button`, so it survives
+ only because `isCreator` is true for a GM, and dnd5e hands our button to
+ `getAssociatedActivity()?.shouldHideChatButton()`, a third-party method receiving an element it has
+ never seen.
+ - **THE ATTRIBUTE IS `data-visibility="all"`, NOT `"gm"` — corrected 2026-08-16, having recorded the
+ wrong one the day before.** `_displayChatActionButtons` (`chat-message.mjs:187-193`) `continue`s
+ out of the loop **only** for `"all"`; `"gm"` falls through into a single `||` chain, so it is still
+ tested against `!isCreator` *and* still handed to `shouldHideChatButton`. Setting `"gm"` therefore
+ buys nothing at all — it does not skip the `isCreator` dependency it was written here to remove.
+ - **And `"all"` is safe on our button for a reason worth stating, because it looks unsafe.** It
+ means "show this to everyone", which is the opposite of the Unlock button's intent — but
+ `offerOverride` is called only under `game.user?.isGM` (`gate.ts:226`), so the element is never
+ appended on a player's client in the first place. **Gating at creation is stronger than gating at
+ render**, and it is what makes the permissive attribute correct here. A button added
+ unconditionally must NOT take `"all"`.
 - **THE HARD HALF IS THE VETO, not the `disabled` attribute.** Disabling a button stops a mouse; it
- does not stop a macro, a keybind, or a client whose render ran before the flag arrived.
+  does not stop a macro, a keybind, or a client whose render ran before the flag arrived.
  `dnd5e.preRollDamage` is the refusal with teeth and it is registered on **every** client, because the
  client that must be stopped is the one whose mouse is on the button. Both `dnd5e.preRollDamage` and
  `...V2` fire for the same roll (`basic-roll.mjs:101-104`), so listen to exactly one — the
@@ -3329,6 +3560,25 @@ Recorded because they will be reported again.
     without it writes the **core-native** encoding instead — the `statuses[]` array, a
     `&Reference[condition]` enricher, and `flags.dnd5e.<condition>Level` for exhaustion. That is also
     independent confirmation that our own condition primitive is on the right encoding.
+  - **SHARPENED 2026-08-16 — the failure is quieter than "stored and ignored", and it is diagnosable
+    statically.** Two corrections from [`mech-04`](../_research/_audit/mech-04-change-key-vocabulary.md):
+    - An unmatched key is not dropped. `_applyLegacy` (`active-effect.mjs:378-424`) casts the value
+      and **`mergeObject`s the path onto the live actor**, landing in `actor.overrides`. That is the
+      same mechanism `flags.dnd5e.*` and `flags.dae.*` ride on, which makes `flags.<ns>.*` the
+      *supported* carrier rather than a hack — and it means the sole `console.warn` on that path
+      (`:397`) fires on a **cast** failure only. There is no code anywhere in core that could ever say
+      "nobody consumes this key".
+    - **Every `macro.*` change is mode CUSTOM (0), and CUSTOM is a total no-op without DAE.**
+      Searching `dnd5e/module` for `applyActiveEffect` returns only the unrelated `applyActiveEffects`
+      *methods*; neither dnd5e nor core registers a listener. So the mode itself is the dead end, not
+      the key name, and the value never appears in any dropdown either.
+    - **Therefore this is checkable at load with no hooks and no runtime cost**: classify every
+      `changes[].key` on every item against the documented grammar and report the families whose
+      consumer is not installed. Sketched as a capability in
+      [`mech-02` §3.10](../_research/_audit/mech-02-the-scaffold.md). It converts the single most
+      likely false bug report we will ever receive into a line a GM can read. **The midi namespace
+      has to be matched as a grammar, not a list** — `setupMidiFlags()` generates several thousand
+      keys by looping attack types × abilities × damage types.
 
 ## Open items carried over from noodlr
 

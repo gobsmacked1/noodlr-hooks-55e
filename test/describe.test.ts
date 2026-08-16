@@ -129,4 +129,46 @@ test("a rule nothing executes is rendered and flagged, never hidden", () => {
   // `gm` adjudication is never executable, whatever the effect says.
   assert.equal(views[1].runs, false);
   assert.match(views[1].text, /the GM decides/);
+  // Nothing was passed to check against, so `refused` is "not asked" rather than "clear".
+  assert.equal(views[0].refused, "");
+});
+
+test("a rule restating the item's own damage is badged on the sheet, not only refused at the table", () => {
+  // The refusal is arithmetic: the dice are simply rolled twice, nothing throws, and nothing appears
+  // in the log. So it has to be legible to whoever opens the compiled ability, or the guard reads as
+  // the rule having quietly stopped working.
+  const capability: Capability = {
+    id: "hash-firebolt",
+    label: "Fire Bolt",
+    status: "compiled",
+    rules: [
+      {
+        trigger: { event: "on_hit" },
+        condition: [],
+        effect: { kind: "damage", amount: { dice: "1d10" }, damageType: "fire", target: "target" },
+        adjudication: "engine",
+      },
+      {
+        trigger: { event: "on_hit" },
+        condition: [],
+        effect: { kind: "damage", amount: { dice: "2d6" }, damageType: "fire", target: "target" },
+        adjudication: "engine",
+      },
+    ],
+  };
+  const item = {
+    system: {
+      activities: {
+        abc: {
+          name: "Fire Bolt",
+          damage: { parts: [{ number: 1, denomination: 10, types: ["fire"] }] },
+        },
+      },
+    },
+  };
+
+  const views = describeCapability(capability, item);
+  assert.match(views[0].refused, /already rolls 1d10/);
+  // The rider is untouched, which is the direction that must not break.
+  assert.equal(views[1].refused, "");
 });

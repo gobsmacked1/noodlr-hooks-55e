@@ -72,6 +72,15 @@ export interface Feature {
 export interface Declined {
   label: string;
   why: string;
+  /**
+   * The prose hash this item WOULD have had.
+   *
+   * Present so `hygiene.ts` can tell a cached descriptor that can never bind again from one whose
+   * creature merely is not on this scene — the two look identical from the cache and want opposite
+   * treatment. Computed only on the report path, because it costs a `proseOf` on an item the hot path
+   * has already decided to skip.
+   */
+  id?: string;
 }
 
 /**
@@ -282,7 +291,14 @@ export function featuresOf(actor: any, declined?: Declined[]): Feature[] {
     // we shipped or a re-litigation of a refusal. See `dnd5e-glossary.ts` for the whole argument.
     const general = generalRuleOf(item);
     if (general) {
-      declined?.push({ label: String(item?.name ?? "?").trim() || "?", why: general });
+      if (declined) {
+        const text = proseOf(item).prose;
+        declined.push({
+          label: String(item?.name ?? "?").trim() || "?",
+          why: general,
+          id: text.length >= MIN_PROSE ? cache.proseHash(text) : undefined,
+        });
+      }
       continue;
     }
 
@@ -513,6 +529,9 @@ function absorb(
       rejected++;
       continue;
     }
+    // Reported, never fatal — see `validateCapability`. An unrecognised key here is how the next
+    // silently-unread field gets noticed on the day it appears; `conditions` went two releases without.
+    if (check.warnings.length) debug(`compiled "${feature.label}" needed repair:`, check.warnings);
     if (cache.put(candidate)) compiled++;
     else debug(`kept the existing "${feature.label}" — a human has the last word on it`);
   }

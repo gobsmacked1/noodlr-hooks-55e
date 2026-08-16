@@ -77,6 +77,7 @@ import {
 import type { Stance } from "./rules/influence";
 import { surveyGeneralRules } from "./rules/general";
 import { surveyActionButtons } from "./system/dnd5e-actions";
+import { surveyGlossary } from "./system/dnd5e-glossary";
 import { advisories, allOwnership, conflicts } from "./integration/ownership";
 import { openRulesConfig } from "./apps/rules-config";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
@@ -93,6 +94,7 @@ import { registerDamageLog } from "./capability/damage-log";
 import { surveyPrimitives } from "./capability/primitives";
 import { registerCapabilityExecutor, surveyCapabilities } from "./capability/executor";
 import { collectScene, registerCapabilityCollector, surveyScene } from "./capability/collect";
+import { pruneOrphans, surveyOrphans } from "./capability/hygiene";
 import { surveyStanding } from "./capability/standing";
 import { openCapabilitySheet, registerCapabilitySheet } from "./apps/capability-sheet";
 
@@ -145,6 +147,7 @@ export interface NoodlrHooksApi {
   firstAid(): Promise<unknown>;
   surveyGeneralRules(): unknown;
   surveyActionButtons(): unknown;
+  surveyGlossary(): unknown;
   push(feet?: number): Promise<unknown>;
   pull(feet?: number): Promise<unknown>;
   undoForcedMovement(): Promise<number>;
@@ -153,6 +156,8 @@ export interface NoodlrHooksApi {
   surveyCapabilities(): unknown;
   surveyScene(): unknown;
   surveyStanding(): unknown;
+  surveyOrphans(): unknown;
+  pruneOrphans(options?: { includeAbsent?: boolean }): Promise<unknown>;
   compileScene(): Promise<unknown>;
   openCapabilities(actor?: unknown): void;
   openRules(page?: string): void;
@@ -287,6 +292,14 @@ const api: NoodlrHooksApi = {
    * from the table looks exactly like one that broke.
    */
   surveyActionButtons: () => surveyActionButtons(),
+  /**
+   * Items whose name is a general rule, and whether the compiler skips them.
+   *
+   * Answers one question and only one: does imported content drop `system.identifier`, leaving the
+   * `feat`-only name test as the sole recogniser. A `MISSED` count of zero means the asymmetry costs
+   * this world nothing and the test must NOT be widened.
+   */
+  surveyGlossary: () => surveyGlossary(),
   /** Manual forced movement, for a rule the automatic layer does not recognise. */
   push: (feet = 10) => shoveTargets(feet, "away"),
   pull: (feet = 10) => shoveTargets(feet, "toward"),
@@ -302,6 +315,10 @@ const api: NoodlrHooksApi = {
   surveyScene: () => surveyScene(),
   /** Everything a compiled capability says is permanently true about the selected creatures. */
   surveyStanding: () => surveyStanding(),
+  /** Cached descriptors nothing can reach any more, and which of them are safe to remove. */
+  surveyOrphans: () => surveyOrphans(),
+  /** Remove them. `declined` only by default; `{includeAbsent: true}` for the probable ones too. */
+  pruneOrphans: (options?: { includeAbsent?: boolean }) => pruneOrphans(options),
   /** Read the scene now, rather than waiting for the next load. */
   compileScene: () => collectScene(),
   /** The review window for one creature. Defaults to the selected token, or your own character. */

@@ -16,10 +16,10 @@
 //     settles them; the collector awaits one flush at the end of a batch, so nothing is lost and the
 //     upload count is bounded by the number of shards touched rather than the number of compiles.
 
-import { log, warn } from "../constants";
+import { debug, log, warn } from "../constants";
 import { isPrimaryGM } from "../util/gm";
 import type { Capability } from "../integration/capability";
-import { exportable } from "../integration/capability";
+import { exportable, normalizeCapability } from "../integration/capability";
 
 /** Not a setting. There is no scenario where a GM needs this somewhere else, and a movable path that
  *  silently recreates itself when moved would be worse than none. */
@@ -39,6 +39,32 @@ const memory = new Map<string, Capability>();
 const dirty = new Set<string>();
 let warmed = false;
 let warming: Promise<void> | null = null;
+
+/**
+ * THE ONE DOOR INTO `memory`, and the reason it exists rather than each caller normalising.
+ *
+ * `normalizeCapability` folds a compiler's aliases and free text into the shape the executor reads. Doing
+ * that here — on a shard read, a fresh compile, a GM edit and an import alike — means no consumer
+ * downstream ever has to know a repair happened, and there is exactly one answer to "what shape is a
+ * cached rule in". It is idempotent, so the compile path validating a normalised copy and then storing
+ * through here costs nothing.
+ *
+ * Notes are returned rather than logged: a warm read of a cache written before the repair existed
+ * produces hundreds of them, and a line each would bury the summary that is the actually useful message.
+ */
+function admit(capability: Capability, notes: string[]): Capability {
+  const { capability: fixed, notes: found } = normalizeCapability(capability);
+  for (const note of found) notes.push(`${capability.id} ${note}`);
+  memory.set(fixed.id, fixed);
+  return fixed;
+}
+
+/** Say what was repaired: the count out loud, the detail behind the debug flag. */
+function reportRepairs(what: string, notes: string[]): void {
+  if (notes.length === 0) return;
+  log(`capability cache: repaired ${notes.length} field(s) while ${what} (debug logging lists them)`);
+  for (const note of notes) debug(`capability repair: ${note}`);
+}
 
 // ---- Keying ---------------------------------------------------------------------------------
 
@@ -162,11 +188,13 @@ export async function warm(): Promise<void> {
   warming = (async () => {
     const shards = Array.from({ length: SHARDS }, (_, i) => i.toString(16));
     const loaded = await Promise.all(shards.map(readShard));
+    const notes: string[] = [];
     for (const capabilities of loaded) {
-      for (const cap of capabilities) memory.set(cap.id, cap);
+      for (const cap of capabilities) admit(cap, notes);
     }
     warmed = true;
     log(`capability cache: ${memory.size} compiled`);
+    reportRepairs("reading the cache", notes);
   })();
   try {
     await warming;
@@ -201,14 +229,18 @@ export function size(): number {
 export function put(capability: Capability): boolean {
   const existing = memory.get(capability.id);
   if (existing && (existing.status === "locked" || existing.status === "rejected")) return false;
-  memory.set(capability.id, capability);
+  const notes: string[] = [];
+  admit(capability, notes);
+  reportRepairs(`storing "${capability.label}"`, notes);
   dirty.add(shardOf(capability.id));
   return true;
 }
 
 /** A GM edit. Always wins, including over a lock, because this IS the human having the last word. */
 export function putOverride(capability: Capability): void {
-  memory.set(capability.id, capability);
+  const notes: string[] = [];
+  admit(capability, notes);
+  reportRepairs(`saving "${capability.label}"`, notes);
   dirty.add(shardOf(capability.id));
 }
 
@@ -295,6 +327,7 @@ export function importAll(payload: unknown): ImportReport {
   const incoming = (payload as CacheExport)?.capabilities;
   if (!Array.isArray(incoming)) return report;
 
+  const notes: string[] = [];
   for (const raw of incoming) {
     if (!raw?.id || !Array.isArray(raw.rules)) {
       report.skipped++;
@@ -306,11 +339,12 @@ export function importAll(payload: unknown): ImportReport {
       continue;
     }
     const { prose: _prose, ...rest } = raw;
-    memory.set(raw.id, { ...rest, status: "compiled" });
+    admit({ ...rest, status: "compiled" }, notes);
     dirty.add(shardOf(raw.id));
     if (existing) report.updated++;
     else report.added++;
   }
+  reportRepairs("importing a shared cache", notes);
   return report;
 }
 

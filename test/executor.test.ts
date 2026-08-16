@@ -163,7 +163,11 @@ beforeEach(() => {
 
 test("every Troll capability validates against the closed vocabulary", () => {
   for (const capability of [REGENERATION, LOATHSOME_LIMBS, MULTIATTACK]) {
-    assert.deepEqual(validateCapability(capability), { ok: true, errors: [] }, capability.label);
+    assert.deepEqual(
+      validateCapability(capability),
+      { ok: true, errors: [], warnings: [] },
+      capability.label,
+    );
   }
 });
 
@@ -600,6 +604,60 @@ test("an effect with no executor is inert rather than approximated", async () =>
   const outcomes = await fireTrigger("on_turn_start", { self: { actor } });
   assert.equal(outcomes[0].fired, false);
   assert.match(String(outcomes[0].reason), /no executor/);
+});
+
+/** Fire Bolt, compiled as 45 of the live cache's 71 `on_hit` rules were: its own printed damage. */
+function restated(dice: string, damageType: string): Capability {
+  return {
+    id: `hash-firebolt-${dice}`,
+    label: "Fire Bolt",
+    status: "compiled",
+    rules: [
+      {
+        trigger: { event: "on_activity_use" },
+        condition: [],
+        effect: { kind: "damage", amount: { dice }, damageType, target: "target" },
+        adjudication: "engine",
+      },
+    ],
+  };
+}
+
+const FIRE_BOLT_ACTIVITY = {
+  name: "Fire Bolt",
+  damage: { parts: [{ number: 1, denomination: 10, types: new Set(["fire"]), formula: "1d10" }] },
+};
+
+test("a rule restating the platform's own damage is refused rather than doubling it", async () => {
+  // The doctrine now states the platform boundary, and this is here because a prompt cannot be relied
+  // on never to re-emit something while a guard can. The failure it prevents is silent: the dice are
+  // rolled twice, nothing throws, and a table just watches a ten-damage cantrip deal twenty.
+  const actor = troll();
+  const victim = troll();
+  bindCapabilities(actor.uuid, [{ capability: restated("1d10", "fire") }]);
+
+  const outcomes = await fireTrigger("on_activity_use", {
+    self: { actor },
+    target: { actor: victim },
+    activity: FIRE_BOLT_ACTIVITY,
+  });
+  assert.equal(outcomes[0].fired, false);
+  assert.match(String(outcomes[0].reason), /already rolls 1d10/);
+});
+
+test("…and a genuine rider on the same activity still runs", async () => {
+  // The direction that must not break. A refused rider is damage a player is owed and has no way to
+  // see was declined.
+  const actor = troll();
+  const victim = troll();
+  bindCapabilities(actor.uuid, [{ capability: restated("2d6", "fire") }]);
+
+  const outcomes = await fireTrigger("on_activity_use", {
+    self: { actor },
+    target: { actor: victim },
+    activity: FIRE_BOLT_ACTIVITY,
+  });
+  assert.equal(outcomes[0].fired, true, outcomes[0].reason);
 });
 
 test("a descriptor that throws does not take the turn down with it", async () => {

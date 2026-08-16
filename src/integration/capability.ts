@@ -400,6 +400,27 @@ export const PREDICATES = [
 
 export type PredicateKind = (typeof PREDICATES)[number];
 
+/**
+ * Whom a predicate may ask about. Closed, and the one truth `capability/predicates.ts` resolves from.
+ *
+ * Declared here beside the predicates because `who` is a parameter of a predicate in the closed set,
+ * and the whole job of this file is to close the parameter level as well as the kind level. **It was
+ * the one parameter left open**, which cost exactly what an open parameter always costs: a live cache
+ * holds `who: "caster"`, `"hit target"`, `"saving creature"`, `"owner"`, `"familiar"` and several
+ * proper nouns — including a guard naming a player character, which can never evaluate on any turn.
+ *
+ * `subjectFor` fails closed on an unknown value, so those guards refuse rather than fire, and their
+ * rules refuse with them. That is the safe direction and it is still a rule the operator paid for and
+ * does not get. The remedy is at the other end: the vocabulary now SAYS what resolves.
+ *
+ * `trigger` is deliberately vaguer than the other three — it means "whoever caused this", which is the
+ * attacker on a hit and the target on a save. It exists so a rule can be written once for a trigger
+ * whose causing side differs between events.
+ */
+export const SUBJECTS = ["self", "target", "attacker", "trigger"] as const;
+
+export type SubjectName = (typeof SUBJECTS)[number];
+
 export const PREDICATE_PARAMS: Record<PredicateKind, ParamSpec> = {
   has_status: { required: ["status"], optional: ["who"], executable: true },
   lacks_status: { required: ["status"], optional: ["who"], executable: true },
@@ -440,6 +461,22 @@ export const PREDICATE_PARAMS: Record<PredicateKind, ParamSpec> = {
   // that regenerates when it should not, which nobody at the table can see is wrong.
   custom: { required: ["text"], optional: [], executable: false },
 };
+
+/**
+ * The windows `damage_taken` can be asked about. Closed, and declared HERE rather than in
+ * `capability/damage-log.ts` because it is vocabulary: `window` is a required parameter of a predicate
+ * in the closed set, and the one thing this file exists to do is close the parameter level as well as
+ * the kind level.
+ *
+ * It was not enumerated originally, and the cost of that was measured on 2026-08-16: the live cache
+ * held `"since_last_turn"`, `"since the start of its previous turn"` and `"this turn"` for the same two
+ * rules. Only the first matched, so the Troll's Regeneration and Loathsome Limbs guards were
+ * unevaluable even once the reader was looking at the right key. `damage-log.ts` derives its type from
+ * this list so there is one answer to "which windows exist".
+ */
+export const DAMAGE_WINDOWS = ["this_turn", "since_last_turn", "this_round", "ever"] as const;
+
+export type DamageWindow = (typeof DAMAGE_WINDOWS)[number];
 
 /** Where a limited use replenishes. `recharge` is the d6 kind and carries `recharge: "5-6"`. */
 export const USE_PERIODS = [
@@ -520,6 +557,138 @@ export interface Capability {
   editedAt?: number;
 }
 
+// ---- Repairing what a compiler hands back --------------------------------------------------------
+//
+// A closed vocabulary only closes what it NAMES. Two things went unnamed and cost the same bug twice.
+//
+// The guard array is `condition`, singular, and the prompt describes it as "conditions" in English. The
+// live cache was censused on 2026-08-16: 576 of 693 guards had been compiled correctly and filed under
+// `conditions`, plural — a key nothing read. Every key the prompt names in dotted form (`trigger.event`,
+// `effect.kind`) was correct 100% of the time; the one named only as an English noun was correct 26% of
+// the time. The Troll's Regeneration and Loathsome Limbs were both in the 74%.
+//
+// And `damage_taken.window` was a required parameter whose legal values were never enumerated, so the
+// same two rules carried `"since_last_turn"`, `"since the start of its previous turn"` and `"this turn"`
+// between them and only the first was readable.
+//
+// Both are fixed properly in the doctrine and the vocabulary. This layer exists because a descriptor
+// already paid for must not have to be bought again, and because a prompt cannot be RELIED on: the
+// normaliser is the guard, and `validateCapability` reporting an unrecognised key is how the next
+// rename gets noticed on the day it happens rather than two releases later.
+
+/** Rule keys `CapabilityRule` declares. Anything else is either an alias below or a model invention. */
+const RULE_KEYS = new Set(["trigger", "condition", "effect", "uses", "adjudication", "note"]);
+
+/** Keys a compiler has been seen to use for the guard array, all folded into `condition`. */
+const CONDITION_ALIASES = ["conditions", "requirements", "prerequisites"] as const;
+
+/** Phrases that resolve to a canonical damage window. Ordered: the narrowest reading is tested first. */
+const WINDOW_PHRASES: readonly [RegExp, DamageWindow][] = [
+  // "since its last turn", "since the start of its previous turn" — the span between two of its turns.
+  [/\b(last|previous|preceding)\s+turn\b/, "since_last_turn"],
+  [/\bsince\b.*\bturn\b/, "since_last_turn"],
+  [/\b(this|that|the|current|its own)\s+turn\b/, "this_turn"],
+  [/\bturn\b/, "this_turn"],
+  [/\bround\b/, "this_round"],
+  [/\b(ever|always|any\s+time|at\s+all)\b/, "ever"],
+];
+
+/**
+ * Resolve a `window` value to one of {@link DAMAGE_WINDOWS}, or null when it cannot be read.
+ *
+ * Null rather than a guess: an unrecognised window leaves the raw string in place, `damage_taken`
+ * reports it as unevaluable, and the rule fails closed with the operator's own text on the capability
+ * sheet. Guessing `ever` would silently widen the guard, which for Regeneration is the difference
+ * between a troll that stops burning and one that never regenerates again.
+ */
+export function normalizeDamageWindow(raw: unknown): DamageWindow | null {
+  const text = String(raw ?? "")
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z_]/g, "")
+    .trim();
+  if (!text) return null;
+  if ((DAMAGE_WINDOWS as readonly string[]).includes(text)) return text as DamageWindow;
+  const prose = text.replace(/_/g, " ");
+  for (const [pattern, window] of WINDOW_PHRASES) {
+    if (pattern.test(prose)) return window;
+  }
+  return null;
+}
+
+export interface NormalizeReport {
+  /** One line per repair, for the log and the capability sheet. Empty is the healthy case. */
+  notes: string[];
+}
+
+/**
+ * Fold a raw rule into the shape the executor reads. Pure, idempotent, and never throws.
+ *
+ * Idempotent matters: this is applied at every point a descriptor enters the cache AND again before
+ * validation, so that what is validated is what will run.
+ */
+function normalizeRule(raw: unknown, at: string, notes: string[]): CapabilityRule {
+  const rule = { ...(raw as Record<string, unknown>) } as CapabilityRule & Record<string, unknown>;
+
+  const guards: Predicate[] = Array.isArray(rule.condition) ? [...rule.condition] : [];
+  for (const alias of CONDITION_ALIASES) {
+    const found = rule[alias];
+    if (found === undefined) continue;
+    delete rule[alias];
+    if (!Array.isArray(found)) {
+      notes.push(`${at}.${alias} was not an array; ignored`);
+      continue;
+    }
+    // ANDed, so merging both keys can only make the rule fire LESS often. Preferring one and dropping
+    // the other is the choice that loses a guard, which is the failure this whole layer exists for.
+    guards.push(...(found as Predicate[]));
+    notes.push(`${at} used "${alias}" for its guards; read as "condition"`);
+  }
+  rule.condition = guards;
+
+  for (const [index, predicate] of guards.entries()) {
+    if (predicate?.kind !== "damage_taken") continue;
+    const canonical = normalizeDamageWindow(predicate.window);
+    if (canonical === null) {
+      notes.push(
+        `${at}.condition[${index}].window "${String(predicate.window)}" is not a known window; ` +
+          `the guard will not evaluate`,
+      );
+      continue;
+    }
+    if (canonical !== predicate.window) {
+      notes.push(
+        `${at}.condition[${index}].window "${String(predicate.window)}" read as "${canonical}"`,
+      );
+      guards[index] = { ...predicate, window: canonical };
+    }
+  }
+
+  for (const key of Object.keys(rule)) {
+    if (!RULE_KEYS.has(key)) notes.push(`${at} has unrecognised key "${key}"`);
+  }
+  return rule as CapabilityRule;
+}
+
+/**
+ * Fold a whole capability into the shape the executor reads.
+ *
+ * Applied on every ingress into the cache — a shard read, a fresh compile, a GM edit, an import — so
+ * no consumer downstream has to know that any of this ever happened.
+ */
+export function normalizeCapability<T extends { rules?: unknown }>(
+  capability: T,
+): { capability: T } & NormalizeReport {
+  const notes: string[] = [];
+  if (!capability || typeof capability !== "object" || !Array.isArray(capability.rules)) {
+    return { capability, notes };
+  }
+  const rules = capability.rules.map((rule, index) =>
+    normalizeRule(rule, `rules[${index}]`, notes),
+  );
+  return { capability: { ...capability, rules }, notes };
+}
+
 function checkParams(
   spec: ParamSpec | undefined,
   node: Record<string, unknown>,
@@ -571,13 +740,47 @@ export function isQuantity(value: unknown): value is Quantity {
  *
  * Deliberately says nothing about whether the rule is a FAITHFUL reading of the prose. Nothing here
  * can know that; the capability sheet and the corpus regression harness are what answer it.
+ *
+ * `warnings` are REPORTED, never fatal, and the distinction is deliberate. An unrecognised rule key is
+ * exactly the signal that would have caught `conditions` on the day it first appeared — but rejecting on
+ * it would throw away a descriptor whose trigger, guards and effect are all fine and spend a repair
+ * round to be told the same thing. Whoever calls this must surface them; nobody may gate on them.
  */
-export function validateCapability(input: unknown): { ok: boolean; errors: string[] } {
+export function validateCapability(input: unknown): {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+} {
   const errors: string[] = [];
-  const cap = input as Capability;
 
-  if (!cap || typeof cap !== "object")
-    return { ok: false, errors: ["capability is not an object"] };
+  if (!input || typeof input !== "object") {
+    return { ok: false, errors: ["capability is not an object"], warnings: [] };
+  }
+  const statuses = knownStatuses().map((id) => id.toLowerCase());
+  /**
+   * A status nobody can apply.
+   *
+   * An ERROR rather than a warning, and `lacks_status` is why: an unknown status is absent from every
+   * creature, so `has_status` on one never fires (safe) while `lacks_status` on one ALWAYS fires. That
+   * is the unsafe direction, and it is not hypothetical — the live cache holds
+   * `apply_status: "sheathed in booming energy"`. The compiler is handed the legal list on the request,
+   * so an unlisted value is a failure to follow an enumeration, exactly like an unlisted effect kind.
+   *
+   * A reserved status is exempt: `RESERVED_STATUSES` names things no world registers, and those rules
+   * are deliberately VALID-but-inert so the sheet can show that the model read the sentence.
+   */
+  const checkStatus = (node: Record<string, unknown>, label: string): void => {
+    if (!statuses.length || node.status === undefined) return;
+    const wanted = String(node.status).toLowerCase();
+    if (RESERVED_STATUSES.includes(wanted) || statuses.includes(wanted)) return;
+    errors.push(
+      `${label} status "${String(node.status)}" is not a status this world can apply; ` +
+        `use one of the status ids on the request`,
+    );
+  };
+  // Checked as it will RUN, not as it arrived: a guard filed under an alias is a real guard, and
+  // validating the raw shape would report it missing and then run it anyway.
+  const { capability: cap, notes: warnings } = normalizeCapability(input as Capability);
   if (typeof cap.id !== "string" || cap.id.trim() === "")
     errors.push("id must be a non-empty string");
   if (typeof cap.label !== "string" || cap.label.trim() === "") {
@@ -585,7 +788,7 @@ export function validateCapability(input: unknown): { ok: boolean; errors: strin
   }
   if (!Array.isArray(cap.rules)) {
     errors.push("rules must be an array");
-    return { ok: false, errors };
+    return { ok: false, errors, warnings };
   }
   // A capability with no rules is a compile that produced nothing. That is a legitimate answer for a
   // purely flavourful trait, but it must be stated by returning an empty array deliberately rather
@@ -604,6 +807,7 @@ export function validateCapability(input: unknown): { ok: boolean; errors: strin
       errors.push(`${at}.effect.kind "${rule.effect?.kind}" is not in the closed vocabulary`);
     } else {
       checkParams(EFFECT_PARAMS[rule.effect.kind], rule.effect, `${at}.effect`, errors);
+      checkStatus(rule.effect as Record<string, unknown>, `${at}.effect`);
     }
 
     if (rule.condition !== undefined && !Array.isArray(rule.condition)) {
@@ -616,6 +820,19 @@ export function validateCapability(input: unknown): { ok: boolean; errors: strin
           return;
         }
         checkParams(PREDICATE_PARAMS[predicate.kind], predicate, pAt, errors);
+        checkStatus(predicate as Record<string, unknown>, pAt);
+        // The parameter the closed vocabulary forgot to close. An unresolvable `who` is not a near
+        // miss: `subjectFor` returns nobody, the guard refuses, and the rule refuses with it — so a
+        // descriptor that validated cleanly could still be a rule that can never fire on any turn.
+        for (const key of ["who", "whom", "of"] as const) {
+          const value = (predicate as Record<string, unknown>)[key];
+          if (value !== undefined && !(SUBJECTS as readonly string[]).includes(String(value))) {
+            errors.push(
+              `${pAt}.${key} "${String(value)}" is not one of ${SUBJECTS.join(", ")} — ` +
+                `the creature whose ability this is, is "self"`,
+            );
+          }
+        }
       });
     }
 
@@ -639,7 +856,7 @@ export function validateCapability(input: unknown): { ok: boolean; errors: strin
     }
   });
 
-  return { ok: errors.length === 0, errors };
+  return { ok: errors.length === 0, errors, warnings };
 }
 
 /**
@@ -676,6 +893,10 @@ export function capabilityVocabulary(): Record<string, unknown> {
     units: [...UNITS],
     namedQuantities: [...NAMED_QUANTITIES],
     adjudication: ["engine", "narration", "gm"],
+    subjects: [...SUBJECTS],
+    // Live, because it includes whatever the system and every installed module registered. Sent so the
+    // compiler picks a real id the first time instead of inventing one and being corrected for it.
+    statuses: knownStatuses(),
   };
 }
 
@@ -700,6 +921,27 @@ export function capabilityVocabulary(): Record<string, unknown> {
  * the tests depend on that, and a world that renamed its defeated status has not made "dead" safe.
  */
 export const RESERVED_STATUSES: readonly string[] = ["dead", "defeated", "slain", "destroyed"];
+
+/**
+ * Every status id this world can actually apply, from `CONFIG.statusEffects`.
+ *
+ * Read live rather than listed, because the answer includes whatever the system and every installed
+ * module registered — so a hardcoded list would reject a legitimate status the moment a table added a
+ * module, and that rejection would look like our compiler being broken.
+ *
+ * **Empty means "could not tell", and every caller must treat it as permission.** This file is bundled
+ * by the census scripts and by `node:test`, neither of which has a Foundry global; failing closed on an
+ * unreadable list would reject every status-bearing descriptor in both.
+ */
+export function knownStatuses(): string[] {
+  try {
+    const list = (globalThis as any)?.CONFIG?.statusEffects;
+    if (!Array.isArray(list)) return [];
+    return list.map((s: any) => String(s?.id ?? "")).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
 
 /** Does this rule end a creature outright? See `RESERVED_STATUSES`. */
 export function isTerminal(rule: CapabilityRule): boolean {

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.6
+
+**The Troll stops regenerating through fire, and stops shedding limbs at full health.** Both rules had
+been read correctly and compiled correctly the whole time; the conditions attached to them were being
+filed under one name and looked up under another, so every guard was silently discarded and the abilities
+fired whenever their trigger did. 576 conditions across your compiled abilities come back with this
+update. **Nothing needs recompiling** — this is money you have already spent, being read.
+
+**An ability no longer deals its damage twice.** A compiled rule that repeats damage the game already
+rolls for that ability is skipped rather than dealt again, and the compiled-abilities window says
+"would double" on it so you can see why. A genuine extra-damage rider on the same attack is unaffected.
+
+**Two new things in the compiled-abilities window.** A rule whose guard could not be understood now says
+so in English instead of quietly firing unguarded, and a rule that would double damage is badged.
+
+**Housekeeping for the compiled-ability cache.** Abilities you no longer have — a monster deleted, a
+feature renamed, or one of the general rules the module now declines to compile — leave entries behind
+that nothing could ever use. `noodlrHooks.surveyCacheHygiene()` lists them and
+`noodlrHooks.pruneOrphanedCapabilities()` removes them. Nothing is deleted without being asked, and
+anything you locked or rejected by hand is never touched.
+
+New diagnostics: `noodlrHooks.surveyCacheHygiene()`, `noodlrHooks.pruneOrphanedCapabilities()`,
+`noodlrHooks.surveyGlossary()`.
+
+
 ## 0.6.5
 
 **Monsters no longer track a hidden creature through a wall.** A rogue who hid, broke line of sight and
