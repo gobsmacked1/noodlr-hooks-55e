@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0
+
+**Abilities that recharge on a rest now do.** A compiled rule saying "regains its uses after a short
+rest" was stored, shown on the capability sheet, and never run, because nothing was listening for a
+rest. Both rest events are wired: a short rest fires the short-rest rules, and a long rest fires those
+as well as its own, which is what the rules say a long rest includes. Recovering something twice over is
+harmless - a pool already full stays full.
+
+**An ability that both recharges on a rest and is itself limited to a few uses a day gets the order
+right.** The counter that decides which day it is is advanced before any rule looks at it, so such an
+ability no longer refuses itself on the very rest that renews it.
+
+**A player resting recovers the same things the GM's monsters do.** Some of what Foundry tells us happens
+only on the computer of the person who did it, and one internal guard was treating those the same as the
+events every computer hears - so a rule that worked perfectly when the GM tested it on a monster did
+nothing at all when a player rested their own character. Nothing was reported, which is what made it
+worth finding before the rest of the trigger work is built on the same path.
+
+**A rest type from another module works with no change here.** Which of our rules a rest fires is read
+from the rest's own definition rather than from its name, so a homebrew nap that recharges short-rest
+resources fires short-rest rules.
+
 ## 0.6.9
 
 **A part-finished world recompile can be finished.** Reading every ability in a world is the expensive

@@ -10,9 +10,11 @@
 //   1. **Fail closed.** A guard that cannot be evaluated stops the rule. A rule whose effect kind has
 //      no executor stops. A quantity that will not resolve stops. Every refusal is recorded with a
 //      reason, because the capability sheet is what turns a silent non-firing into a fixable bug.
-//   2. **The primary GM alone executes.** `isGM` is a role several clients can hold, and every trigger
-//      here is a document hook that fires on all of them. Without the gate a troll summons four limbs
-//      per assistant GM.
+//   2. **A table decides who executes**, per event, and never this file by hand. A document hook
+//      arrives on every client, so `isGM` being a role several clients hold means a troll would summon
+//      four limbs per assistant GM without a gate. But `dnd5e.restCompleted` fires on the ACTING client
+//      alone, and there the same gate discards the event outright whenever a player owns the actor.
+//      `runsOn()` is the single answer; see its note in `integration/capability.ts`.
 //   3. **Nothing throws outward.** A capability is an enhancement; a broken one must not take a turn,
 //      a save or an attack down with it.
 
@@ -23,10 +25,12 @@ import {
   isExecutable,
   isStanding,
   isTerminal,
+  runsOn,
   type Capability,
   type CapabilityRule,
   type TriggerEvent,
 } from "../integration/capability";
+import { readRest } from "../system/dnd5e-rest";
 import { bindingsFor } from "./bindings";
 import { conditionsMet, type EvalContext, type Subject } from "./predicates";
 import { describePredicate, describeRule } from "./describe";
@@ -121,7 +125,9 @@ export async function fireTrigger(
   event: TriggerEvent,
   ctx: TriggerContext,
 ): Promise<RuleOutcome[]> {
-  if (!isPrimaryGM()) return [];
+  // Narrowed to one writer only where the table says so. On an acting-client event this client IS the
+  // one writer, and gating would discard every player's own rest. See `runsOn`.
+  if (runsOn(event) === "primary-gm" && !isPrimaryGM()) return [];
   const outcomes: RuleOutcome[] = [];
   const actor = ctx.self?.actor;
   if (!actor) return outcomes;
@@ -518,6 +524,10 @@ let registered = false;
  *
  * Only the events with a real hook behind them are wired. The rest are legitimate compiler output and
  * simply never fire — which the capability sheet shows as inert, rather than the module pretending.
+ *
+ * NOTHING HERE GATES ON THE CLIENT. Every listener hands straight to `fireTrigger`, which reads
+ * `runsOn()`; a second gate beside a hook is how one event drifts out of step with the table that is
+ * supposed to be the only answer to who executes.
  */
 export function registerCapabilityExecutor(): void {
   if (registered) return;
@@ -526,7 +536,6 @@ export function registerCapabilityExecutor(): void {
   // on_damage_taken. Off the ledger rather than off a Foundry hook, so the amount and the damage
   // types arrive together — which is the whole reason the ledger exists.
   onDamageTaken((event) => {
-    if (!isPrimaryGM()) return;
     void fireTrigger("on_damage_taken", {
       self: { actor: event.actor, token: tokenOf(event.actor) },
       damage: { amount: event.amount, types: event.types },
@@ -535,7 +544,6 @@ export function registerCapabilityExecutor(): void {
 
   // on_zero_hp, from the same ledger event: cheaper and more reliable than a second actor watcher.
   onDamageTaken((event) => {
-    if (!isPrimaryGM()) return;
     const hp = Number(event.actor?.system?.attributes?.hp?.value);
     if (hp !== 0) return;
     void fireTrigger("on_zero_hp", { self: { actor: event.actor, token: tokenOf(event.actor) } });
@@ -543,8 +551,11 @@ export function registerCapabilityExecutor(): void {
 
   // on_turn_start / on_turn_end. `updateCombat` reports the turn AFTER it changed, so the creature
   // whose turn just ended is read from the hook's own `changes`, not from the tracker.
+  //
+  // `onTurnChange` runs on EVERY client, which is what keeps `previousCombatant` honest — it is
+  // module-level state, and a client that skipped the bookkeeping would name the wrong creature as
+  // having just finished the first time it did participate. `fireTrigger` narrows the execution.
   Hooks.on("updateCombat", (combat: any, changes: any, _options: any, _userId: string) => {
-    if (!isPrimaryGM()) return;
     if (changes?.turn === undefined && changes?.round === undefined) return;
     void onTurnChange(combat);
   });
@@ -553,29 +564,30 @@ export function registerCapabilityExecutor(): void {
     previousCombatant = null;
   });
 
-  // Rest-scoped allowances come back. Not a trigger event — `periodStamp` derives "which rest are we
-  // after" from a counter on the actor, and nothing anywhere was bumping it, so a compiled 1/day or
-  // per-short-rest rule spent its charge once and never got it back for the rest of the campaign.
+  // on_short_rest / on_long_rest, plus the ledger bump that makes a rest-scoped allowance readable
+  // again. `periodStamp` derives "which rest are we after" from a counter on the actor, and until this
+  // was wired a compiled 1/day or per-short-rest rule spent its charge once and never got it back.
   //
-  // Deliberately NOT gated on the primary GM: `Hooks.callAll` runs only on the client that performed
-  // the rest, and that client is the one that owns the actor and can therefore write the flag. A GM
-  // gate here would mean a player's own long rest restored nothing.
+  // ORDER IS LOAD-BEARING: the counter is awaited BEFORE any rule fires, because a recovery rule
+  // carrying its own `uses: 1/long_rest` would otherwise be checked against the period that just
+  // ended and read as already spent — the ability would refuse itself on the very rest that renews it.
+  //
+  // `readRest` decides what fired and why the ledger's answer is deliberately looser. Not gated here;
+  // see the note above `registerCapabilityExecutor`.
   Hooks.on("dnd5e.restCompleted", (actor: any, result: any, config: any) => {
     if (!actor) return;
-    // dnd5e recovers per-day uses on any rest flagged as a new day, and our stamp conflates "day"
-    // with "long rest" (one counter serves both), so a new day has to bump the long counter or a daily
-    // rule never returns. The cost is that long-rest rules also come back on a new-day short rest,
-    // which is the generous direction this ledger already errs in on purpose: a creature quietly
-    // losing an ability is worse than one getting an extra use of it.
-    const long =
-      result?.type === "long" ||
-      result?.longRest === true ||
-      result?.newDay === true ||
-      config?.newDay === true;
-    void noteRest(actor, long);
+    const rest = readRest(result, config);
+    void (async () => {
+      await noteRest(actor, rest.long);
+      for (const event of rest.triggers) {
+        await fireTrigger(event, { self: { actor, token: tokenOf(actor) } });
+      }
+    })();
   });
 
-  // on_activity_use. Fires on the client that used it, so the gate inside `fireTrigger` decides.
+  // on_activity_use. The hook fires on the client that pressed the button and `runsOn` still says
+  // primary GM, so a player's own use reaches `fireTrigger` and is discarded there — a known gap with
+  // a reason, recorded at the table entry rather than worked around here.
   Hooks.on("dnd5e.postUseActivity", (activity: any) => {
     const actor = activity?.actor;
     if (!actor) return;

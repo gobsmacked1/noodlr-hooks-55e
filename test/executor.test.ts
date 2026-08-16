@@ -9,7 +9,7 @@ import {
 import { fireTrigger } from "../src/capability/executor";
 import { __clearShadow, noteRest, spendUse, usesLeft } from "../src/capability/uses";
 import { __damageLogInternals, noteTurnStart } from "../src/capability/damage-log";
-import { validateCapability, type Capability } from "../src/integration/capability";
+import { isExecutable, validateCapability, type Capability } from "../src/integration/capability";
 
 const damage = __damageLogInternals();
 
@@ -489,6 +489,66 @@ test("paying comes first, whatever order the rules are listed in", async () => {
 
 // ---- Rest ------------------------------------------------------------------------------------------
 
+/**
+ * The realistic rest specimen, and it is realistic on purpose: a census of the live cache's 25
+ * rest-triggered rules (`npm run census:rests`) found all nine engine-adjudicated ones using
+ * `recover_resource`, so a `heal` on a rest would have been a simpler fake exercising a path nothing
+ * in the world takes. The one liberty is the event: all nine are `on_long_rest`, and `on_short_rest` is
+ * used here on purpose because it is the harder case — the event a warlock depends on, and the one a
+ * LONG rest has to fire as well.
+ */
+const PACT_MAGIC: Capability = {
+  id: "hash-pact-magic",
+  label: "Pact Magic",
+  status: "compiled",
+  rules: [
+    {
+      trigger: { event: "on_short_rest" },
+      condition: [],
+      effect: { kind: "recover_resource", resource: "Pact Slots", amount: { value: 2 } },
+      adjudication: "engine",
+    },
+  ],
+};
+
+test("a compiled rest rule runs, and is badged as running", async () => {
+  const item = { name: "Pact Slots", system: { uses: { max: 2, spent: 2 } } } as any;
+  item.update = async (data: any) => {
+    item.system.uses.spent = data["system.uses.spent"];
+  };
+  const actor = { ...troll(), items: [item] };
+  assert.deepEqual(validateCapability(PACT_MAGIC), { ok: true, errors: [], warnings: [] });
+  assert.equal(
+    isExecutable(PACT_MAGIC.rules[0]),
+    true,
+    "the trigger is wired, so the capability sheet must not call it inert",
+  );
+
+  bindCapabilities(actor.uuid, [{ capability: PACT_MAGIC }]);
+  const outcomes = await fireTrigger("on_short_rest", { self: { actor } });
+  assert.equal(outcomes[0].fired, true, outcomes[0].reason);
+  assert.equal(item.system.uses.spent, 0);
+});
+
+test("…and recovering twice over is a no-op rather than an overflow", async () => {
+  // The double-fire hazard, measured before it was designed around: two capabilities in the live cache
+  // carry an `on_short_rest` AND an `on_long_rest` rule for the same mechanic, so a long rest runs both.
+  // `adjustUses` clamps, which makes the redundancy free — the second recovery reports "already at 2"
+  // and changes nothing. Were that clamp ever removed this would be a compiler bug with teeth.
+  const item = { name: "Pact Slots", system: { uses: { max: 2, spent: 2 } } } as any;
+  item.update = async (data: any) => {
+    item.system.uses.spent = data["system.uses.spent"];
+  };
+  const actor = { ...troll(), items: [item] };
+  bindCapabilities(actor.uuid, [{ capability: PACT_MAGIC }]);
+
+  await fireTrigger("on_short_rest", { self: { actor } });
+  const again = await fireTrigger("on_short_rest", { self: { actor } });
+  assert.equal(item.system.uses.spent, 0, "no negative spend, no pool above its maximum");
+  assert.equal(again[0].fired, false);
+  assert.match(String(again[0].reason), /already at 2/);
+});
+
 test("a rest gives a rest-scoped allowance back, and the short one does not refresh the daily", async () => {
   // Every stamp here is derived from a counter on the actor, and nothing was bumping it — so a 1/day
   // rule spent its charge once and stayed spent for the campaign. `noteRest` is what the
@@ -555,6 +615,25 @@ test("only the primary GM executes, or every assistant summons their own limbs",
   bindCapabilities(actor.uuid, [{ capability: REGENERATION }]);
   (globalThis as any).game.users.activeGM = { id: "gm-2" };
   assert.deepEqual(await fireTrigger("on_turn_start", { self: { actor } }), []);
+});
+
+test("…but an acting-client event is not narrowed, or a player's own rest recovers nothing", async () => {
+  // The mirror of the test above, and the reason the gate reads a table rather than one flag.
+  // `dnd5e.restCompleted` arrives on the client that rested, which for a character IS the player — so
+  // the same gate that stops four assistant GMs summoning four limbs would discard every rest the
+  // party takes, silently, on a table where the identical rule works for the GM's monsters.
+  const item = { name: "Pact Slots", system: { uses: { max: 2, spent: 2 } } } as any;
+  item.update = async (data: any) => {
+    item.system.uses.spent = data["system.uses.spent"];
+  };
+  const actor = { ...troll(), items: [item] };
+  bindCapabilities(actor.uuid, [{ capability: PACT_MAGIC }]);
+  (globalThis as any).game.user = { isGM: false, id: "player-1" };
+  (globalThis as any).game.users.activeGM = { id: "gm-1" };
+
+  const outcomes = await fireTrigger("on_short_rest", { self: { actor } });
+  assert.equal(outcomes[0]?.fired, true, outcomes[0]?.reason);
+  assert.equal(item.system.uses.spent, 0);
 });
 
 test("a rule left to the GM is reported, never performed", async () => {

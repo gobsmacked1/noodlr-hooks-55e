@@ -211,11 +211,11 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 Diagnostics: `api.surveyPrimitives()`, `api.surveyCapabilities()`, `api.surveyScene()` (what this
 scene WOULD ask about and what the cache already answers), `api.compileScene()`, `api.openCapabilities()`.
 
-### Five of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
+### Seven of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
 
 `registerCapabilityExecutor()` attaches a hook to `on_damage_taken`, `on_zero_hp`, `on_turn_start`,
-`on_turn_end` and `on_activity_use`. The other twelve never fire. That is fine and was always the
-design — the compiler is offered all seventeen because "the cloak recharges on a long rest" is a true
+`on_turn_end`, `on_activity_use` and — since v0.7.0 — `on_short_rest` and `on_long_rest`. The other ten
+never fire. That is fine and was always the design — the compiler is offered all seventeen because "the cloak recharges on a long rest" is a true
 reading whether or not this build listens for one, and a vocabulary that hid the unheard events would
 teach the model to mis-file rules rather than skip them.
 
@@ -228,11 +228,12 @@ the worst version of this bug: the intent was written down, believed, and never 
 `WIRED_TRIGGERS` in `integration/capability.ts`, checked first in `isExecutable()`, which feeds the
 sheet badge, the `runs` column of `api.surveyCapabilities()` and the executor's own refusal from one
 place. **Wiring a new hook means adding its event to that list in the same change**, or the sheet will
-go on calling a working rule dead — the inverse failure, and the harder one to notice.
+go on calling a working rule dead — the inverse failure, and the harder one to notice. As of v0.7.0 the
+list is DERIVED from the `WIRED` table below, so there is no longer a way to wire one and forget.
 
 This is the same principle as the ownership resolver, arriving from the other direction: there we made
 a rule that had stood aside say so, and here a rule that cannot fire. `always` is answered by query
-instead (see `capability/standing.ts`), and `on_short_rest` / `on_long_rest` are still correctly inert.
+instead (see `capability/standing.ts`).
 
 **A rest-scoped USE is a different thing from a rest TRIGGER, and conflating the two hid a real bug for
 two months (v0.4.2).** `periodStamp` derives "which rest are we after" from a counter on the actor, and
@@ -246,7 +247,8 @@ dead end nobody re-opens.**
 
 - Wired on `dnd5e.restCompleted`, and **not** gated on the primary GM. `Hooks.callAll` runs only on the
  client that performed the rest, and that client is the one that owns the actor and can therefore write
- the flag; a GM gate would mean a player's own long rest restored nothing.
+ the flag; a GM gate would mean a player's own long rest restored nothing. **That was true of the
+ listener and false of the executor for four days** — see the next section.
 - **A new day bumps the long counter even on a short rest**, because one counter serves both `day` and
  `long_rest` and dnd5e recovers per-day uses on any rest flagged `newDay`. That refreshes long-rest
  rules slightly early, which is the generous direction `readLedger` already errs in on purpose.
@@ -254,6 +256,67 @@ dead end nobody re-opens.**
  future "tidy up by deleting stale entries" fails rather than losing a use spent before a reload.
 - A table that narrates a long rest without opening the rest dialog gets no recovery, which is the same
  limitation dnd5e's own item uses have. Consistent, and worth saying out loud.
+
+### One gate served two opposite kinds of hook, and the rests are what exposed it (v0.7.0, 2026-08-16)
+
+Wiring the two rest triggers was supposed to be the cheapest possible proof of the dispatch path, since the
+hook was already listened to. It was cheap and it found a live defect one layer down. **`fireTrigger` opens
+with `if (!isPrimaryGM()) return []`, and that single line is correct for four of the five wired events and
+wrong for the other one**, because the two kinds of hook feeding it need opposite treatment:
+
+- A **document** hook (`updateCombat`, and our own damage ledger, which is maintained on every client
+ because the amount is only computable from `updateActor`) arrives everywhere. `isGM` is a role several
+ clients hold, so without narrowing a troll summons one limb per assistant GM. That is what the gate is
+ for and it has earned itself.
+- A **client-local** hook fires on the acting client alone. `Hooks.callAll("dnd5e.restCompleted")` runs on
+ whoever rested and `dnd5e.postUseActivity` on whoever pressed the button — so there the same gate narrows
+ nothing, it **discards the event outright whenever a player owns the actor**, which for rests and ability
+ uses is most of the time. A player's own long rest would recover nothing and announce nothing, on a table
+ where the identical rule visibly works for the GM's monsters.
+
+**THE FAILURE IS SILENT AND ASYMMETRIC, WHICH IS WHY IT WOULD HAVE BEEN REPORTED AS SOMETHING ELSE.** There
+is no error, and the rule works when the GM tests it — the two conditions that reliably send a diagnosis to
+the wrong place. The pre-existing note directly above this section made the same mistake in prose: it
+recorded, correctly, that the *listener* is not GM-gated, and never asked what happened downstream of it.
+**A note that a hook is ungated says nothing about who executes**, and the two were four days out of step.
+
+- **`runsOn(event)` in `integration/capability.ts` is the single answer, and `WIRED_TRIGGERS` is DERIVED
+ from the same table.** That is the structural half of the fix: adding a hook IS declaring who executes
+ it, and the previous shape — a list of wired events here, a gate in the executor, a comment in each — had
+ three places to keep in step and no way to notice when they were not. Every redundant `isPrimaryGM()`
+ beside a hook registration is gone; the executor's doctrine header now says nothing gates locally.
+- **`on_activity_use` stays on the primary GM DELIBERATELY, and it is still a gap.** It is client-local
+ like the rests, so widening it is one word — and the reason not to is that an activity can reach every
+ effect kind there is. `summon_creature` and `insert_combatant` need world rights a player has not got,
+ so a wider gate trades a silent non-firing for a **partial** one: the spend lands on the player's own
+ sheet and the summon beside it is refused. Partial is worse than nothing, because nothing is at least
+ consistent. The fix is a relay to the primary GM — `util/queries.ts` already carries one for Influence
+ — and it is Phase 5 work, not a flag flip. Recorded at the table entry so the next reader finds the
+ reason at the line rather than here.
+- **The rests are on the acting client ON EVIDENCE, not on hope.** `npm run census:rests`
+ (`scripts/peek-rest-rules.mjs`) over the live 1,099-capability cache: **25 rest-triggered rules, and all
+ nine engine-adjudicated ones are a `recover_resource` on the resting creature's own item** — precisely
+ what that client has rights to write. The other sixteen are `gm` or `narration` and mutate nothing. So
+ the permission question was answered by measurement before the switch was flipped, which is the check
+ `on_activity_use` cannot pass.
+- **A long rest fires BOTH events and that is safe because `adjustUses` clamps.** Two capabilities in the
+ live cache (Regurgitate, Pact Magic) carry a short-rest rule and a long-rest rule for the same mechanic,
+ so a long rest runs both; the second reports "already at 2" and changes nothing. Pinned by a test,
+ because were that clamp ever removed this becomes a double-recovery with no symptom.
+- **ORDER IS LOAD-BEARING: `noteRest` is awaited BEFORE any rule fires.** `periodStamp` derives "which
+ rest are we after" from the counter that `noteRest` writes, so a recovery rule carrying its own
+ `uses: 1/long_rest` would otherwise be checked against the period that just ended and read as already
+ spent — **the ability would refuse itself on the very rest that renews it.**
+- **`readRest` in `system/dnd5e-rest.ts` reads `CONFIG.DND5E.restTypes[type].recoverPeriods` rather than
+ comparing the type's name.** dnd5e's own `long` entry is `["lr", "sr"]`, which is the system stating the
+ inclusion this dispatch depends on instead of us assuming it — and a rest type another module registers
+ then works with no change here. The name comparison survives as the fallback, and **the fallback has to
+ restate the inclusion** (`isLong || type === "short"`), or a long rest on a world whose CONFIG cannot be
+ read stops recharging short-rest abilities: the exact failure the event exists to prevent, reintroduced
+ in the branch nobody exercises. Caught by a test, not by review.
+- Why it is worth wiring at all, given the yield: `on_long_rest` is **9** runnable rules in the
+ whole-world census, not the 2 the biased subset suggested. Small, real, and the cheapest confirmation
+ available that the dispatch path works before the expensive triggers are built on it.
 
 ### What the enabled-module audit gave the compiler (2026-08-11)
 
@@ -2288,13 +2351,8 @@ active (12.8%)** — 32 executable and 49 standing facts.
   `on_save_failed` 24, `on_activity_use` 14, `on_attack_roll` 4, `on_save_succeeded` 4,
   `on_long_rest` 2. The 22 `always` rules in that column are NOT waiting on a hook — they are standing
   claims whose effect kind is outside `STANDING_EFFECTS`, so they are genuinely inert.
-- **THOSE NUMBERS ARE FROM THE PRE-v0.7.2 DOCTRINE AND THE ORDERING ARGUMENT THEY CARRY NO LONGER HOLDS.**
-  A full-world recompile on 2026-08-16 took `on_hit` to **2** and `on_save_failed` to **5** over the same
-  145 wordings, because the v0.7.2 doctrine pushed `adjudication: "engine"` from 137 rules to 29. The three
-  things that release set out to fix all landed (plural guards → 0, unresolvable subjects → 0, restated
-  damage lines 66 → 29); the yield fell fivefold alongside. **Re-measure before ordering Phase 3 work** —
-  the full reasoning, the likely cause and the caveat about the floating model slug are in
-  [noodlr's AGENTS.md](../noodlr-main/AGENTS.md) under "the three fixes cost more than they bought".
+- **THOSE NUMBERS ARE FROM THE PRE-v0.7.2 DOCTRINE. SUPERSEDED — see the whole-world census below,
+  which reverses the ordering they carry.**
 - **`npm run census:subset` exists because the two caches were not the same population.** A recompile
   answers only for wordings the collector still asks about, and 62 of 1,022 failed on provider 403s, so the
   post-recompile cache held 1,038 entries of which 78 of the original 223 still carried the OLD descriptor.
@@ -2311,6 +2369,57 @@ active (12.8%)** — 32 executable and 49 standing facts.
   so it cannot cost more than a bare recompile. It is therefore idempotent — run it repeatedly and it
   converges on the gap, spending nothing on what already landed. **`compiledBy.at` is stamped by
   `noodlr-main` at answer time**, not by us, so this depends on the compiler having filled it in.
+
+### The whole world on one doctrine, and why the subset comparison read the opposite (2026-08-16)
+
+The gap was closed — the 62 were re-asked once the key's spend guardrail was lifted, and the cache now holds
+**1,022 wordings all answered by the same doctrine**, zero left on the old one. Censusing that is the first
+measurement this repo has ever had that is neither a mixed cache nor a small subset, and **it reverses the
+conclusion drawn from the subset that morning.**
+
+| | pruned, pre-v0.7.2 | whole world, v0.7.2 |
+| --- | --- | --- |
+| reachable rules | 631 | **2,358** |
+| rules that RUN | 32 (5.1%) | **163 (6.9%)** |
+| standing facts | 49 | 44 |
+| `other` | 136 (21.6%) | 676 (28.7%) |
+| unresolvable-subject predicates | 105 in 83 rules | **23 in 22 rules** |
+
+- **BOTH READINGS ARE HONEST AND THEY ANSWER DIFFERENT QUESTIONS, which is the whole lesson.** The subset
+  is the clean controlled comparison — same 145 wordings, two doctrines — and on that population the new
+  doctrine really is more conservative. But those 145 are the wordings that happened to be on scenes
+  somebody had loaded, which is a bench of hand-picked test monsters with unusually rich mechanical prose;
+  they are not a sample of a world. Per rule, the runnable density went **up**, 5.1% → 6.9%.
+- **A CONTROLLED COMPARISON ON AN UNREPRESENTATIVE POPULATION IS STILL UNREPRESENTATIVE.** `census:subset`
+  was built that morning to stop a population mismatch producing a false improvement, and it worked; what
+  it could not do is stop a *biased* population producing a false regression. **Report the controlled
+  delta and the absolute baseline together, or one of them will be quoted alone.**
+- **`engine` is not `runs`, and conflating them is what made the subset read as fivefold.** That census
+  counted `adjudication: "engine"` (137 → 29). Running additionally needs a wired trigger and an
+  executable effect, and most of that 137 hung off triggers this build does not dispatch. Two different
+  measures, one of them four times larger, and only one of them is what Phase 3 is scored against.
+
+**THE PHASE 3 ORDERING FLIPS.** `on_save_failed` **81**, `on_hit` **46**, `on_activity_use` 24,
+`always` 16, `on_save_succeeded` 14, `on_long_rest` 9, `on_attack_roll` 6, `on_move` 4, `on_enter_area` 2,
+`on_condition_applied` 2. Saves now lead hits by nearly two to one, the reverse of the 36/24 that put
+`on_hit` first — and `readSave` already exists, so the cheaper build is also now the higher-yield one.
+`on_long_rest` at 9 is real yield rather than the 2 that made it look like a wiring proof only.
+
+**The subject whitelist worked, and what it left behind is a different shape than predicted.** 105 → 23,
+and `"caster"` ×20 — the entire basis of the planned aliasing — **is gone from the histogram**. What
+remains sorts into three kinds, and only the first is an aliasing job:
+
+- **Possessives meaning `self`:** `owner` ×6, `user`, `ability user`, `source`. The aliasing todo stands,
+  narrowed to these.
+- **Role descriptors meaning `trigger`:** `saving creature` ×2, `moving creature`, `acting creature`,
+  `damaged creature`. Cheaper than aliasing and more general — the doctrine should say that the creature
+  an event is ABOUT is `trigger`, since every one of these is the model correctly identifying that
+  creature and having no word for it.
+- **NOT CREATURES AT ALL:** `rod` ×4, `weapon` ×2, `chosen location`. A genuine vocabulary gap of the
+  same class as `secondary target` — a subject axis that only enumerates creatures cannot express a rule
+  about the implement or the spot. Fold into the `secondary-map` work rather than aliasing it away.
+- Two proper names (`Beholder Zombie`, a player character) are the model naming a specific creature from
+  the prose. Nothing to alias; the doctrine's example object is the fix and it is already shipped.
 
 ### The compiler was reading the ability's own damage line back to us (v0.6.6)
 

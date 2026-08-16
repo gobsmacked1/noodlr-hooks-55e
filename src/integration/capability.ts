@@ -58,24 +58,77 @@ export const TRIGGER_EVENTS = [
 export type TriggerEvent = (typeof TRIGGER_EVENTS)[number];
 
 /**
- * The subset of {@link TRIGGER_EVENTS} that `registerCapabilityExecutor()` attaches a real hook to.
+ * Which client runs the executor for a wired trigger.
+ *
+ * THIS IS NOT A DETAIL OF THE WIRING, IT IS THE DIFFERENCE BETWEEN A RULE FIRING AND NOT FIRING, and
+ * it is a question about the hook rather than about the rule. `isGM` is a role several clients hold,
+ * so a trigger carried by a *document* hook arrives everywhere and has to be narrowed to one writer or
+ * a troll summons a limb per assistant GM. But several of the system's hooks fire on the ACTING client
+ * alone — `dnd5e.postUseActivity` and `dnd5e.restCompleted` both do — and there the same gate narrows
+ * nothing: it discards the event outright whenever a player owns the actor, which for rests and
+ * ability uses is most of the time. A player's own long rest would recover nothing and announce
+ * nothing, silently, on a table where the identical rule works for the GM's monsters.
+ *
+ * So the answer is declared per event and {@link WIRED_TRIGGERS} is DERIVED from this table rather
+ * than written beside it: adding a hook IS declaring who executes, and there is no way to wire one
+ * without answering the question.
+ *
+ * `acting-client` is not merely permitted, it is the only client that can act: it owns the actor by
+ * construction. What it may NOT be able to do is mutate the world — creating a token or a combatant
+ * needs rights a player does not have — and that is why the answer is per event rather than derived
+ * from the hook automatically. A refusal there is caught by `fireTrigger`'s own try/catch and recorded
+ * as a non-firing with its reason, so it is a logged refusal rather than a broken turn; it is still a
+ * refusal, which is the whole reason `on_activity_use` stays on the primary GM for now.
+ */
+export type RunsOn = "primary-gm" | "acting-client";
+
+/**
+ * The subset of {@link TRIGGER_EVENTS} that `registerCapabilityExecutor()` attaches a real hook to,
+ * each with the client that executes it.
  *
  * The compiler is deliberately offered all seventeen: "the troll regenerates at the start of its turn"
  * and "the cloak recharges on a long rest" are both true readings of the prose, and a vocabulary that
  * hid the events this build cannot hear would teach the model to mis-file rules rather than to skip
- * them. This list is the other half of that bargain — a rule whose event never fires is badged inert
+ * them. This table is the other half of that bargain — a rule whose event never fires is badged inert
  * instead of being shown as live.
  *
  * Wiring a new hook in `capability/executor.ts` means adding its event here in the same change, or the
  * sheet will go on calling a working rule dead.
  */
-export const WIRED_TRIGGERS: readonly TriggerEvent[] = [
-  "on_damage_taken",
-  "on_zero_hp",
-  "on_turn_start",
-  "on_turn_end",
-  "on_activity_use",
-];
+const WIRED: Partial<Record<TriggerEvent, RunsOn>> = {
+  // Off our own damage ledger, which is maintained on every client because the amount is only
+  // computable from `updateActor` and that fires everywhere.
+  on_damage_taken: "primary-gm",
+  on_zero_hp: "primary-gm",
+  // `updateCombat` is a document hook: every client sees the turn change.
+  on_turn_start: "primary-gm",
+  on_turn_end: "primary-gm",
+  // A CLIENT-LOCAL HOOK DELIBERATELY LEFT ON THE GM, which means a player's own ability use still
+  // fires nothing. Not an oversight and not the rests' situation: an activity can reach every effect
+  // kind there is, including `summon_creature` and `insert_combatant`, and those need world rights a
+  // player has not got — so widening this gate trades a silent non-firing for a partial one, where
+  // the spend lands on the player's own sheet and the summon beside it is refused. The fix is a relay
+  // to the primary GM (`util/queries.ts` already carries one for Influence), not a wider gate.
+  on_activity_use: "primary-gm",
+  // `Hooks.callAll("dnd5e.restCompleted")` on the client that rested, i.e. usually a player. Safe to
+  // run there on evidence rather than on hope: every engine-adjudicated rest rule in the live cache is
+  // a `recover_resource` on the resting creature's own item (`npm run census:rests`), which is exactly
+  // what that client has rights to.
+  on_short_rest: "acting-client",
+  on_long_rest: "acting-client",
+};
+
+export const WIRED_TRIGGERS: readonly TriggerEvent[] = Object.keys(WIRED) as TriggerEvent[];
+
+/**
+ * Which client runs the executor for `event`.
+ *
+ * Defaults to `primary-gm` for anything unwired, which is the conservative answer: an unwired event is
+ * never dispatched at all, and an event added without a table entry gates rather than fanning out.
+ */
+export function runsOn(event: TriggerEvent): RunsOn {
+  return WIRED[event] ?? "primary-gm";
+}
 
 /** Units a quantity can be in. `hp` and `temp_hp` are separate because they are spent differently. */
 export const UNITS = [
