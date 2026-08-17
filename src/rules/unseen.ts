@@ -32,6 +32,7 @@
 import { log } from "../constants";
 import { blocked, centerOf } from "../core/positioning";
 import { hasStatus, isIncapacitated } from "../system/dnd5e-conditions";
+import { separation } from "./sight";
 import { evades } from "./stealth";
 
 export interface SightModifiers {
@@ -39,27 +40,10 @@ export interface SightModifiers {
   disadvantage: string[];
 }
 
-/** Scene-unit distance between two tokens, elevation included. */
-export function separation(a: any, b: any): number {
-  const p1 = centerOf(a);
-  const p2 = centerOf(b);
-  if (!p1 || !p2) return Number.POSITIVE_INFINITY;
-  const grid: any = (canvas as any)?.grid;
-  const size = Number(grid?.size) || 100;
-  const perSquare = Number(grid?.distance) || 5;
-  let horizontal = (Math.hypot(p2.x - p1.x, p2.y - p1.y) / size) * perSquare;
-  try {
-    if (typeof grid?.measurePath === "function") {
-      const measured = Number(grid.measurePath([p1, p2])?.distance);
-      if (Number.isFinite(measured)) horizontal = measured;
-    }
-  } catch {
-    /* the fallback above already holds a usable number */
-  }
-  const rise =
-    Number((b?.document ?? b)?.elevation ?? 0) - Number((a?.document ?? a)?.elevation ?? 0);
-  return Math.hypot(horizontal, Number.isFinite(rise) ? rise : 0);
-}
+// Scene-unit distance between two tokens, elevation included. Re-exported rather than implemented:
+// this file used to carry a second copy under the same name, which measured the same pair differently
+// from `sight.ts` on any scene with a diagonal rule. One question, one implementation.
+export { separation };
 
 /**
  * Can `spotter` see `subject`? Returns the reason it cannot, or null when it can.

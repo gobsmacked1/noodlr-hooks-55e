@@ -166,6 +166,7 @@ export function registerCombatSettings(): void {
   split(COMBAT_SETTINGS.counterspell, "Counterspell", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.ready, "Ready", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.barbs, "Barbs", Boolean, { npc: true, pc: true });
+  split(COMBAT_SETTINGS.sneak, "Sneak", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.legendaryResistance, "LegendaryResistance", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
@@ -539,6 +540,20 @@ export function isReadyEnabled(subject: unknown): boolean {
  */
 export function isBarbsEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.barbs, subject);
+}
+
+/**
+ * Is a qualifying hit offered its Sneak Attack?
+ *
+ * The subject is the ATTACKER, which is the other way round from the three settings above and is the
+ * right reading for this one: those hold a roll open and are governed by whoever is being delayed, while
+ * this offers a creature damage it has earned and is governed by the creature offered.
+ *
+ * Both start on. Nothing happens unless the conditions of the rule are met, and the alternative to a
+ * prompt is what the table already has — a feature on a sheet that everybody forgets.
+ */
+export function isSneakEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.sneak, subject);
 }
 
 /**

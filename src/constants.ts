@@ -97,6 +97,15 @@ export const COMBAT_SETTINGS = {
    * a broken setting.
    */
   legendaryResistance: "combat.legendaryResistance",
+  /**
+   * Per audience. Whether a qualifying hit offers Sneak Attack to whoever plays the rogue.
+   *
+   * Split by the ATTACKER, unlike the two settings above it, and for the opposite reason to theirs: those
+   * hold somebody's roll open, so the delayed creature owns the column, while this offers a creature its
+   * own damage and the creature offered is the one the column is about. A table running the party by hand
+   * and the bestiary automatically is the case it serves.
+   */
+  sneak: "combat.sneak",
   /** Whether condition combat math (adv/disadv, auto-fail, crit-on-hit, incapacitated) is applied. */
   conditions: "combat.conditions",
   /** Per audience. Whether dropping to 0 HP applies Unconscious/Dead and damage-at-0 death failures. */
@@ -129,6 +138,7 @@ export const SPLIT_COMBAT_SETTINGS = [
   COMBAT_SETTINGS.counterspell,
   COMBAT_SETTINGS.ready,
   COMBAT_SETTINGS.barbs,
+  COMBAT_SETTINGS.sneak,
 ] as const;
 
 /** The registered key for one side of a split setting. */

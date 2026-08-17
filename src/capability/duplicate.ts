@@ -21,7 +21,7 @@
 import type { CapabilityRule } from "../integration/capability";
 
 /** One `damage.parts` entry, as much of `DamageData` as we read. */
-interface PartLike {
+export interface PartLike {
   formula?: unknown;
   number?: unknown;
   denomination?: unknown;
@@ -77,15 +77,28 @@ export function activityDamage(activity: unknown): DamageClaim[] {
   const claims: DamageClaim[] = [];
   for (const raw of parts as PartLike[]) {
     if (!raw || typeof raw !== "object") continue;
-    // The getter when the model is live, reconstructed when it is plain data — a descriptor may be
-    // compared against an activity read from source, and `custom.formula` wins there as it does there.
-    const formula = raw.custom?.enabled
-      ? canonicalFormula(raw.custom.formula)
-      : canonicalFormula(raw.formula ?? automaticFormula(raw));
+    const formula = canonicalFormula(partFormula(raw));
     if (!formula) continue;
     claims.push({ formula, types: typesOf(raw.types) });
   }
   return claims;
+}
+
+/**
+ * What one damage part rolls, verbatim.
+ *
+ * Uncanonicalised on purpose: this is the string that gets handed to `Roll`, so `@scale.rogue.sneak-attack`
+ * has to survive intact. `canonicalFormula` is applied on top of it wherever two formulas are being
+ * COMPARED, and never where one is about to be evaluated.
+ *
+ * The getter when the model is live, reconstructed when it is plain data — a descriptor may be compared
+ * against an activity read from source, and `custom.formula` wins there as it does there.
+ */
+export function partFormula(part: PartLike): string {
+  if (part?.custom?.enabled) return String(part.custom.formula ?? "");
+  const live = part?.formula;
+  if (live !== undefined && live !== null && String(live)) return String(live);
+  return automaticFormula(part);
 }
 
 /** `DamageData#_automaticFormula`, for the plain-data case where the getter is absent. */

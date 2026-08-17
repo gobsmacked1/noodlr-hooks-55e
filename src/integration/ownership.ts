@@ -43,6 +43,7 @@ import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { midiPromptsReactions } from "../system/dnd5e-reactions";
 import { gambitsOwnsCounterspell } from "../system/dnd5e-counterspell";
 import { gambitsOwnsBarbs } from "../system/dnd5e-barbs";
+import { cprMaySneak } from "../system/dnd5e-sneak";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 
@@ -253,6 +254,22 @@ const AREAS: Area[] = [
               "gains Advantage — and it runs through Midi QoL, which is installed. Two windows on one " +
               "success would ask twice and could reroll twice. Ours automates the reroll only; the " +
               "Advantage half is whatever your copy of the spell carries as an effect.",
+          }
+        : null,
+  },
+  {
+    id: "sneak",
+    setting: COMBAT_SETTINGS.sneak,
+    contender: () =>
+      cprMaySneak()
+        ? {
+            by: "Chris's Premades",
+            note:
+              "Its Sneak Attack macro adds the dice on Midi QoL's damage-bonus pass, and both are " +
+              "installed. That runs whether or not midi is applying damage, so this stands aside " +
+              "PER ROGUE — a creature whose feature CPR has claimed is skipped, and one it never " +
+              "touched is still offered. Theirs also reads the 2014 ally clause (an enemy of the " +
+              "target) where ours reads the printed 2024 one (one of your allies).",
           }
         : null,
   },
@@ -525,6 +542,7 @@ export function advisories(): Advisory[] {
   }
 
   out.push(...capabilityAdvisories());
+  out.push(...sneakAdvisories());
   out.push(...systemSettingAdvisories());
   out.push(...sceneAdvisories());
 
@@ -567,6 +585,42 @@ function capabilityAdvisories(): Advisory[] {
           "is what dispatches a compiled ability's on-hit and on-miss rules. A bite compiled to " +
           "poison the creature it hits will not fire. Turn triggers, damage-taken, rests and " +
           "standing facts are unaffected.",
+    });
+  } catch {
+    // Reading a setting is not worth taking the advisory list down for.
+  }
+  return out;
+}
+
+/**
+ * The same coupling as the one above, for a rule that ships rather than one that is compiled.
+ *
+ * Sneak Attack is offered from inside the auto-damage layer for exactly the reason the on-hit triggers
+ * are: that layer holds the only answer to "did this connect". So the switch a GM turns on says
+ * "offer Sneak Attack" and, with automatic damage off, nothing ever will.
+ *
+ * Separate from `capabilityAdvisories` rather than folded into it because that one is gated on the
+ * compiler being enabled, and this rule has nothing to do with the compiler. Merging them would hide
+ * this warning from every table that never turned compilation on — which is most of them.
+ */
+function sneakAdvisories(): Advisory[] {
+  const out: Advisory[] = [];
+  try {
+    if (!AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.sneak, a)))) return out;
+    const damages = AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.autoDamage, a)));
+    if (damages && !midiOwnsDamage()) return out;
+    out.push({
+      level: "warn",
+      title: "Sneak Attack will never be offered",
+      detail: midiOwnsDamage()
+        ? "Midi QoL is applying damage, so this module never reads whether an attack connected — and " +
+          "that reading is what decides whether a hit qualifies. Chris's Premades implements Sneak " +
+          "Attack on midi's damage-bonus pass, so with both installed a rogue whose feature it has " +
+          "claimed is already covered; one it has not is offered by nobody."
+        : "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
+          "is what decides whether a hit qualifies for Sneak Attack. The switch is on and no rogue " +
+          "will ever be asked. Pressing the feature from the sheet still works exactly as it always " +
+          "did.",
     });
   } catch {
     // Reading a setting is not worth taking the advisory list down for.

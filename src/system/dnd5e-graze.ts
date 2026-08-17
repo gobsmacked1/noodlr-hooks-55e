@@ -18,6 +18,7 @@
 // This is also the only honest reading available: there is no "graze damage" field anywhere to roll.
 
 import { masteryOf } from "../rules/cards";
+import { weaponDamageType } from "./dnd5e-damage";
 
 /** What Graze deals on one miss. */
 export interface Graze {
@@ -44,27 +45,4 @@ export function grazeDamage(attack: any, item: any, activity: any): Graze | null
   if (!Number.isFinite(mod) || mod <= 0) return null;
 
   return { amount: Math.floor(mod), type: weaponDamageType(activity, item) };
-}
-
-/**
- * "The same type dealt by the weapon."
- *
- * The activity's first damage part is the reading, and `types` is a Set because a weapon may offer a choice
- * (a trident dealing piercing, a versatile club, a magic weapon offering its own type). Where there is a
- * choice we take the first rather than asking: a prompt for the damage type of a 3-point graze is worse
- * than being occasionally wrong about which of two physical types it was.
- *
- * An unreadable type is "" rather than a guess. `Actor5e#applyDamage` treats an unknown type as untyped,
- * which is the correct failure — it skips resistance rather than inventing an immunity.
- */
-function weaponDamageType(activity: any, item: any): string {
-  const parts = activity?.damage?.parts ?? [];
-  for (const part of parts) {
-    const types = part?.types;
-    const first = types?.first?.() ?? (types instanceof Set ? [...types][0] : undefined);
-    if (first) return String(first);
-  }
-  const fallback = item?.system?.damage?.base?.types;
-  const one = fallback?.first?.() ?? (fallback instanceof Set ? [...fallback][0] : undefined);
-  return one ? String(one) : "";
 }

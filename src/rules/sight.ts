@@ -34,7 +34,7 @@
 
 import { log } from "../constants";
 import { isStealthEnabled } from "../settings";
-import { measureBetween } from "../core/positioning";
+import { centerOf, measureBetween } from "../core/positioning";
 import { evades } from "./stealth";
 
 /** Sight range assumed for a creature whose token has vision switched off and no stated senses. */
@@ -69,12 +69,26 @@ export function releaseVision(cache: VisionCache): void {
   cache.clear();
 }
 
-/** Distance between two tokens in scene units, through the one shared measurement. */
+/**
+ * Distance between two tokens in scene units, elevation included, through the one shared measurement.
+ *
+ * THE ONE ANSWER, and it had to be made so: `unseen.ts` carried a second `separation` of the same name
+ * that reimplemented `measureBetween` inline and added the rise, while this one used the shared
+ * measurement and dropped it. Two functions, one name, two answers about a flying creature — the same
+ * shape as the two answers to "can X see Y" and the two answers to "how far is that", both of which this
+ * repo has already paid for. `unseen.ts` re-exports this rather than keeping a copy.
+ *
+ * `a.center` is preferred over `centerOf` where the placeable offers it, because a Token's own getter
+ * accounts for a footprint the document's width alone does not.
+ */
 export function separation(a: any, b: any): number {
-  const p1 = a?.center;
-  const p2 = b?.center;
+  const p1 = a?.center ?? centerOf(a);
+  const p2 = b?.center ?? centerOf(b);
   if (!p1 || !p2) return Number.POSITIVE_INFINITY;
-  return measureBetween(p1, p2);
+  const horizontal = measureBetween(p1, p2);
+  const rise =
+    Number((b?.document ?? b)?.elevation ?? 0) - Number((a?.document ?? a)?.elevation ?? 0);
+  return Math.hypot(horizontal, Number.isFinite(rise) ? rise : 0);
 }
 
 /**

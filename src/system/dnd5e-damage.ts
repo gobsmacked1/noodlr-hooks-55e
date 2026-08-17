@@ -116,3 +116,30 @@ export async function applyDamageTo(
 export function hasHitPoints(actor: any): boolean {
   return typeof hpOf(actor)?.value === "number";
 }
+
+/**
+ * "The same type dealt by the weapon."
+ *
+ * Here rather than beside either of its callers because two rules now need it — Graze deals the ability
+ * modifier "of the same type dealt by the weapon", and Sneak Attack's extra dice are the weapon's type
+ * too — and a second copy of this reading is the divergence this repo keeps finding.
+ *
+ * The activity's first damage part is the answer, and `types` is a Set because a weapon may offer a choice
+ * (a trident dealing piercing, a versatile club, a magic weapon offering its own type). Where there is a
+ * choice we take the first rather than asking: a prompt for the damage type of a 3-point graze is worse
+ * than being occasionally wrong about which of two physical types it was.
+ *
+ * An unreadable type is "" rather than a guess. `Actor5e#applyDamage` treats an unknown type as untyped,
+ * which is the correct failure — it skips resistance rather than inventing an immunity.
+ */
+export function weaponDamageType(activity: any, item: any): string {
+  const parts = activity?.damage?.parts ?? [];
+  for (const part of parts) {
+    const types = part?.types;
+    const first = types?.first?.() ?? (types instanceof Set ? [...types][0] : undefined);
+    if (first) return String(first);
+  }
+  const fallback = item?.system?.damage?.base?.types;
+  const one = fallback?.first?.() ?? (fallback instanceof Set ? [...fallback][0] : undefined);
+  return one ? String(one) : "";
+}

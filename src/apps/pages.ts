@@ -680,6 +680,16 @@ const BARBS_ROW: Row = {
   ownership: "barbs",
 };
 
+const SNEAK_ROW: Row = {
+  id: "sneak",
+  label: "NOODLRHOOKS.Combat.Sneak.Name",
+  hint: "NOODLRHOOKS.Combat.Sneak.Hint",
+  state: "live",
+  setting: C.sneak,
+  kind: "boolean",
+  ownership: "sneak",
+};
+
 const READY_ROW: Row = {
   id: "ready",
   label: "NOODLRHOOKS.Combat.Ready.Name",
@@ -735,6 +745,7 @@ const PER_SIDE_STATE: Section = {
         REACTION_PROMPT_ROW,
         COUNTERSPELL_ROW,
         BARBS_ROW,
+        SNEAK_ROW,
         READY_ROW,
       ],
     },
@@ -750,6 +761,7 @@ const PER_SIDE_STATE: Section = {
         REACTION_PROMPT_ROW,
         COUNTERSPELL_ROW,
         BARBS_ROW,
+        SNEAK_ROW,
         READY_ROW,
       ],
     },

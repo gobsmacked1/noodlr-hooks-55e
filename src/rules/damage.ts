@@ -40,6 +40,7 @@ import { fireAttackTriggers } from "../capability/attack";
 import { offerReaction } from "./offer";
 import { considerBarbs } from "./barbs";
 import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
+import { offerSneakAttack } from "./sneak";
 import {
   activityOf,
   damageParts,
@@ -328,6 +329,12 @@ async function barbsWindow(message: any, reading: HitReading, attacker: any): Pr
  * reaction window, so a Shield that turned a hit into a miss has already moved the creature and the
  * poison follows the verdict rather than the die. Before the flag, so everything a rider does has landed
  * by the time the Damage button opens.
+ *
+ * SNEAK ATTACK IS THE ONE THING THAT GOES AFTER THE FLAG, and it is the only exception because it is the
+ * only one that ASKS. Everything above is deterministic and finishes in a tick; the Sneak Attack dialog
+ * can sit on a player's screen for the whole six-second countdown, and holding the Damage button shut for
+ * that long would read exactly like the lock having jammed. Its damage arrives as its own card with its
+ * own undo, so nothing is lost by it landing a moment after the weapon's.
  */
 async function settleAttack(message: any, reading: HitReading): Promise<void> {
   const grazed = await applyGraze(message, reading);
@@ -337,6 +344,21 @@ async function settleAttack(message: any, reading: HitReading): Promise<void> {
   if (reading.hits.length > 0) verdict = "hit";
   else if (reading.missed.length > 0) verdict = grazed ? "graze" : "miss";
   await noteVerdict(message, verdict);
+
+  const sneak = await offerSneakAttack(message, reading);
+  if (sneak) {
+    await applyRolledDamage(
+      message,
+      [
+        {
+          doc: sneak.target,
+          multiplier: 1,
+          note: game.i18n.localize("NOODLRHOOKS.Combat.Sneak.Note"),
+        },
+      ],
+      [{ value: sneak.total, type: sneak.damageType, properties: new Set<string>() }],
+    );
+  }
 }
 
 /**

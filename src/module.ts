@@ -48,6 +48,7 @@ import { registerReactionHooks } from "./rules/reactions";
 import { registerReactionOffers, surveyOffers } from "./rules/offer";
 import { surveyCounterspell } from "./rules/counterspell";
 import { surveyBarbs } from "./rules/barbs";
+import { registerSneakOffers, registerSneakWatch, surveySneak } from "./rules/sneak";
 import { registerReady, registerReadyExpiry, surveyReady } from "./rules/ready";
 import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
@@ -134,6 +135,7 @@ export interface NoodlrHooksApi {
   surveyOffers(): unknown;
   surveyCounterspell(): unknown;
   surveyBarbs(): unknown;
+  surveySneak(): unknown;
   surveyReady(): unknown;
   surveyLegendary(): unknown;
   surveyConditions(): unknown;
@@ -252,6 +254,8 @@ const api: NoodlrHooksApi = {
   surveyCounterspell: () => surveyCounterspell(),
   /** Who could spoil the selected creature's next good roll, and whether anything is holding one open. */
   surveyBarbs: () => surveyBarbs(),
+  /** Whether the selected creature would be offered Sneak Attack, who is asked, and what has spent it. */
+  surveySneak: () => surveySneak(),
   /** What the selected creature is holding, for what trigger, and whether a compiler is listening. */
   surveyReady: () => surveyReady(),
   /** What the selected creature has left to resist with, and how much damage would be worth asking about. */
@@ -415,6 +419,12 @@ Hooks.once("ready", () => {
   // as Influence: the GM detects the trigger, and the client that owns the sheet draws the prompt, spends
   // the reaction and rolls it.
   registerReactionOffers();
+  // Sneak Attack, same shape and for the same reason: the GM's client reads the hit, and the rogue's own
+  // client draws the dialog and rolls `@scale.rogue.sneak-attack` against its own roll data.
+  registerSneakOffers();
+  // And the feature being pressed from the sheet is watched everywhere, because the press happens on
+  // whichever client owns the rogue and the turn has to be marked spent from there.
+  registerSneakWatch();
   // A readied action is released by whoever owns the creature, for the same reason. Registered on every
   // client because the addressee is decided by who is playing, not by who noticed the trigger.
   registerReady();

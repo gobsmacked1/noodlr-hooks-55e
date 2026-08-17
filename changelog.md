@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.2
+
+**Sneak Attack is offered when it is earned, and only then.** Foundry has always shipped the feature with
+working dice; what it has never done is check whether the rogue qualified, or remind anyone the moment has
+arrived. Now a hit that carries Advantage, or that lands beside one of the rogue's conscious allies, with a
+Finesse or Ranged weapon, puts a short timed prompt on the rogue's own screen. Taking it rolls the dice on
+that player's client, under their own name, and the damage is applied with the usual receipt and undo. The
+prompt defaults to yes, because the dice come back next turn either way.
+
+**Once per turn, counted properly.** A rogue who has already dealt Sneak Attack this turn is not asked
+again - including when they dealt it by pressing the feature on their own sheet, which is watched for. A
+fresh turn in the initiative order restores it, so an opportunity attack on somebody else's turn is a new
+opportunity. Out of combat it is not limited, because there is no turn to restore it.
+
+**It stands aside for Chris's Premades, per rogue, and says so.** Where that module has claimed a
+particular rogue's Sneak Attack, we do not offer a second one. A rogue it has not claimed is still offered.
+And if automatic damage is off, or Midi QoL is applying damage, nothing here can read whether an attack
+connected - the settings window now warns that the switch is on and no rogue will ever be asked, rather
+than leaving it to be discovered at the table.
+
+**A compiled Sneak Attack rule no longer stacks on top of it.** The same protection that stops a compiled
+ability restating the weapon's own damage now covers this: while we are dealing the dice, a compiled damage
+rule on the same feature is declined and the capability sheet says why. If the offer is switched off and
+nothing else is handling it, the compiled rule is left to do its job.
+
 ## 0.7.1
 
 **A compiled ability that does something when it hits now does it.** This is the largest group of

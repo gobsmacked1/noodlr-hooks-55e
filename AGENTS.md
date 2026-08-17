@@ -375,6 +375,93 @@ in a way nothing on the descriptor resolves.
  different question from `speakerToken`, which this dispatch uses. Consolidating it touches perception and
  readying and is not required by anything here.
 
+### Sneak Attack, and the refusal predicate proved in the allow direction (v0.7.2, 2026-08-16)
+
+`rules/sneak.ts` + `system/dnd5e-sneak.ts`. Built alongside `on_hit` deliberately, because it is the one
+mechanic where the compiler and a hand-written layer can both plausibly claim the same feature, and the
+release that dispatches attack riders is the release where that stops being hypothetical.
+
+**The system already rolls this and nobody presses it.** dnd5e ships Sneak Attack as a real feature with a
+real damage activity carrying `@scale.rogue.sneak-attack`, so the dice were never missing. Two things are:
+the button is equally pressable on a turn where none of the conditions hold, and it is forgotten. Identical
+finding to the damage tray, the concentration save and the legendary resistance, and the reason all four
+layers exist.
+
+- **It owns the DECISION and nothing else.** `readSneak` reads the conditions off the swing — Advantage on
+ the roll, or an ally of the target within 5 feet with the attacker not at Disadvantage, plus a Finesse or
+ Ranged weapon — and everything downstream is the person holding the sheet answering a prompt.
+- **THE DICE ARE ROLLED ON THE ROGUE'S OWN CLIENT, which is why this crosses a wire at all.**
+ `@scale.rogue.sneak-attack` resolves through that actor's roll data, the player sees their own dice, and
+ the roll is posted under their name rather than appearing as something the GM did to them. Only the total
+ comes back. Same `askUser` routing as the reaction offers, and the transport timeout is comfortably longer
+ than the dialog's countdown or a slow reader is reported as having declined.
+- **`offerSneakAttack` RETURNS an award; it does not apply one.** `damage.ts` calls in here and nothing here
+ calls back, which keeps the dependency one-way — a cycle between two files this size works under ESM right
+ up until somebody moves an initialiser to module scope. It lands down the same path graze takes, so the
+ receipt and the undo come free.
+- **Once per turn means once per ANY turn**, so this does not use the action ledger's `stampFor` — that
+ answers "which of this creature's own turns is live", and a rogue who has used Sneak Attack on their turn
+ may legitimately use it again on an opportunity attack during somebody else's. The stamp is the current
+ slot in the initiative order, whoever owns it, and nothing is ever cleared: a stamp from another turn reads
+ as absent. **Out of combat it is unlimited**, deliberately — there is no turn to clear a lockout, and a
+ flag that never expires is the stale state this repo keeps paying for.
+- **The item's own button records the spend too** (`registerSneakWatch`, on `dnd5e.postUseActivity`).
+ Observation, not interception: the activity resolves exactly as it always did. Without it, a rogue who
+ pressed the feature would be offered a second one on the next hit — double damage in the name of
+ convenience.
+- **The clock defaults to YES**, which is the prompt layer's one rule applied rather than an exception to
+ it: the resource renews every turn, so a missed dialog costs that turn's damage and nothing that was being
+ saved. Asked rather than applied because 2024 Cunning Strike spends these dice on riders and half a dozen
+ subclass features hang off the "when you deal Sneak Attack damage" moment — none of it modelled here, and
+ none of it ours to decide.
+
+**`sneakClaimedNatively()` is the point of the exercise.** A compiled `damage` rule on this feature is
+refused while we are dealing it, and the capability sheet says why.
+
+- **`duplicate.ts` CANNOT SEE THIS CASE, which is why a second refusal exists at all.** That guard compares a
+ rule's dice against the activity's `damage.parts`, and the specimen that produced this work is a feature
+ hollowed out to a Utility with no parts at all — so the descriptor's `2d6` matches nothing, is correctly
+ allowed, and lands on top of the offer. Same class of duplication, invisible from that angle.
+- **Measured before building: all eleven compiled Sneak Attack wordings in the reference world are
+ `adjudication: "gm"`**, so nothing doubles today. The model reading "once per turn, if you have Advantage"
+ as a human's decision is the model being right. This is the guard for the release where a better doctrine
+ makes one of them `engine` — which would otherwise be silent, because the only symptom is arithmetic.
+- **NOTHING IS REFUSED WHEN NEITHER WE NOR CHRIS'S PREMADES IS DEALING IT.** A table that switched the offer
+ off and compiled the feature deliberately has exactly one thing dealing the dice, and refusing there would
+ leave nothing dealing them — the failure that reads as the compiler having been paid for nothing. This is
+ the allow direction, and it is the half a refusal predicate gets wrong.
+- Only `damage`. A `grant_capability` describing the feature costs nothing and feeds the prompt.
+- **`runRule` takes the originating item for this**, so the refusal is asked with the feature in hand;
+ `describe.ts` asks the same predicate statically, so it is a badge on the sheet rather than a line in a
+ console somebody sees once. Same doctrine as the duplicate-damage refusal beside it.
+
+**Where it stands down, and all three say so.** Everything here is reached from `settleAttack`, which only
+runs when this module applies damage — so with auto-damage off the switch reads ON and no rogue is ever
+asked. `sneakAdvisories()` reports that, and reports midi owning damage. Per rogue, `cprAutomatesSneak()`
+stands aside for Chris's Premades, whose macro adds the dice on midi's damage-bonus pass; the ownership
+resolver names it. **Chris's outranks our own switch** in `sneakClaimedNatively`, because its macro deals the
+dice whether our offer is on or off.
+
+Three readings worth not re-deriving.
+
+- **`D20Roll.options.advantageMode` survives serialisation** (set during evaluation at
+ `d20-roll.mjs:216-220`), so the attack MESSAGE is the authority on whether the swing had Advantage. Never
+ the actor's current state, which has moved on by the time damage is rolled, and which the client being
+ asked may not even hold.
+- **THE 2024 ALLY CLAUSE IS NOT THE 2014 ONE, and Chris's Premades still reads the older sentence.** 2014
+ said "another ENEMY OF THE TARGET is within 5 feet of it"; 2024 says "at least one of YOUR ALLIES", not
+ Incapacitated. Foundry has no concept of an alliance, so disposition is the approximation: an ally is a
+ token sharing the ATTACKER'S disposition, with the attacker and the target both excluded. CPR's macro is
+ `findNearby(target, 5, {disposition: 'enemy'})` while being labelled `rules: '2024'`. The two agree on
+ every ordinary fight and part company on a charmed creature — theirs qualifies it, ours does not, and ours
+ errs toward refusing the bonus, which is the recoverable direction.
+- **The weapon test requires a POSITIVE reading**, which is the one place this errs strict rather than
+ generous. The generous direction offers Sneak Attack on a maul whenever the properties cannot be read, and
+ a prompt that appears on every swing gets clicked through — at which point the rogue is dealing damage
+ they did not earn and nothing says so.
+
+Diagnostics: `api.surveySneak()`.
+
 ### What the enabled-module audit gave the compiler (2026-08-11)
 
 From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from source.

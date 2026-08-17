@@ -52,6 +52,7 @@ import { duplicatesActivityDamage, duplicatesItemDamage } from "./duplicate";
 import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
+import { sneakClaimedNatively } from "../rules/sneak";
 
 // ---- Firing -------------------------------------------------------------------------------------
 
@@ -173,7 +174,7 @@ export async function fireTrigger(
         continue;
       }
       try {
-        const outcome = await runRule(capability, rule, index, ctx);
+        const outcome = await runRule(capability, rule, index, ctx, binding.item);
         if (!outcome.fired && rule.effect?.kind === "spend_resource") {
           unpaid = outcome.reason ?? "the resource could not be spent";
         }
@@ -204,6 +205,8 @@ async function runRule(
   rule: CapabilityRule,
   index: number,
   ctx: TriggerContext,
+  /** The feature the prose came from, where the binding knows it. Read only to refuse. */
+  item?: any,
 ): Promise<RuleOutcome> {
   const label = capability.label;
   const no = (reason: string): RuleOutcome => ({
@@ -225,6 +228,13 @@ async function runRule(
     return no("a compiled rule may not kill; a creature at 0 hit points is the dying layer's");
   }
   if (!isExecutable(rule)) return no("no executor for this effect or one of its guards");
+
+  // A rule whose effect a hand-written layer of this module already performs. Same shape as the
+  // terminal refusal above and for the same reason: the descriptor is a true reading, and running it
+  // beside the layer that owns the mechanic doubles it silently.
+  const claimed = sneakClaimedNatively(rule, item);
+  if (claimed) return no(claimed);
+
   if (!POSTHUMOUS.includes(rule.trigger?.event as TriggerEvent) && isDefeated(ctx.self)) {
     return no("the creature is out of the fight");
   }
