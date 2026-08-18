@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.8
+
+**A compile request now names the model Noodlr will ask.** The slug lives in Noodlr's Text Generation
+window, not here — this module just reads it so a batch can say which model is about to stamp the
+answer. No new setting and nothing on any window here changed.
+
 ## 0.7.7
 
 **NPC saving throws now roll themselves.** Hold Person on a monster posted the usage card and then

@@ -134,6 +134,8 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 - `src/integration/contract.ts` — `requestCompile()`, protocol **2**. Same `callAll` + `waitFor` +
   `handled` shape as `requestBehavior`, with one deliberate difference: it hands over a **batch**, so
   the listener can run a whole scene concurrently instead of one feature at a time.
+  The optional `model` on that request is Noodlr's compile slug (`api.capabilityModel()`), not the
+  chatbot's — this module never stores one of its own.
 - `src/capability/cache.ts` — file-backed shards under `worlds/<id>/assets/noodlr-hooks-55e/capabilities/`
  (install-wide `assets/` before v0.7.4, and that tree is never read — see the multi-world note),
   in-memory `Map` warmed at ready, keyed by normalized prose hash.

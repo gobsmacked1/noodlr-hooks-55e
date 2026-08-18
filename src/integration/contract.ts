@@ -179,6 +179,12 @@ export interface CompileRequest {
    * Anything absent simply was not compiled, which is a normal answer and never an error here.
    */
   compiled: Record<string, unknown>;
+  /**
+   * The compile slug, read from noodlr's Text Generation field. Absent when noodlr is not
+   * installed. The listener holds the key and may ignore this; it is how this module names
+   * the model that will stamp `compiledBy` without owning a second slug of its own.
+   */
+  model?: string;
   /** Register asynchronous work; this module waits for it before reading `compiled`. */
   waitFor(promise: Promise<unknown>): void;
   /** Set by a listener that took the batch on, so a second one does not pay for it again. */
@@ -187,6 +193,24 @@ export interface CompileRequest {
 
 function systemId(): string {
   return String((game as any)?.system?.id ?? "");
+}
+
+/**
+ * The slug noodlr will compile with, fetched from its public API.
+ *
+ * This module holds no credentials and no compile setting of its own. noodlr owns both; we only
+ * read the name so a request can say which model is about to be asked. An older noodlr without
+ * `capabilityModel` is treated as unset — the listener still compiles from its own field.
+ */
+function capabilityModelOf(): string {
+  try {
+    const api = (game.modules.get("noodlr") as { api?: { capabilityModel?: () => string } } | undefined)
+      ?.api;
+    if (typeof api?.capabilityModel !== "function") return "";
+    return String(api.capabilityModel() ?? "").trim();
+  } catch {
+    return "";
+  }
 }
 
 /** Collects listener promises so a synchronous hook can still carry asynchronous work. */
@@ -281,6 +305,7 @@ export async function requestCompile(
 ): Promise<Record<string, unknown>> {
   if (items.length === 0) return {};
   const { pending, waitFor } = collector();
+  const model = capabilityModelOf();
   const payload: CompileRequest = {
     module: "noodlr-hooks-55e",
     systemId: systemId(),
@@ -289,6 +314,7 @@ export async function requestCompile(
     items,
     compiled: {},
     waitFor,
+    ...(model ? { model } : {}),
   };
   try {
     Hooks.callAll("noodlrHooks.compile", payload);
