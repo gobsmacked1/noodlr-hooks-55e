@@ -46,7 +46,14 @@ import { promptChoice } from "../util/prompt";
 import { speakerFor } from "../util/speaker";
 import { askUser, registerQuery } from "../util/queries";
 import { isDnd5e } from "../system/dnd5e-rewards";
-import { cprAutomatesSneak, isSneakFeature, readSneak, sneakFeature } from "../system/dnd5e-sneak";
+import {
+  cprAutomatesSneak,
+  isSneakFeature,
+  qualifyingWeapon,
+  readSneak,
+  sneakFeature,
+  sneakFormula,
+} from "../system/dnd5e-sneak";
 import { activityOf, itemOf, speakerToken, type HitReading } from "./cards";
 import type { CapabilityRule } from "../integration/capability";
 
@@ -303,16 +310,36 @@ async function resolveUuid(uuid: string): Promise<any> {
   }
 }
 
+/**
+ * Everything that decides whether this creature will ever be offered Sneak Attack.
+ *
+ * THE TWO LINES THAT MATTER MOST ARE THE DICE AND THE WEAPONS, and neither was here. Both gaps failed in
+ * the same silent direction: `sneakFormula` returns "" for a feature hollowed out to a Utility on an actor
+ * whose class scale is named something other than `sneak-attack`, and `qualifyingWeapon` demands a POSITIVE
+ * reading of Finesse or Ranged — so a rogue with the feature present, the setting on, nobody else
+ * automating and nothing spent would read as perfectly healthy and never be asked. `spent: false` is
+ * indistinguishable from a working rogue who has not hit anything yet.
+ *
+ * The weapon line also settles a promise the code had already made: `qualifyingWeapon`'s own doc says its
+ * refusal "is quiet and is reported by `api.surveySneak()`", and it was not. Same class of fault as
+ * `WIRED_TRIGGERS` badging an unwired rule active — the intent written down, believed, never implemented.
+ *
+ * Flat, one fact per line, per the rule that a diagnostic returning an object has reported nothing.
+ */
 export function surveySneak(): unknown {
   const token: any = (canvas as any)?.tokens?.controlled?.[0];
   const actor = token?.actor;
   if (!actor) return { note: "select a token" };
   const feature = sneakFeature(actor);
+  const formula = feature ? sneakFormula(actor, feature) : "";
+  const weapons = qualifyingWeapons(actor);
   const lines = [
     `module: ${MODULE_ID}`,
     `creature: ${String(token?.name ?? "")}`,
     `setting (${COMBAT_SETTINGS.sneak}): ${isSneakEnabled(actor) ? "on" : "off"}`,
     `feature: ${feature ? String(feature.name) : "NONE — nothing to offer"}`,
+    `dice: ${formula ? `${formula}${describeFormula(actor, formula)}` : "NONE — no damage part and no class scale named sneak-attack, so nothing would be rolled"}`,
+    `qualifying weapons: ${weapons.length ? weapons.join(", ") : "NONE — needs a Finesse or Ranged weapon, and the test requires a positive reading"}`,
     `chris-premades automates it: ${feature && cprAutomatesSneak(feature) ? "YES — we stand aside" : "no"}`,
     `turn stamp: ${turnStamp() || "(out of combat — unlimited)"}`,
     `spent this turn: ${sneakSpent(actor) ? "yes" : "no"}`,
@@ -320,6 +347,42 @@ export function surveySneak(): unknown {
   ];
   console.log(lines.join("\n"));
   return { creature: String(token?.name ?? ""), spent: sneakSpent(actor) };
+}
+
+/**
+ * What the dice come out as right now, appended to the formula so a scale reference is legible.
+ *
+ * `@scale.rogue.sneak-attack` tells a reader nothing about whether the actor is level 3 or 17, and the
+ * failure this line exists to catch is a reference that resolves to nothing at all.
+ */
+function describeFormula(actor: any, formula: string): string {
+  if (!formula.includes("@")) return "";
+  try {
+    const resolved = (globalThis as any).Roll?.replaceFormulaData?.(
+      formula,
+      actor?.getRollData?.() ?? {},
+    );
+    const text = String(resolved ?? "").trim();
+    return text && text !== formula
+      ? ` (resolves to ${text})`
+      : " (UNRESOLVED — the reference is dead)";
+  } catch {
+    return " (UNRESOLVED — the reference could not be read)";
+  }
+}
+
+/** The equipped weapons this creature could Sneak Attack with, named so a strict refusal is diagnosable. */
+function qualifyingWeapons(actor: any): string[] {
+  const found: string[] = [];
+  for (const item of actor?.items ?? []) {
+    if (String(item?.type) !== "weapon" || item?.system?.equipped === false) continue;
+    for (const activity of item?.system?.activities ?? []) {
+      if (!qualifyingWeapon(item, activity)) continue;
+      found.push(String(item.name));
+      break;
+    }
+  }
+  return found;
 }
 
 function nameOf(userId: string | null): string {

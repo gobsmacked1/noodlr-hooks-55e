@@ -161,9 +161,9 @@ export interface NoodlrHooksApi {
   undoDying(): Promise<number>;
   surveyPrimitives(): unknown;
   surveyCapabilities(): unknown;
-  surveyScene(): unknown;
+  surveyScene(): Promise<unknown>;
   surveyStanding(): unknown;
-  surveyOrphans(): unknown;
+  surveyOrphans(): Promise<unknown>;
   pruneOrphans(options?: { includeAbsent?: boolean }): Promise<unknown>;
   compileScene(): Promise<unknown>;
   recompileWorld(options?: { since?: number }): Promise<unknown>;

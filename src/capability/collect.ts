@@ -842,11 +842,31 @@ export function registerCapabilityCollector(): void {
     schedule(doc.parent, 1500);
   });
 
+  // THE CANVAS IS ALREADY DRAWN BY THE TIME WE GET HERE, so the hook above has missed the only
+  // `canvasReady` of this page load and would not fire again until the GM changed scene or dropped a
+  // token. Core awaits `initializeCanvas()` at `game.mjs:784` and calls `ready` at `:787`; this module
+  // registers from `ready`, so on every fresh load the listener is one moment too late.
+  //
+  // Without this, NOTHING COMPILED IS BOUND: no `cache.warm()`, no bindings, so every descriptor is
+  // inert and the action ledger cannot see a compiled Multiattack. It is silent, it reads exactly like
+  // the compiler having been paid for nothing, and it survived because the usual way to notice a
+  // capability is to drop the creature that carries it — which fires `createToken` and warms the cache
+  // as a side effect. A GM who loads a world onto a scene already populated gets none of it.
+  if ((canvas as any)?.ready) schedule((canvas as any).scene);
+
   log("capability collector registered");
 }
 
-/** Diagnostics: what this scene would ask about, without asking. */
-export function surveyScene(): Record<string, unknown> {
+/**
+ * Diagnostics: what this scene would ask about, without asking.
+ *
+ * WARMS THE CACHE FIRST, because reading `cache.has` against a cache nobody has loaded reports every
+ * wording as uncached — which is an instrument answering the opposite of the truth, and the answer it
+ * gives is the alarming one. It cost a day: a full cache of 1,099 descriptors read as empty and was
+ * diagnosed as a data loss. Warming is idempotent and costs nothing once the collector has run.
+ */
+export async function surveyScene(): Promise<Record<string, unknown>> {
+  await cache.warm();
   const actors = actorsOn();
   const distinct = new Map<
     string,

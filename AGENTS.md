@@ -211,6 +211,37 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 Diagnostics: `api.surveyPrimitives()`, `api.surveyCapabilities()`, `api.surveyScene()` (what this
 scene WOULD ask about and what the cache already answers), `api.compileScene()`, `api.openCapabilities()`.
 
+### NOTHING COMPILED WAS BOUND ON A FRESH PAGE LOAD (v0.7.5, 2026-08-17)
+
+The whole capability layer was inert on load, for eight days, silently. `registerCapabilityCollector()`
+listens for `canvasReady` and is called from `Hooks.once("ready")` — and **core awaits
+`initializeCanvas()` at `game.mjs:784` and calls `ready` at `:787`**, so the only `canvasReady` of the
+page load has already fired by the time the listener exists. No collect, therefore no `cache.warm()`, no
+bindings: 1,099 compiled descriptors on disk and an empty `Map` in front of them, so every rule that runs
+off a binding did nothing and the action ledger could not see a compiled Multiattack.
+
+- **It survived because the way anybody notices a capability is to drop the creature that carries it**,
+  and `createToken` fires, schedules a collect and warms the cache as a side effect. Every test of this
+  feature has ever been "place the monster, watch the rule" — which repairs the state it should have been
+  measuring. **A GM who loads a world onto a scene that is already populated gets none of it**, and that
+  is the ordinary case at a table.
+- **Generalisable, and this repo will meet it again: a module registering from `ready` has already missed
+  every hook core fires during startup.** The fix is a catch-up — `if (canvas?.ready) schedule(canvas.scene)`
+  — not an earlier registration, because the collector needs `game.settings` and the compile listener. Any
+  future listener for a setup-phase hook needs the same pairing, and the hook alone reads as sufficient.
+- **The diagnostics could not see it either, and one of them was actively reassuring.** `surveyScene()`
+  reported `cached` from `cache.has` against an unwarmed cache, so a full cache read as **0 cached, 109
+  would ask**; `findOrphans()` walked an empty `Map` and reported nothing to prune. Both now `await
+  cache.warm()`, which is idempotent and free once the collector has run. **An instrument that reports the
+  opposite of the truth costs more than no instrument** — this one turned a wiring bug into a day spent
+  looking for a data loss that had not happened.
+- `findOrphans`, `surveyOrphans` and `surveyScene` are `async` as a consequence, and the API types with
+  them. `pruneOrphans` over an empty cache deletes nothing, so the bug had no destructive symptom and
+  nothing but a wrong number to notice it by — which is the other half of why it lasted.
+- Both halves are pinned in `test/collect.test.ts`, and each was checked by removing the fix and watching
+  its own test fail. A test that passes with the bug in place certifies nothing, and both of these would
+  have: the fakes warm the cache incidentally, exactly as dropping a token does.
+
 ### Nine of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
 
 `registerCapabilityExecutor()` attaches a hook to `on_damage_taken`, `on_zero_hp`, `on_turn_start`,
@@ -2464,6 +2495,25 @@ certain and that asymmetry is the design:**
 - **Nothing runs automatically.** A sweep on scene load would eventually delete something paid for, and
   quietly. The GM presses the button having read what it would take.
 
+#### THE CACHE IS PER INSTALL AND `absent` IS ANSWERED PER WORLD (2026-08-17)
+
+Sharpened the moment a second test world appeared on the reference host — smaller, different scenes,
+different PCs and NPCs, deliberately varied to make testing obvious. The shards live under the shared
+`assets/` tree while `findOrphans` reads only `game.actors` and the loaded scenes, so **every wording
+belonging to the other world is `absent` in this one**, and `pruneOrphans({includeAbsent: true})` would
+have deleted most of a 1,022-wording cache bought over 87 minutes of real credit. The compendium caveat
+above understates this badly: it reads as a corner case about unplaced monsters, and the real exposure is
+routine multi-world hosting.
+
+- **A large `absent` count on a fresh world is the expected reading, not a finding.** Say so before
+  anybody acts on it, because the number is alarming and the safe action is to do nothing.
+- **The sharing is a benefit in the other direction and is why the design stays.** Templated trait prose
+  is byte-identical across creatures (one wording covers 270 of them), so a new world inherits every hit
+  its predecessor paid for — Regeneration, Pack Tactics and friends are already answered for monsters this
+  world has never seen. Scoping the cache per world would buy safety by re-purchasing the corpus.
+- **`includeAbsent` is therefore a switch for a single-world install and nothing else.** Its default is
+  the whole safety property; do not add a caller that passes it, and do not put it on a button.
+
 ### The honest baseline, and the two ways 12.4% was wrong at once (v0.6.6)
 
 `npm run census:yield -- <cache-dir>` is the measurement everything in the roadmap is scored against,
@@ -2542,6 +2592,12 @@ conclusion drawn from the subset that morning.**
   counted `adjudication: "engine"` (137 → 29). Running additionally needs a wired trigger and an
   executable effect, and most of that 137 hung off triggers this build does not dispatch. Two different
   measures, one of them four times larger, and only one of them is what Phase 3 is scored against.
+- **THE WORLD IS PART OF THE POPULATION, and the reference host has had a second one since 2026-08-17.**
+  Every number above is the *first* world's roster; the cache is shared per install but which of its
+  wordings are reachable is answered per world (see the hygiene note). So a re-census on the smaller test
+  world is a different population and **its yield may not be read as a delta against this table** — the
+  same trap `census:subset` exists to close, on an axis that tool cannot see. Record which world a census
+  was taken in, or the next comparison is unfalsifiable.
 
 **THE PHASE 3 ORDERING FLIPS.** `on_save_failed` **81**, `on_hit` **46**, `on_activity_use` 24,
 `always` 16, `on_save_succeeded` 14, `on_long_rest` 9, `on_attack_roll` 6, `on_move` 4, `on_enter_area` 2,
@@ -3897,6 +3953,100 @@ Recorded because they will be reported again.
       likely false bug report we will ever receive into a line a GM can read. **The midi namespace
       has to be matched as a grammar, not a list** — `setupMidiFlags()` generates several thousand
       keys by looping attack types × abilities × damage types.
+
+### And in the reference world it is CHRIS'S PREMADES, not DDB Importer (measured 2026-08-16)
+
+The note above is correct about DDB Importer and it sent the investigation to the wrong module. The
+operator's reasonable fear — every DDB-imported object in the world was fetched while Midi QoL was
+enabled, so all of it is now inert and everything must be re-imported and re-compiled — **is not
+supported by that world's data, and the re-import would have fixed nothing.** Measured live through
+the harness rather than inferred:
+
+- **4 actors carry a DDB flag and ZERO of 2,430 items do.** The four are the player characters.
+  **Chris's Premades has replaced essentially every item on them**: 47 of 48, 131 of 135, 74 of 76,
+  134 of 138 carry `flags["chris-premades"]`, and 441 CPR items exist world-wide. So the DDB
+  provenance was overwritten on the items, and a DDB re-import would replace CPR's versions rather
+  than repair them.
+- **The whole midi residue on actors is 22 items, 20 of them CPR's.** The other two are the
+  Legendary Resistance feature on the Adult White Dragon and the Beholder, which `rules/legendary.ts`
+  now automates natively. Nothing there is DDB's.
+- **`character-update-policy-add-midi-effects` is ALREADY `false`.** The two still on are the
+  *munching* policies, and nothing in the world was munched: 202 of 206 actors have no DDB flag and
+  came from the active premium modules (`dnd-monster-manual`, `dnd-players-handbook`, …). Flipping
+  them is cheap hygiene for future munches and repairs nothing already present.
+- **The nine world items named `Class Features` / `Conditions` / `Magic Items` / `Other` / `Spells`
+  plus their `- Backup` copies are DFreds Convenient Effects libraries**, type `weapon`, `prose=0`.
+  Their midi change keys are inert exactly as this file already records for CE 9.2.5; their
+  `statuses` arrays are real and uninvolved.
+- **THE COMPILE CACHE IS UNAFFECTED, which is the expensive half of the fear.** `surveyScene()` on a
+  scene holding the Troll and the 135-item rogue reports **109 distinct wordings, 109 cached, 0
+  would ask**. The cache key is normalised prose and CPR does not rewrite descriptions, so the 1,022
+  compiled wordings need no re-scrutiny.
+- **THE REAL INERTNESS IS CPR'S AND IT IS NOT FIXABLE BY ANY IMPORT.** Its entry points route
+  through `MidiQOL.Workflow.getWorkflow()` and `MidiQOL.socket()`, so with midi gone 441 items'
+  automation does nothing. The remedies are reinstalling midi or this module covering the rules,
+  which is the project. Every stand-aside here that gates on `chris-premades` AND midi
+  (`gambitsOwnsCounterspell` and friends) is right for exactly this reason.
+- **The transferable lesson is about attribution, not about either module.** "Content was imported by
+  X and X writes Y's flags" is an inference; `Object.keys(item.flags)` is a measurement, and the two
+  disagreed here because a *third* module had rewritten the items in between. **Read the flag
+  namespaces off the documents before believing any provenance story** — including one told by the
+  person who did the importing. And check the spelling: DDB Importer's actor namespace in this world
+  is `ddb-importer`, not the `ddbimporter` the first probe looked for, so the first census reported a
+  reassuring zero for the wrong reason. Same class of fault as the meta-notes census.
+- Consequence for the compiler's read side: **the Hold Person asymmetry is CPR's doing.** The copies
+  on the two casters are CPR items with an EMPTY `statuses` array and a `flags.midi-qol.OverTime`
+  change, while stock dnd5e's Hold Person carries `[paralyzed]` natively. So a refusal predicate for
+  `apply_status` has to be **per item**, like `duplicatesActivityDamage` — a per-descriptor refusal
+  would decline the one copy that is the only thing applying the condition.
+
+### A second world answered the same question the opposite way round, and found the real residue (2026-08-17)
+
+The reference host now carries **two** worlds. `noodlr-test` is smaller and deliberately varied — different
+scenes, 13 freshly DDB-imported player characters (one per class), **and a different module set: midi off,
+Chris's Premades ABSENT, AC5e absent, DAE and Convenient Effects and Token Magic active.** So the reassuring
+answer above does not transfer: there is no CPR here to have overwritten anything, and all **1,823 items on
+those 13 sheets carry a DDB flag**. This is the world the original fear described, and it was re-measured
+from scratch rather than assumed to be covered.
+
+- **THE MIDI RESIDUE IS COSMETIC, AND THE NUMBER THAT SETTLES IT IS `OverTime` = 0.** 1,302 of 1,823 items
+  carry `flags["midi-qol"]`, which is what makes the namespace count so alarming and so useless. Censusing
+  the KEYS rather than the namespace: `removeAttackDamageButtons: "default"` ×1,176 and `forceCEOff: true`
+  ×1,476 are the whole of it, and neither is a rule. **The load-bearing residue is SIX items** — four
+  `reactionCondition`, one `effectCondition`, one `effectActivation` — which are inert and are gates rather
+  than effects, so their failure mode is a reaction offered slightly too readily. **A re-import buys back
+  six conditions and costs every sheet plus the RAG corpus.** Not worth it, and now measured in two worlds
+  by two independent routes.
+- **Generalise the method, not the verdict: `Object.keys(flags)` is a provenance question and the KEYS
+  INSIDE are the capability question, and only the second one can tell you whether anything is broken.**
+  Both censuses of this family have been wrong at first pass by reading the outer layer — the previous world
+  by attributing CPR's items to DDB, this one by reading 1,302 namespace hits as 1,302 inert automations.
+- **THE ACTUAL LOSS IS DAE `specialDuration`, 196 DECLARATIONS, AND IT IS NOT FIXABLE BY RE-IMPORTING.**
+  DDB writes that key whenever DAE is present, which it is. Confirmed at runtime rather than inferred:
+  **`DAE.daeSpecialDurations` is an empty object**, because DAE registers the vocabulary only when midi is
+  active (`DAEdnd5e.ts:632`) and every interesting value is checked inside midi. So `turnStartSource` ×59
+  (Absorb Elements, Booming Blade), the twenty `isSkill.*` variants ×~120 (Guidance), `1Attack:*` ×8
+  (Frostbite), `isSave` ×5, `isDamaged` ×2 all mean nothing: **the effect applies correctly and then never
+  expires.** A player keeps Guidance's bonus for the rest of the session.
+  - This is the first measured justification for the Phase 4 `duration` task rather than an argued one.
+    Core v14 owns the expiry model natively (`CONST.ACTIVE_EFFECT_EXPIRY_EVENTS` plus `start.combatant`,
+    so source-turn versus target-turn is expressible), so the fix is a translation of a vocabulary we can
+    read into one core already enforces — and it repairs imported content nobody has to re-import.
+  - The 31 `macro.tokenMagic` changes are the exception that proves the split: mode CUSTOM, consumed by
+    DAE, which IS active, and Token Magic FX is installed. Those work. Purely visual either way.
+- **Ownership in this world is `us` for all 22 rules, `enabled=true`, with ZERO conflicts and no scene
+  advisories** (Token Vision on, fog on, 31 walls). That makes it the cleanest test configuration this
+  module has ever had — nothing stands aside, so every layer here is the only thing enforcing its rule, and
+  a failure cannot be another module's. The single advisory is dnd5e's `autoRecharge`, still off.
+- **Two operational facts to read before trusting any census taken here.** `capabilities.compile` is
+  **off** in this world, so placing tokens binds cached wordings and asks for nothing — an "ingestion
+  works" conclusion drawn from a quiet scene load would be drawn from a switch. And **884 of the 1,105
+  wordings these 39 sheets produce are uncached** (1,099 cached, 221 of them reachable here), so turning it
+  on is roughly the previous world's 87-minute bill again. Decide that deliberately rather than by ticking
+  a box.
+- **The `absent` hazard is now measured, not predicted: 878 orphans, every one `absent`, `prunable` 0.**
+  Those 878 are the first world's paid-for wordings, and `pruneOrphans({includeAbsent: true})` run from
+  here would delete them. See the hygiene note above.
 
 ## Open items carried over from noodlr
 

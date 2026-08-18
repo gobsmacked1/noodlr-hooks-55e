@@ -33,7 +33,7 @@ import {
 import { readRest } from "../system/dnd5e-rest";
 import { bindingsFor } from "./bindings";
 import { conditionsMet, type EvalContext, type Subject } from "./predicates";
-import { describePredicate, describeRule } from "./describe";
+import { describePredicate, describeRule, staticRefusal } from "./describe";
 import { asQuantity, resolveQuantity } from "./quantity";
 import {
   addCombatants,
@@ -48,7 +48,7 @@ import {
   summonerKey,
   usesRemaining,
 } from "./primitives";
-import { duplicatesActivityDamage, duplicatesItemDamage } from "./duplicate";
+import { duplicatesActivityDamage } from "./duplicate";
 import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from "./uses";
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
@@ -688,8 +688,10 @@ export function surveyCapabilities(): Record<string, unknown> {
           guards: (rule.condition ?? []).map(describePredicate),
           // Reported here rather than only at the moment of refusal: this one is a compile fault that
           // does not show up as an error at the table, it shows up as an ability hitting twice as hard
-          // as the book says, so it has to be visible to anybody reading the compiled ability.
-          doubles: duplicatesItemDamage(rule, binding.item) ?? undefined,
+          // as the book says, so it has to be visible to anybody reading the compiled ability. Through
+          // `staticRefusal` rather than one predicate of its own — see the note there for the session
+          // where this console and the capability sheet gave different answers about one descriptor.
+          doubles: staticRefusal(rule, binding.item) || undefined,
           // In English, because a reviewer skims twenty of these looking for the wrong one. Same
           // renderer as the capability sheet, so the console and the window cannot disagree.
           reads: describeRule(rule),

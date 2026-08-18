@@ -295,6 +295,24 @@ export interface RuleView {
   refused: string;
 }
 
+/**
+ * Why the executor will decline this rule, asked with no turn in progress. Empty string means clear.
+ *
+ * THE ONE ANSWER, because there are two readers and they were already disagreeing. The capability sheet
+ * asked both predicates; `surveyCapabilities` had its own copy that asked only `duplicatesItemDamage`,
+ * so a rogue's compiled Sneak Attack was badged "would double" in the window and printed with no
+ * `REFUSED:` line in the console — from the same descriptor, in the same session. Same class of fault as
+ * the two answers to "can X see Y" and the two answers to "how far is that": the cheap local copy looks
+ * reasonable in isolation and is quietly missing a case.
+ *
+ * Absent `item` is "not checked", never "clear" — the callers that have no feature in hand must not be
+ * able to report a clean bill of health they never asked for.
+ */
+export function staticRefusal(rule: CapabilityRule, item: unknown): string {
+  if (!item) return "";
+  return duplicatesItemDamage(rule, item) ?? sneakClaimedNatively(rule, item) ?? "";
+}
+
 export function describeCapability(capability: Capability, item?: unknown): RuleView[] {
   return (capability.rules ?? []).map((rule, index) => {
     const runs = isExecutable(rule);
@@ -310,10 +328,7 @@ export function describeCapability(capability: Capability, item?: unknown): Rule
       standing,
       inert: !runs && !standing,
       note: String(rule.note ?? ""),
-      // Only askable when the caller has the feature in hand. Absent is "not checked", never "clear".
-      refused: item
-        ? (duplicatesItemDamage(rule, item) ?? sneakClaimedNatively(rule, item) ?? "")
-        : "",
+      refused: staticRefusal(rule, item),
     };
   });
 }

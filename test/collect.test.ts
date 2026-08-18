@@ -1,7 +1,12 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { collectScene, featuresOf, surveyScene } from "../src/capability/collect";
+import {
+  collectScene,
+  featuresOf,
+  registerCapabilityCollector,
+  surveyScene,
+} from "../src/capability/collect";
 import { plainText } from "../src/capability/prose";
 import { bindingsFor, clearBindings } from "../src/capability/bindings";
 import * as cache from "../src/capability/cache";
@@ -364,10 +369,45 @@ test("the survey reports what a scene would cost without spending it", async () 
       ]),
     },
   ];
-  const report = surveyScene() as any;
+  const report = (await surveyScene()) as any;
   assert.equal(report.actors, 2);
   assert.equal(report.features, 2);
   assert.equal(report.distinct, 1);
   assert.equal(report.wouldAsk, 1);
   assert.equal(compileCalls.length, 0);
+});
+
+test("the survey warms the cache, or it reports a full one as empty", async () => {
+  // Shards on disk and nothing warmed: the state of every page load before the collector runs. An
+  // unwarmed read reported 1,099 stored descriptors as zero and was diagnosed as a data loss.
+  const text = "The troll regains 15 Hit Points at the start of each of its turns.";
+  const id = cache.proseHash(text);
+  const shard = JSON.stringify({ capabilities: [regeneration(id)] });
+  (globalThis as any).fetch = async () => ({ ok: true, text: async () => shard });
+  (globalThis as any).canvas.scene.tokens.contents = [
+    { actor: creature("Actor.a", "Troll", [item("Regeneration", text)]) },
+  ];
+
+  const report = (await surveyScene()) as any;
+  assert.equal(report.cached, 1);
+  assert.equal(report.wouldAsk, 0);
+  assert.equal(compileCalls.length, 0);
+});
+
+test("registering onto a canvas that is already drawn still collects", async () => {
+  // `canvasReady` fires before `ready`, and this module registers from `ready`, so the hook has
+  // already been missed by the time the listener exists. Without the catch-up nothing is ever bound
+  // on a fresh load — silently, and only on scenes the GM does not re-enter.
+  const text = "The troll regains 15 Hit Points at the start of each of its turns.";
+  const actor = creature("Actor.a", "Troll", [item("Regeneration", text)]);
+  (globalThis as any).canvas = {
+    ready: true,
+    scene: { id: "scene-1", tokens: { contents: [{ actor }] } },
+  };
+
+  registerCapabilityCollector();
+  await new Promise((resolve) => setTimeout(resolve, 900));
+
+  assert.equal(compileCalls.length, 1);
+  assert.equal(bindingsFor(actor).length, 1);
 });

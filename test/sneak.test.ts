@@ -8,7 +8,9 @@ import {
   readSneak,
   sneakFormula,
 } from "../src/system/dnd5e-sneak";
-import { sneakClaimedNatively } from "../src/rules/sneak";
+import { sneakClaimedNatively, surveySneak } from "../src/rules/sneak";
+import { staticRefusal } from "../src/capability/describe";
+import { duplicatesItemDamage } from "../src/capability/duplicate";
 
 // The rule is four clauses long and every one of them is a place a prompt could appear on a swing that
 // did not earn it. These pin the reading rather than the plumbing: what qualifies, what does not, and
@@ -272,4 +274,79 @@ test("Chris's Premades outranks the switch, because its macro deals the dice eit
 
   // And a feature it never touched is still ours to refuse.
   assert.equal(sneakClaimedNatively(rule("damage"), { ...FEATURE, actor: CHARACTER }), null);
+});
+
+// Both readers of the refusal — the capability sheet and `surveyCapabilities` — go through one
+// function, because they did not and disagreed. The console asked `duplicatesItemDamage` alone, so a
+// live rogue's compiled Sneak Attack was badged in the window and printed clean in the console from the
+// same descriptor in the same session.
+test("the static refusal reports what duplicate.ts alone cannot see", () => {
+  const item = { ...FEATURE, actor: CHARACTER };
+  assert.equal(duplicatesItemDamage(rule("damage"), item), null);
+  assert.match(staticRefusal(rule("damage"), item), /natively/);
+});
+
+test("no feature in hand is not checked, and must never read as clear", () => {
+  assert.equal(staticRefusal(rule("damage"), undefined), "");
+});
+
+// The survey, pinned for the same reason `hideLine` is: both of the failures it exists to catch produce a
+// perfectly reasonable-looking block when the line is missing, so a review cannot see them. A rogue whose
+// dice do not resolve and whose weapons do not qualify will never be asked, and every other line reads
+// healthy — feature present, setting on, nobody else automating, nothing spent.
+
+/** A dagger as a sheet holds one: the weapon's own activity is what `qualifyingWeapon` is asked about. */
+function blade() {
+  const item = dagger(["fin"]);
+  return { ...item, name: "Dagger", system: { ...item.system, activities: [{ attack: {} }] } };
+}
+
+function survey(actor: any): string {
+  const printed: string[] = [];
+  const real = console.log;
+  console.log = (...args: unknown[]) => void printed.push(args.map(String).join(" "));
+  try {
+    (globalThis as any).canvas.tokens.controlled = [{ name: "Rogue", actor }];
+    surveySneak();
+  } finally {
+    console.log = real;
+  }
+  return printed.join("\n");
+}
+
+test("the survey names dice that would roll nothing, and weapons that cannot qualify", () => {
+  const hollow = { ...FEATURE, system: { activities: [{ type: "utility" }] } };
+  const block = survey({
+    type: "character",
+    items: [hollow, dagger([])],
+    getRollData: () => ({ scale: {} }),
+  });
+  assert.match(block, /dice: NONE/);
+  assert.match(block, /qualifying weapons: NONE/);
+});
+
+test("and reports both when they are healthy, resolving a scale reference to its dice", () => {
+  (globalThis as any).Roll = { replaceFormulaData: (f: string) => f.replace(/@\S+/, "2d6") };
+  const hollow = { ...FEATURE, system: { activities: [{ type: "utility" }] } };
+  const block = survey({
+    type: "character",
+    items: [hollow, blade()],
+    getRollData: () => ({ scale: { rogue: { "sneak-attack": "2d6" } } }),
+  });
+  assert.match(block, /dice: @scale\.rogue\.sneak-attack \(resolves to 2d6\)/);
+  assert.match(block, /qualifying weapons: Dagger/);
+});
+
+// A reference the actor's roll data cannot answer is the one case worth shouting about: it is the shape
+// the dice line was added for, and it resolves to itself rather than to an error.
+test("a dead scale reference says so rather than printing itself back", () => {
+  (globalThis as any).Roll = { replaceFormulaData: (f: string) => f };
+  const written = {
+    ...FEATURE,
+    system: {
+      activities: [{ damage: { parts: [{ custom: { enabled: true, formula: "@scale.x.y" } }] } }],
+    },
+  };
+  const block = survey({ type: "character", items: [written], getRollData: () => ({}) });
+  assert.match(block, /dice: @scale\.x\.y \(UNRESOLVED/);
 });

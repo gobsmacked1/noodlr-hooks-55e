@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.3
+
+**Compiled abilities now work after simply loading the world.** They were only ever bound when you
+changed scene or dropped a token onto the canvas, so a GM who logged in onto a scene that was already
+populated got none of them - every regeneration, every rider, every compiled Multiattack sat on disk and
+did nothing, with nothing anywhere saying so. It went unnoticed because the way anybody tests one of these
+abilities is to place the creature that has it, which quietly fixed the problem it was measuring. Nothing
+needs recompiling; the descriptors were correct the whole time.
+
+**Two diagnostics were reporting the opposite of the truth.** "What would this scene ask about" read a
+full cache as empty, so it announced that every ability on the scene still needed compiling, and the
+cache clean-up tool reported nothing to tidy however much was there. Both now load the cache before
+answering. Nothing was ever deleted by this - the clean-up sweep over an empty list does nothing - but the
+numbers were alarming and wrong.
+
+**The Sneak Attack report says whether the dice and the weapons are there.** It could previously show a
+rogue as perfectly healthy while nothing would ever be offered, because the two things most likely to be
+missing - a damage amount to roll, and a Finesse or Ranged weapon to qualify - were not among the facts it
+printed. It now names both, and resolves the dice to what they come out as at this character's level, so a
+reference that points at nothing says so.
+
+**The console and the capability window agreed to disagree about one ability.** A compiled Sneak Attack
+rule was badged as declined in the window and printed as fine in the console, from the same descriptor in
+the same session. Both now ask the same question.
+
 ## 0.7.2
 
 **Sneak Attack is offered when it is earned, and only then.** Foundry has always shipped the feature with

@@ -91,8 +91,15 @@ export function classifyCache(
  *
  * Reads sheets and the cache and writes neither, so it is safe to call from a console at any time —
  * which is the point, because its answer is what a GM decides a prune on.
+ *
+ * IT MUST WARM THE CACHE FIRST, and that is a correctness requirement rather than a convenience. An
+ * unwarmed cache is an empty `Map`, so every count comes back 0 and the report reads "nothing to
+ * prune" — the reassuring answer, from a measurement never taken. It also fails closed in the other
+ * direction, which is how it hid: {@link pruneOrphans} over an empty cache deletes nothing, so the bug
+ * had no destructive symptom and nothing but a wrong number to notice it by.
  */
-export function findOrphans(): HygieneReport {
+export async function findOrphans(): Promise<HygieneReport> {
+  await cache.warm();
   const live = new Set<string>();
   const declinedIds = new Map<string, Declined>();
   const actors = readableActors();
@@ -129,6 +136,13 @@ export interface PruneReport {
  * model call to get back. `declined` costs nothing to be wrong about, because the collector refuses the
  * item either way.
  *
+ * THE CACHE IS PER INSTALL AND `absent` IS ANSWERED PER WORLD, which makes `includeAbsent` far more
+ * destructive than the compendium caveat above suggests. The shards live under the shared `assets/`
+ * tree while {@link findOrphans} reads only `game.actors` and the loaded scenes, so on a host running a
+ * second world every wording belonging to the FIRST world is `absent` and would be swept. That is not
+ * hypothetical: the reference install carries a 1,022-wording cache bought over 87 minutes, and a
+ * smaller test world beside it makes most of it look dead.
+ *
  * A `locked` or `rejected` entry is kept whatever its reason. Those two statuses mean a human has had
  * the last word, and a sweep that deletes a GM's correction because the monster is off-scene is the
  * one failure worse than the clutter this exists to remove.
@@ -139,7 +153,7 @@ export async function pruneOrphans(options?: { includeAbsent?: boolean }): Promi
     warn("only the primary GM may prune the capability cache.");
     return report;
   }
-  const { orphans } = findOrphans();
+  const { orphans } = await findOrphans();
   for (const orphan of orphans) {
     if (orphan.reason === "absent" && !options?.includeAbsent) continue;
     if (orphan.status === "locked" || orphan.status === "rejected") {
@@ -162,8 +176,8 @@ export async function pruneOrphans(options?: { includeAbsent?: boolean }): Promi
  * Printed flat, one line per orphan, for the reason recorded in AGENTS.md — a console renders a nested
  * return value as a collapsed `Object { … }`, and the collapsed line is what gets pasted into a report.
  */
-export function surveyOrphans(): HygieneReport {
-  const report = findOrphans();
+export async function surveyOrphans(): Promise<HygieneReport> {
+  const report = await findOrphans();
   const lines: string[] = [
     `${MODULE_ID} cache hygiene`,
     `  read ${report.actors} sheet(s); ${report.live} wording(s) still produced`,
