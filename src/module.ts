@@ -39,6 +39,7 @@ import { surveyAwareness } from "./tactics/awareness";
 import { registerDossierCleanup } from "./tactics/dossier";
 import { toggleSelectedCombatantAutomation } from "./tactics/control";
 import { registerAutomationCleanup } from "./tactics/registry";
+import { registerAutoRoll } from "./tactics/auto-roll";
 import { registerAutomationTurnHook } from "./tactics/hooks";
 import { registerPerceptionWatch, surveyPerception } from "./rules/perception";
 import { registerStealthWatch } from "./rules/stealth";
@@ -438,6 +439,9 @@ Hooks.once("ready", () => {
   // The Damage button held shut until the attack has been resolved. Every client, and that is the whole
   // point: the press to stop happens on the roller's own machine, and only that machine can refuse it.
   registerDamageGate();
+  // Automated attacks skip the system's roll-configuration dialogs. Every client: a reaction
+  // can roll on the GM, and `preRollAttack` fires only where the roll is built.
+  registerAutoRoll();
   // The system's cards drawn at half height, if this screen asked for it.
   applyCompactCards();
   // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is

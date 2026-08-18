@@ -85,8 +85,27 @@ export function rollerForActor(actor: any): string | null {
   return gm ? String(gm.id) : null;
 }
 
-/** Is this client the one that should roll for that actor? */
+/**
+ * True when THIS client should press the roll for that actor.
+ *
+ * `rollerForActor` ALWAYS names someone when a GM is online — the player if one
+ * owns the creature, otherwise the GM. A truthy roller is therefore not "leave
+ * the button". Treating it that way left every NPC save unpressed in a running
+ * world (Hold Person vs Assassin, 2026-08-18): the Assassin's roller was the
+ * GM, the skip saw a name, and the Wisdom save never happened.
+ *
+ * Auto-roll when we are the designated roller. Leave the button when a
+ * connected player owns the dice.
+ */
 export function isRollerFor(actor: any): boolean {
-  const id = rollerForActor(actor);
-  return Boolean(id) && id === String(game.user?.id ?? "");
+  return autoRollsWhen(rollerForActor(actor), game.user?.id);
+}
+
+/**
+ * The save-automation gate, extracted so a test can pin the Hold Person miss
+ * without a Foundry world. `rollerId` is `rollerForActor`; `thisUserId` is
+ * the client considering whether to press.
+ */
+export function autoRollsWhen(rollerId: string | null, thisUserId: string | null | undefined): boolean {
+  return Boolean(rollerId) && rollerId === String(thisUserId ?? "");
 }

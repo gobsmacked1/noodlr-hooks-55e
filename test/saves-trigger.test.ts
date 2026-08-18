@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import { dispatchesFor, fireSaveTriggers, resetSaveDispatch } from "../src/capability/saves";
+import { bindingAppliesToActivity } from "../src/capability/executor";
 import { bindCapabilities, clearBindings } from "../src/capability/bindings";
 import { __clearShadow } from "../src/capability/uses";
 import { __damageLogInternals } from "../src/capability/damage-log";
@@ -343,4 +344,67 @@ test("a usage with no caster on the scene is skipped rather than thrown over", a
 test("no usage card means no dispatch", async () => {
   await fireSaveTriggers(null, [failed({ id: "t-x" }, "s9")]);
   assert.deepEqual(damaged, []);
+});
+
+test("the announcement names who the effect landed on, not the caster", async () => {
+  const caster = creature("Bardo", "Actor.bardo");
+  const victim = creature("Assassin", "Actor.assassin");
+  place(caster.doc, victim.doc);
+  bindCapabilities(caster.actor.uuid, [{ capability: HOLD_PERSON }]);
+
+  await fireSaveTriggers(usageMessage("u-announce", caster.doc), [failed(victim.doc, "s-announce")]);
+
+  assert.equal(victim.actor.statuses.has("restrained"), true);
+  assert.match(String(chat[0]?.content ?? ""), /Assassin is restrained/);
+  assert.doesNotMatch(String(chat[0]?.content ?? ""), /Bardo is restrained/);
+});
+
+test("another spell's save rider does not fire on this spell's save", async () => {
+  // Hold Person failed; Otto's is also `on_save_failed` on the same caster. Firing both
+  // charmed the Assassin in a live fight (2026-08-18).
+  const caster = creature("Bardo", "Actor.bardo");
+  const victim = creature("Assassin", "Actor.assassin");
+  place(caster.doc, victim.doc);
+
+  const holdItem: { id: string; type: string; name: string; uuid: string; system?: any } = {
+    id: "hold",
+    type: "spell",
+    name: "Hold Person",
+    uuid: "Item.hold",
+  };
+  const activity = { name: "Save", item: holdItem };
+  holdItem.system = { activities: { get: () => activity } };
+  (globalThis as any).fromUuidSync = () => holdItem;
+
+  const ottos: Capability = {
+    id: "hash-ottos",
+    label: "Otto's Irresistible Dance",
+    status: "compiled",
+    rules: [
+      {
+        trigger: { event: "on_save_failed" },
+        condition: [],
+        effect: { kind: "apply_status", status: "charmed", target: "target" },
+        adjudication: "engine",
+      },
+    ],
+  };
+
+  bindCapabilities(caster.actor.uuid, [
+    { capability: HOLD_PERSON, item: holdItem },
+    { capability: ottos, item: { id: "otto", type: "spell", name: "Otto's Irresistible Dance" } },
+  ]);
+
+  await fireSaveTriggers(usageMessage("u-otto", caster.doc, holdItem), [failed(victim.doc, "s-otto")]);
+
+  assert.equal(victim.actor.statuses.has("restrained"), true, "Hold Person still lands");
+  assert.equal(victim.actor.statuses.has("charmed"), false, "Otto's does not ride along");
+});
+
+test("a feat that watches any save still fires beside the spell that was used", () => {
+  const used = { id: "hold", type: "spell" };
+  assert.equal(bindingAppliesToActivity({ item: { id: "hold", type: "spell" } }, used), true);
+  assert.equal(bindingAppliesToActivity({ item: { id: "otto", type: "spell" } }, used), false);
+  assert.equal(bindingAppliesToActivity({ item: { id: "war-caster", type: "feat" } }, used), true);
+  assert.equal(bindingAppliesToActivity({ item: undefined }, used), true);
 });

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.7
+
+**NPC saving throws now roll themselves.** Hold Person on a monster posted the usage card and then
+waited forever for a GM to press the Wisdom save, because the module treated "someone is elected to
+roll" as "leave the button". Someone is always elected when a GM is online — the player if they own
+the creature, otherwise the GM — so every NPC save in a running world was skipped. The Assassin sat
+unparalyzed with a compiled Hold Person rule that never saw a verdict. Player characters still leave
+the dice for their owner.
+
+**A compiled rider now names who it landed on.** "Hold Person: Bardo is paralyzed" was signed as the
+caster. The card now names the creature the effect hit.
+
+**A caster's other spells no longer fire on this save.** Otto's Irresistible Dance was charming the
+Assassin because every `on_save_failed` bound to Bardo ran when Hold Person's save failed. Spell,
+weapon and consumable riders now only fire for the item that was used. A feat that watches any save
+still fires.
+
+**Automated attacks no longer wait on the Attack Roll window.** Full Automation posted the Light
+Crossbow usage card and then opened the system's roll dialog, because skipping the usage dialog does
+not skip the attack that follows it — and that follow-up is not even waited for, so the turn could
+advance while the dice were still a window. Automated creatures now roll the attack (and the damage)
+without a GM at the dialog. A player's own roll is never silenced.
+
+The Assassin's opening crossbow in that same fight was a planned turn after initiative, not a Ready
+action before combat. Hold Person landed about forty-five seconds later.
+
 ## 0.7.6
 
 **Compiled abilities now fire when a save fails or succeeds.** Hold Person restraining what failed

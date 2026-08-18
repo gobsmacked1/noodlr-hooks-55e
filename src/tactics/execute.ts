@@ -69,8 +69,13 @@ async function useAction(
   asReaction = false,
 ): Promise<string | undefined> {
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
+  // `configure: false` on `use()` is only the USAGE dialog. AttackActivity then fires `rollAttack`
+  // with an empty dialog config (and does not await it), which is the Attack Roll window that sat
+  // in front of the Assassin's Light Crossbow. We skip that subsequent call and finish the rolls
+  // ourselves, awaited, so the turn cannot advance while the dice are still a dialog.
   const dialog = { configure: false };
   const message = {};
+  const usage = { subsequentActions: false };
 
   const attempts: Array<() => Promise<unknown>> = [];
   const activity = action.activity;
@@ -91,11 +96,11 @@ async function useAction(
       midiOptions.isReaction = true;
       midiOptions.workflowOptions = { targetConfirmation: "none" };
     }
-    const usage = targetUuid || asReaction ? { midiOptions } : {};
-    attempts.push(() => midi.completeActivityUse(activity, usage, dialog, message));
+    const midiUsage = targetUuid || asReaction ? { midiOptions } : {};
+    attempts.push(() => midi.completeActivityUse(activity, midiUsage, dialog, message));
   }
   if (typeof activity?.use === "function") {
-    attempts.push(() => activity.use({}, dialog, message));
+    attempts.push(() => finishActivity(activity, usage, dialog, message));
   }
   const item = action.item;
   if (typeof item?.use === "function") {
@@ -126,6 +131,47 @@ async function useAction(
     if (lastError) throw lastError;
     return undefined;
   });
+}
+
+/**
+ * Use, then finish the attack the system would have started and not waited for.
+ *
+ * `results` is whatever `Activity#use` returned; an early return (cannot use, vetoed) is
+ * `undefined` and must not grow a dangling roll.
+ */
+async function finishActivity(
+  activity: any,
+  usage: Record<string, unknown>,
+  dialog: { configure: boolean },
+  message: Record<string, unknown>,
+): Promise<unknown> {
+  const results = await activity.use(usage, dialog, message);
+  if (!results) return results;
+
+  const origin = results?.message?.id;
+  const follow = origin ? { data: { "flags.dnd5e.originatingMessage": origin } } : {};
+  const silent = { configure: false };
+
+  const parts = activity.damage?.parts;
+  const hasParts = Array.isArray(parts) && parts.length > 0;
+  const kind = String(activity.type ?? "");
+
+  if (typeof activity.rollAttack === "function") {
+    await activity.rollAttack({}, silent, follow);
+    if (typeof activity.rollDamage === "function" && hasParts) {
+      await activity.rollDamage({}, silent, follow);
+    }
+  } else if (
+    (kind === "heal" || kind === "damage") &&
+    typeof activity.rollDamage === "function" &&
+    hasParts
+  ) {
+    // Heal/Damage activities also fire an una waited subsequent roll. A Save activity
+    // has `rollDamage` too (Fireball) and the system leaves that button for after the
+    // save — do not press it here.
+    await activity.rollDamage({}, silent, follow);
+  }
+  return results;
 }
 
 /**

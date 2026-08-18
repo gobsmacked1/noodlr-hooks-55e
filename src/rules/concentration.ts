@@ -235,6 +235,12 @@ export function registerConcentrationHooks(): void {
       if (!changed?.system?.attributes?.hp) return;
       if (!isConcentrating(actor)) return;
       if (options?.dnd5e?.concentrationCheck === false) return;
+      // Truthy is correct HERE. This is "is anyone elected to roll instead?", not
+      // "should THIS client roll". `rollerForActor` always names the GM when one is
+      // online, so we suppress the stock button and `onDamaged` uses `isRollerFor`
+      // to actually press. Flipping this to `isRollerFor` would leave the system's
+      // prompt up on every client that is not the roller — the Hold Person save
+      // inversion, the other way around.
       if (!rollerForActor(actor)) return;
       foundry.utils.setProperty(options, "dnd5e.concentrationCheck", false);
     } catch (err) {

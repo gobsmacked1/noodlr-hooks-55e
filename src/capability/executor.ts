@@ -150,6 +150,7 @@ export async function fireTrigger(
   for (const binding of bindingsFor(actor)) {
     const capability = binding.capability;
     if (capability.status === "rejected") continue;
+    if (!bindingAppliesToActivity(binding, usedItemOf(ctx))) continue;
 
     // IF IT CANNOT BE PAID FOR, NONE OF IT HAPPENS. A compiler is free to split one ability into a
     // `spend_resource` rule and a separate effect rule on the same trigger, and when it does, that
@@ -534,6 +535,34 @@ function findItem(actor: any, name: string): any {
   return null;
 }
 
+/**
+ * A spell's (or weapon's) compiled riders are about THAT item. Binding every `on_save_failed`
+ * on the caster and firing them all is how Otto's Irresistible Dance charmed the Assassin
+ * when Hold Person's save failed (2026-08-18). Feats that watch any save still fire.
+ *
+ * Exported so a test can pin the split without a scene.
+ */
+export function bindingAppliesToActivity(binding: { item?: any }, usedItem: any): boolean {
+  if (!usedItem || !binding.item) return true;
+  if (sameItem(binding.item, usedItem)) return true;
+  const type = String(binding.item.type ?? "");
+  return type !== "spell" && type !== "consumable" && type !== "weapon";
+}
+
+function usedItemOf(ctx: TriggerContext): any {
+  return ctx.activity?.item ?? ctx.activity?.parent ?? null;
+}
+
+function sameItem(a: any, b: any): boolean {
+  if (a === b) return true;
+  const aId = String(a?.id ?? "");
+  const bId = String(b?.id ?? "");
+  if (aId && aId === bId) return true;
+  const aUuid = String(a?.uuid ?? "");
+  const bUuid = String(b?.uuid ?? "");
+  return Boolean(aUuid) && aUuid === bUuid;
+}
+
 /** Say what happened, in the creature's own voice, so the table can see the rule fire. */
 function announce(
   capability: Capability,
@@ -542,8 +571,11 @@ function announce(
   detail: string,
 ): void {
   try {
-    const subject = ctx.self.token ?? ctx.self.actor;
-    const name = String(ctx.self.actor?.name ?? "The creature");
+    // The effect names who it happened to. Naming `self` here is why "Hold Person: Bardo is
+    // paralyzed" appeared on a card signed as the caster while the Assassin actually froze.
+    const who = subjectOf(rule.effect?.target, ctx) ?? ctx.self;
+    const subject = who.token ?? who.actor;
+    const name = String(who.actor?.name ?? "The creature");
     const body = detail
       ? `<strong>${capability.label}:</strong> ${name} ${detail}.`
       : `<strong>${capability.label}</strong>`;

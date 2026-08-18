@@ -33,7 +33,7 @@
 // layer's; inventing a condition from a save is exactly the kind of guess that produces a rules argument.
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
-import { isPrimaryGM, rollerForActor } from "../util/gm";
+import { isPrimaryGM, isRollerFor, rollerForActor } from "../util/gm";
 import { narrator } from "../util/speaker";
 import { isAutoSavesEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
@@ -484,12 +484,13 @@ async function offerResistances(act: Activation): Promise<void> {
 }
 
 /**
- * Roll a save for every target no player can roll for.
+ * Roll a save for every target this client is the designated roller for.
  *
- * The election is `rollerForActor`, which answers with a player's id when one owns the creature and null
- * when nobody does. That single call is the whole player/GM asymmetry: a goblin's save is rolled here, a
- * character's is left for the person whose character it is. It is derived rather than configured on
- * purpose — a table does not want a preference here, it wants its players rolling their own dice.
+ * The election is `isRollerFor`, not a truthy `rollerForActor`. That function always names
+ * someone when a GM is online (the player, else the GM), so treating a name as "leave the
+ * button" skipped every NPC save — Hold Person's Wisdom DC sat on Bardo's usage card and
+ * the Assassin never rolled. A connected player still owns their own dice: `isRollerFor`
+ * is false on the GM for that character, and the button stays.
  */
 async function rollMissing(act: Activation): Promise<void> {
   const ask = act.ask;
@@ -499,11 +500,15 @@ async function rollMissing(act: Activation): Promise<void> {
     if (state.success !== null || state.rolling || state.applied) continue;
     const actor = state.doc?.actor;
     if (!actor?.system?.abilities) continue;
-    // Somebody else's dice to roll. Leave the button.
-    if (rollerForActor(actor)) continue;
+    if (!isRollerFor(actor)) {
+      const who = rollerForActor(actor);
+      log(`save resolution: leaving ${state.name}'s save for ${who ?? "a player"}`);
+      continue;
+    }
 
     const ChatMessage = (globalThis as any).ChatMessage;
     state.rolling = true;
+    log(`save resolution: rolling ${ask.abilities[0]} DC ${ask.dc} for ${state.name}`);
     try {
       await actor.rollSavingThrow(
         { ability: ask.abilities[0], target: ask.dc },
@@ -563,7 +568,14 @@ export function surveyDamageSaves(): unknown {
         applied: state.applied,
         barbsOffered: state.barbed,
         resistanceOffered: state.offered,
-        rolledBy: state.doc?.actor ? (rollerForActor(state.doc.actor) ?? "us") : "?",
+        rolledBy: (() => {
+          const actor = state.doc?.actor;
+          if (!actor) return "?";
+          if (isRollerFor(actor)) return "us";
+          const id = rollerForActor(actor);
+          const user = id ? (game.users as any)?.get?.(id) : null;
+          return String(user?.name ?? id ?? "player");
+        })(),
       })),
     })),
   };

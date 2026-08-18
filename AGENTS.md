@@ -3151,6 +3151,38 @@ button press.
   there without one: a creature nobody but the GM can roll for has its save rolled automatically, and a
   character with a player owner does not, because that player came to the table to roll it. Same election as
   concentration (`rollerForActor`), deliberately not a second one.
+- **`isRollerFor` is the skip, never a truthy `rollerForActor` (2026-08-18).** That function ALWAYS names
+  someone when a GM is online — the player if one owns the creature, otherwise the GM. `rollMissing` used
+  to treat a name as "leave the button", so every NPC save in a running world was skipped: Bardo's Hold
+  Person posted a usage card signed as Bardo (dnd5e's activity card, which is what makes it look like the
+  caster must save), the Assassin was targeted, DC 20 Wisdom was read, and `surveyDamageSaves` sat at
+  `saved: null, rolledBy: <GM id>` until the planner took the Assassin's next turn unparalyzed. The
+  compiled `on_save_failed → apply_status paralyzed` was bound and runnable; it had no verdict. The
+  crossbow in that same fight was the Assassin's opening turn (init 29 vs 12), before the spell, not
+  impatience after it. `test/gm.test.ts` pins the gate. The usage card's speaker is the system's and is
+  not rewritten here; the Assassin's own save card is what tells a new player who is rolling.
+- **The Assassin's Light Crossbow in that same fight was a planned turn, not a Ready.** Combat
+  started at 16:32:56 (`Assassin spots Bardo`), automation took the turn at 16:33:01, Hold Person
+  landed ~47 s later. The usage card posted and the Attack Roll dialog waited, because
+  `activity.use({configure:false})` is only the USAGE dialog: `AttackActivity#_triggerSubsequentActions`
+  then calls `rollAttack` with an empty dialog config and does not await it.
+  `tactics/auto-roll.ts` sets `dialog.configure = false` on `preRollAttack` / `preRollDamage` for
+  creatures we are playing, and `finishActivity` skips the subsequent call, awaits the attack, and
+  rolls damage so the turn cannot advance while the dice are still a window. A player's roll is
+  never silenced.
+- **`if (!rollerForActor(actor))` on concentration's `preUpdateActor` is the OTHER use of a truthy
+  election, and it is correct.** That line asks "is anyone elected to roll instead?" so the stock
+  button can be suppressed. Flipping it to `isRollerFor` would leave the system's prompt up on every
+  client that is not the roller. The scan of every `rollerForActor` call (2026-08-18) found the
+  inverted skip only in `rollMissing`; sneak, Ready and reaction offers use the id to ADDRESS a
+  client, which is the election doing its job.
+- **A capability card names who the effect landed on, not `ctx.self`.** The same fight posted
+  "Hold Person: Bardo is paralyzed" signed as Bardo, because `announce` always used the caster. The
+  Assassin was the one frozen. `subjectOf(effect.target)` is the speaker and the name.
+- **A spell's save riders fire only for that spell.** `fireTrigger` used to run every `on_save_failed`
+  bound to the caster, so Otto's Irresistible Dance charmed the Assassin on Hold Person's failed save.
+  Spell, weapon and consumable bindings must match the used item; a feat that watches any save still
+  fires. `bindingAppliesToActivity` is the split, pinned in `test/saves-trigger.test.ts`.
 - **What a failed save INFLICTS is not applied.** Restrained, Prone and the rest are prose on the item, which
   is the compiler's problem. Guessing at them would start an argument at the table.
 

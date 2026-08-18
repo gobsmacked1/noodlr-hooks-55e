@@ -120,7 +120,17 @@ export async function fireSaveTriggers(usage: any, verdicts: SaveVerdict[]): Pro
   }
 
   const item = itemOf(usage);
-  const activity = activityOf(usage, item);
+  const raw = activityOf(usage, item);
+  // `usedItemOf` reads `activity.item`. A Foundry activity usually has it; a test fake and
+  // some imported items do not, so stamp the usage item on a thin wrapper rather than
+  // mutating the document. `damage` is copied so `duplicatesActivityDamage` still sees it.
+  const activity = raw
+    ? raw.item
+      ? raw
+      : { ...raw, item: raw.item ?? item }
+    : item
+      ? { item }
+      : raw;
   const spellLevel = Number(item?.system?.level) || undefined;
 
   for (const { event, doc, saveMessage } of dispatches) {
