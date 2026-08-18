@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.7.4
+
+**Each world now keeps its own compiled abilities.** They were previously stored beside the module rather
+than inside a world, which meant every world on one Foundry server shared a single set - so two open worlds
+could overwrite each other's readings, a world backup did not include them, and the clean-up tool saw the
+other world's abilities as dead and offered to delete them. They are now written under
+`worlds/<your world>/assets/`, so a backup carries them and nothing crosses between campaigns. **Nothing is
+inherited from the old shared location, deliberately**: abilities compiled before this release are not
+adopted, and a world that wants them reads its sheets again. If you have paid for a large cache and want to
+keep it, copy `Data/assets/noodlr-hooks-55e/capabilities` into
+`Data/worlds/<your world>/assets/noodlr-hooks-55e/capabilities` before loading.
+
+**Survey reports are world-scoped too.** They wrote to one fixed filename beside the module, so on a server
+with two worlds the second census silently overwrote the first, and nothing in the file said which world it
+described.
+
+**Every compiled ability now records which rules version it was read under**, and the capability window
+says so when that no longer matches - "read under dnd5e 5.3.2, Foundry 14.360". It is a note rather than a
+warning, because the reading is very probably still correct: the ability's wording has not changed, and a
+system update rarely touches the ability in front of you. Nothing is deleted, nothing is re-read, and
+nothing is spent. Where an update *did* change a rule, Recompile buys a fresh reading of that one ability;
+Lock records that you have checked it and clears the note for free. `noodlrHooks.surveyCacheAge()` prints
+the whole picture, grouped by what changed.
+
+**The Sneak Attack report lists weapons that can be counted.** Two hand crossbows read as four weapons,
+because dnd5e weapon names contain commas and the list was joined with one.
+
+**Scene ingestion reported the wrong numbers.** Twenty goblins sharing one trait were counted as twenty
+distinct abilities rather than one, so a fully cached scene could report a third of itself as unknown.
+Nothing was bought or lost by it - only the log line was wrong.
+
 ## 0.7.3
 
 **Compiled abilities now work after simply loading the world.** They were only ever bound when you

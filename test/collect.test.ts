@@ -79,6 +79,8 @@ beforeEach(() => {
 
   (globalThis as any).game = {
     system: { id: "dnd5e" },
+    // The cache is world-scoped since v0.7.4, so a fake world with no id caches nothing at all.
+    world: { id: "test-world" },
     user: { isGM: true, id: "gm-1" },
     users: { activeGM: { id: "gm-1" } },
     i18n: { format: (_k: string, d: any) => `read ${d.count}` },
@@ -265,6 +267,20 @@ test("a second pass asks about nothing, because the cache answers", async () => 
   assert.equal(report.hits, 1);
   assert.equal(report.requested, 0);
   assert.equal(compileCalls.length, 0);
+});
+
+test("a cache hit is counted once per wording, not once per creature carrying it", async () => {
+  const text =
+    "The goblin has Advantage on an attack roll against a creature if at least one of the goblin's allies is within 5 feet of the creature.";
+  const actors = Array.from({ length: 20 }, (_, i) =>
+    creature(`Actor.goblin${i}`, "Goblin", [item("Pack Tactics", text)]),
+  );
+  await collectScene(scene(actors));
+
+  const report = await collectScene(scene(actors));
+  assert.equal(report.features, 20, "twenty sheets still carry it");
+  assert.equal(report.hits, 1, "one wording is answered, however many creatures share it");
+  assert.equal(report.distinct, 1, "and so the scene holds one distinct wording, not twenty");
 });
 
 test("with nobody listening the scene still binds, and says so rather than failing", async () => {

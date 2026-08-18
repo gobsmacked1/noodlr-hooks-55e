@@ -325,6 +325,14 @@ export interface CollectReport {
   features: number;
   /** Distinct wordings, after the within-scene dedup. The number that would ever cost anything. */
   distinct: number;
+  /**
+   * Distinct wordings the cache already answers — NOT how many features hit it.
+   *
+   * Counted through a Set because the whole economy of this layer is that 270 creatures share one
+   * wording, so a per-occurrence tally reports twenty goblins as twenty and makes `distinct` twenty
+   * as well. That read as a cache covering 35% of a scene when it covered 100% of it, and the number
+   * is quoted straight into a log line.
+   */
   hits: number;
   requested: number;
   compiled: number;
@@ -376,6 +384,7 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
   // Pass one: read every sheet, and note which wordings nobody has compiled yet.
   const perActor = new Map<any, Feature[]>();
   const misses = new Map<string, Feature>();
+  const known = new Set<string>();
   const declined: Declined[] = [];
   for (const actor of actors) {
     const features = featuresOf(actor, declined);
@@ -383,11 +392,12 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     report.features += features.length;
     for (const feature of features) {
       if (feature.removed.length) report.scrubbed[feature.label] = feature.removed;
-      if (cache.has(feature.id)) report.hits++;
+      if (cache.has(feature.id)) known.add(feature.id);
       else if (!misses.has(feature.id)) misses.set(feature.id, feature);
     }
   }
-  report.distinct = report.hits + misses.size;
+  report.hits = known.size;
+  report.distinct = known.size + misses.size;
   for (const row of declined) report.declined[row.label] = row.why;
 
   // Debug rather than a warning, and the severity is the decision: on a 2024 character sheet this is

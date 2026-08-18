@@ -136,12 +136,14 @@ export interface PruneReport {
  * model call to get back. `declined` costs nothing to be wrong about, because the collector refuses the
  * item either way.
  *
- * THE CACHE IS PER INSTALL AND `absent` IS ANSWERED PER WORLD, which makes `includeAbsent` far more
- * destructive than the compendium caveat above suggests. The shards live under the shared `assets/`
- * tree while {@link findOrphans} reads only `game.actors` and the loaded scenes, so on a host running a
- * second world every wording belonging to the FIRST world is `absent` and would be swept. That is not
- * hypothetical: the reference install carries a 1,022-wording cache bought over 87 minutes, and a
- * smaller test world beside it makes most of it look dead.
+ * SINCE v0.7.4 THE CACHE IS PER WORLD, and that retires a far worse version of the same hazard rather
+ * than merely reducing it. The shards used to live under the install-wide `assets/` tree while
+ * {@link findOrphans} reads only `game.actors` and the loaded scenes, so on a host running a second
+ * world every wording belonging to the FIRST world was `absent` and would have been swept. Not
+ * hypothetical — the reference install's 1,022-wording cache, bought over 87 minutes, looked 878
+ * wordings dead from a smaller test world beside it. Nothing is inherited from that tree, so a
+ * world's `absent` list is now genuinely about its own sheets, and the remaining exposure is the
+ * compendium caveat above and nothing else.
  *
  * A `locked` or `rejected` entry is kept whatever its reason. Those two statuses mean a human has had
  * the last word, and a sweep that deletes a GM's correction because the monster is off-scene is the

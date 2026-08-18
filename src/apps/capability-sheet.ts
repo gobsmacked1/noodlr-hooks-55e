@@ -27,6 +27,7 @@ import { isPrimaryGM } from "../util/gm";
 import { isCapabilityCompileEnabled } from "../settings";
 import { validateCapability, type Capability } from "../integration/capability";
 import * as cache from "../capability/cache";
+import { currentProvenance, describeStamp, driftOf, type Provenance } from "../capability/age";
 import { describeCapability } from "../capability/describe";
 import { featuresOf, rebindActor, recompileFeatures } from "../capability/collect";
 
@@ -46,6 +47,11 @@ interface Row {
   flavourOnly: boolean;
   model: string;
   when: string;
+  /**
+   * Non-empty when this reading was made against a different ruleset than the one it will run under.
+   * Reported and nothing else — see `capability/age.ts` for why a version bump does not spend money.
+   */
+  drift: string;
   rules: ReturnType<typeof describeCapability>;
   inert: number;
 }
@@ -60,10 +66,32 @@ function localize(key: string, fallback: string, data?: Record<string, unknown>)
   }
 }
 
+/**
+ * One line saying what a reading was made against, or "" when it still matches this world.
+ *
+ * Deliberately a sentence rather than a badge: the useful thing to tell a GM is not "stale" — the
+ * reading is very probably still correct — but WHICH ruleset it was made under, so they can judge
+ * whether their own dnd5e upgrade touched the ability in front of them. The two answers are the two
+ * buttons already on the row: Recompile buys a fresh reading, Lock records that they have checked it.
+ */
+function driftLine(capability: Capability | undefined, now: Provenance): string {
+  if (!capability) return "";
+  const reasons = driftOf(capability, now);
+  if (reasons.length === 0) return "";
+  const was = describeStamp(capability);
+  return was
+    ? localize("NOODLRHOOKS.Capabilities.Drift", `read under ${was}`, { was })
+    : localize(
+        "NOODLRHOOKS.Capabilities.DriftUnstamped",
+        "read before this module recorded the ruleset",
+      );
+}
+
 /** Rows for one creature: every written ability, compiled or not. */
 function rowsFor(actor: any): Row[] {
   const seen = new Set<string>();
   const rows: Row[] = [];
+  const now = currentProvenance();
   for (const feature of featuresOf(actor)) {
     if (seen.has(feature.id)) continue;
     seen.add(feature.id);
@@ -89,6 +117,7 @@ function rowsFor(actor: any): Row[] {
       when: capability?.compiledBy?.at
         ? new Date(capability.compiledBy.at).toLocaleDateString()
         : "",
+      drift: driftLine(capability, now),
       rules,
       // A standing fact is not inert. Counting it as such is what made a third of every compiled
       // corpus look like wasted money on this sheet — see `capability/standing.ts`.

@@ -339,7 +339,7 @@ export function surveySneak(): unknown {
     `setting (${COMBAT_SETTINGS.sneak}): ${isSneakEnabled(actor) ? "on" : "off"}`,
     `feature: ${feature ? String(feature.name) : "NONE — nothing to offer"}`,
     `dice: ${formula ? `${formula}${describeFormula(actor, formula)}` : "NONE — no damage part and no class scale named sneak-attack, so nothing would be rolled"}`,
-    `qualifying weapons: ${weapons.length ? weapons.join(", ") : "NONE — needs a Finesse or Ranged weapon, and the test requires a positive reading"}`,
+    `qualifying weapons: ${weapons.length ? weapons.join(" | ") : "NONE — needs a Finesse or Ranged weapon, and the test requires a positive reading"}`,
     `chris-premades automates it: ${feature && cprAutomatesSneak(feature) ? "YES — we stand aside" : "no"}`,
     `turn stamp: ${turnStamp() || "(out of combat — unlimited)"}`,
     `spent this turn: ${sneakSpent(actor) ? "yes" : "no"}`,
@@ -371,7 +371,18 @@ function describeFormula(actor: any, formula: string): string {
   }
 }
 
-/** The equipped weapons this creature could Sneak Attack with, named so a strict refusal is diagnosable. */
+/**
+ * The equipped weapons this creature could Sneak Attack with, named so a strict refusal is diagnosable.
+ *
+ * JOINED WITH A PIPE, NOT A COMMA, because dnd5e weapon names contain commas: two hand crossbows render
+ * as "Crossbow, Hand, Crossbow, Hand" and read as four weapons. A diagnostic whose list cannot be
+ * counted has not reported a list — the same rule as the flat-output doctrine one line up.
+ *
+ * IT FILTERS ON `equipped` AND `qualifyingWeapon` DOES NOT, so this is narrower than the runtime answer:
+ * a stowed dagger would qualify on a swing and is not listed here. Deliberate, and the safe direction —
+ * the survey exists to explain "I am never offered this", so under-reporting raises a false alarm that
+ * gets investigated while over-reporting would answer the question wrongly and close it.
+ */
 function qualifyingWeapons(actor: any): string[] {
   const found: string[] = [];
   for (const item of actor?.items ?? []) {

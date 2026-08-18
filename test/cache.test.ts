@@ -5,6 +5,7 @@ import {
   __reset,
   all,
   exportAll,
+  flush,
   get,
   importAll,
   normalizeProse,
@@ -13,6 +14,7 @@ import {
   putOverride,
   remove,
   size,
+  warm,
 } from "../src/capability/cache";
 import type { Capability } from "../src/integration/capability";
 
@@ -32,7 +34,68 @@ const cap = (id: string, over: Partial<Capability> = {}): Capability => ({
   ...over,
 });
 
-beforeEach(() => __reset());
+// ---- A fake disk, addressed by path ------------------------------------------------------------
+//
+// Every test below turns on the DIFFERENCE between a shard file that is absent and one that is
+// present and empty, so the fake has to be a real file table rather than a blanket "not ok".
+
+let disk: Map<string, string>;
+let world: string | null;
+
+const LEGACY = "assets/noodlr-hooks-55e/capabilities";
+const MINE = "worlds/w1/assets/noodlr-hooks-55e/capabilities";
+
+function writeDisk(folder: string, capabilities: Capability[]): void {
+  const shards = new Map<string, Capability[]>();
+  for (const capability of capabilities) {
+    let acc = 0;
+    for (const char of capability.id) acc ^= parseInt(char, 16);
+    const shard = (acc % 16).toString(16);
+    if (!shards.has(shard)) shards.set(shard, []);
+    shards.get(shard)!.push(capability);
+  }
+  for (const [shard, list] of shards) {
+    disk.set(`${folder}/${shard}.json`, JSON.stringify({ format: 1, capabilities: list }));
+  }
+}
+
+beforeEach(() => {
+  __reset();
+  disk = new Map();
+  world = "w1";
+
+  (globalThis as any).game = {
+    get world() {
+      return world ? { id: world } : undefined;
+    },
+    user: { isGM: true, id: "gm-1" },
+    users: { activeGM: { id: "gm-1" } },
+  };
+  (globalThis as any).foundry = {
+    applications: {
+      apps: {
+        FilePicker: {
+          createDirectory: async () => {},
+          upload: async (_src: string, path: string, file: any) =>
+            disk.set(`${path}/${file.name}`, file.parts.join("")),
+        },
+      },
+    },
+    utils: { getRoute: (p: string) => `/${p}` },
+  };
+  (globalThis as any).File = class {
+    constructor(
+      public parts: any[],
+      public name: string,
+    ) {}
+  };
+  (globalThis as any).fetch = async (url: string) => {
+    const body = disk.get(String(url).replace(/^\//, ""));
+    return body === undefined
+      ? { ok: false, text: async () => "" }
+      : { ok: true, text: async () => body };
+  };
+});
 
 test("prose that differs only in markup or spacing hashes the same", () => {
   // This is where the corpus's 70% dedup rate comes from: 4,661 SRD features, 1,387 wordings.
@@ -148,4 +211,45 @@ test("import survives a malformed payload rather than throwing mid-merge", () =>
   assert.equal(report.added, 1);
   assert.equal(report.skipped, 2);
   assert.equal(all().length, 1);
+});
+
+// ---- World scoping ------------------------------------------------------------------------------
+
+test("a world writes and reads its shards under its own folder", async () => {
+  put(cap("3333000000000001"));
+  await flush();
+  assert.ok(
+    [...disk.keys()].every((path) => path.startsWith(MINE)),
+    `expected only ${MINE}, got ${[...disk.keys()].join(" ")}`,
+  );
+
+  __reset();
+  await warm();
+  assert.equal(size(), 1, "and reads them back from there");
+});
+
+test("the pre-0.7.4 shared tree is never read, whatever is sitting in it", async () => {
+  // Deliberately NOT a migration (user, 2026-08-17). A cache from another campaign is a plausible
+  // route to a descriptor nobody in this world asked for, and that failure surfaces weeks later as a
+  // rule behaving oddly rather than as anything traceable to an adoption.
+  writeDisk(LEGACY, [cap("4444000000000001"), cap("4444000000000002")]);
+  await warm();
+
+  assert.equal(size(), 0, "a world starts empty and re-buys its own wordings");
+  assert.equal(get("4444000000000001"), undefined);
+});
+
+test("a world whose id cannot be read stores nothing rather than falling back to the shared tree", async () => {
+  // The only fallback available is the tree being retired, and a path built from `undefined` would
+  // scatter shards into a folder literally named "undefined". With no world there is nothing to
+  // cache for, so `flush` clears rather than warning on every attempt for ever.
+  world = null;
+  writeDisk(LEGACY, [cap("6666000000000001")]);
+  const before = [...disk.keys()].sort();
+  await warm();
+  assert.equal(size(), 0, "the shared tree is not read");
+
+  put(cap("6666000000000002"));
+  assert.equal(await flush(), 0, "and nothing is written");
+  assert.deepEqual([...disk.keys()].sort(), before, "no file anywhere was created or rewritten");
 });

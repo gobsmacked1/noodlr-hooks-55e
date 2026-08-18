@@ -262,6 +262,15 @@ body.noodlr-compact-cards .message p.supplement {
   opacity: 0.6;
 }
 
+/* Version drift. Deliberately not styled as a warning: the reading is probably still correct, and a
+   red banner on a third of a cache would teach a GM to ignore the row. */
+.noodlr-capability__drift {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  font-style: italic;
+  opacity: 0.75;
+}
+
 .noodlr-badge {
   padding: 0 0.4em;
   border: 1px solid var(--color-border-light-tertiary, rgba(0, 0, 0, 0.2));

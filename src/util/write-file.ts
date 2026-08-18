@@ -5,11 +5,22 @@
 // out of a chat message. `noodlr` has a whole media-storage layer with a configurable folder; this
 // needs one function and a fixed destination, so it has one.
 //
-// Foundry v13 forbids uploads into `modules`, `systems`, `worlds` and the data root, but allows any
-// new top-level folder, so reports land in `noodlr-hooks/`. A failure here returns null and is
-// reported to the console: the report is also printed there, so losing the file loses nothing.
+// WORLD-SCOPED, into `worlds/<id>/noodlr-hooks/`. A survey is a census of one world's sheets, so a
+// shared top-level folder meant the second world on a host silently overwrote the first world's
+// report — same filename, no warning, and the reader has no way to tell which world they are looking
+// at. The FilePicker's refusal to browse into `worlds/` is a client-side UI restriction and does not
+// apply to a module's own `upload` call; verified against a live server.
+//
+// A failure here returns null and is reported to the console: the report is also printed there, so
+// losing the file loses nothing.
 
 import { log } from "../constants";
+
+/** `worlds/<id>/noodlr-hooks`, or the pre-0.7.4 shared folder when the world id cannot be read. */
+function defaultFolder(): string {
+  const world = (game as any)?.world?.id;
+  return world ? `worlds/${world}/noodlr-hooks` : "noodlr-hooks";
+}
 
 /** Resolve the v13 FilePicker class (namespaced), falling back to the legacy global. */
 function filePicker(): any {
@@ -42,7 +53,7 @@ async function ensureFolder(folder: string): Promise<void> {
 export async function writeReport(
   fileName: string,
   data: unknown,
-  folder = "noodlr-hooks",
+  folder = defaultFolder(),
 ): Promise<string | null> {
   const fp = filePicker();
   if (!fp?.upload) return null;

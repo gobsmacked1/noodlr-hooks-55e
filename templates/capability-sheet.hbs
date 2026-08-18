@@ -41,6 +41,10 @@
           {{/if}}
         </div>
 
+        {{#if this.drift}}
+          <p class="noodlr-capability__drift">{{this.drift}}</p>
+        {{/if}}
+
         <details class="noodlr-capability__prose">
           <summary>{{localize "NOODLRHOOKS.Capabilities.Sheet.Prose"}}</summary>
           <p>{{this.prose}}</p>

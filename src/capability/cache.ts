@@ -16,14 +16,48 @@
 //     settles them; the collector awaits one flush at the end of a batch, so nothing is lost and the
 //     upload count is bounded by the number of shards touched rather than the number of compiles.
 
-import { debug, log, warn } from "../constants";
+import { MODULE_ID, debug, log, warn } from "../constants";
 import { isPrimaryGM } from "../util/gm";
+import { worldStamp } from "../util/provenance";
 import type { Capability } from "../integration/capability";
 import { exportable, normalizeCapability } from "../integration/capability";
 
-/** Not a setting. There is no scenario where a GM needs this somewhere else, and a movable path that
- *  silently recreates itself when moved would be worse than none. */
-const FOLDER = "assets/noodlr-hooks-55e/capabilities";
+/**
+ * Where THIS world's compiled capabilities live. WORLD-SCOPED SINCE v0.7.4.
+ *
+ * Before that it was `assets/<module>/capabilities`, and `assets/` is a sibling of `worlds/` rather
+ * than a child of any one of them — so every world on a host shared one cache. That reads as an
+ * economy, since templated trait prose is byte-identical across creatures AND across worlds, and it
+ * carries three faults that outweigh it:
+ *
+ *   * TWO OPEN WORLDS CLOBBER EACH OTHER, silently. `writeShard` serialises a whole shard from this
+ *     client's `memory`, so world B flushing shard 3 overwrites everything world A had added to it.
+ *     Nothing guarded that, and the loss shows up as a descriptor simply not being there next warm.
+ *   * `pruneOrphans({includeAbsent: true})` in one world would delete another's wordings, because "no
+ *     sheet here produces this" is answered per world. Guarded only by there being no caller.
+ *   * A world backup does not carry it, so restoring a world restores an empty cache.
+ *
+ * NOTHING IS INHERITED FROM THE OLD SHARED TREE, and that was a deliberate call (user, 2026-08-17)
+ * against the obvious migration. A one-time read of a cache belonging to some other campaign — a
+ * different ruleset, different modules, different creatures — is a plausible route to a descriptor
+ * nobody in this world asked for, and the failure would surface as a rule behaving oddly weeks later
+ * rather than as anything traceable to an adoption. Re-buying a wording costs a model call once;
+ * chasing a poisoned cache costs days. `exportAll`/`importAll` remain the way to share on purpose.
+ *
+ * Not a setting: there is no scenario where a GM needs it somewhere else, and a movable path that
+ * silently recreates itself when moved would be worse than none. `worlds/<id>/assets/` is core's own
+ * home for a world's media — it exists before we touch it — and a named file under it is fetchable
+ * over the routed URL exactly like one under `assets/`, both verified against a live server.
+ *
+ * `null` when the world id cannot be read. There is no fallback on purpose: the only path available
+ * would be the old shared tree, which is the thing being retired, and a path built from `undefined`
+ * would scatter shards into a folder literally named "undefined". With no world there is also nothing
+ * to cache FOR, so the honest answer is to do nothing and say so.
+ */
+function folder(): string | null {
+  const world = (game as any)?.world?.id;
+  return world ? `worlds/${world}/assets/${MODULE_ID}/capabilities` : null;
+}
 
 /** 16 shards, so the SRD bestiary's 1,387 wordings land ~87 to a file. */
 const SHARDS = 16;
@@ -49,13 +83,19 @@ let warming: Promise<void> | null = null;
  * cached rule in". It is idempotent, so the compile path validating a normalised copy and then storing
  * through here costs nothing.
  *
+ * `stamp` records what the world was when a reading was MADE HERE, and the two callers that pass it are
+ * exactly the two where somebody just decided something: a fresh compile and a GM's own save. Reading a
+ * shard must not restamp, or every warm would claim the whole cache was read today and `capability/age.ts`
+ * could never report anything. An import must not either — an imported descriptor was compiled on
+ * somebody else's world, and its own stamp is the honest account of that, drift and all.
+ *
  * Notes are returned rather than logged: a warm read of a cache written before the repair existed
  * produces hundreds of them, and a line each would bury the summary that is the actually useful message.
  */
-function admit(capability: Capability, notes: string[]): Capability {
+function admit(capability: Capability, notes: string[], stamp = false): Capability {
   const { capability: fixed, notes: found } = normalizeCapability(capability);
   for (const note of found) notes.push(`${capability.id} ${note}`);
-  memory.set(fixed.id, fixed);
+  memory.set(fixed.id, stamp ? { ...fixed, compiledIn: worldStamp() } : fixed);
   return fixed;
 }
 
@@ -137,12 +177,12 @@ function routeUrl(path: string): string {
   return typeof getRoute === "function" ? getRoute(path) : `/${path}`;
 }
 
-async function ensureFolder(): Promise<void> {
+async function ensureFolder(dir: string): Promise<void> {
   const fp = filePicker();
   if (!fp?.createDirectory) return;
   // Each segment separately: createDirectory does not create intermediates, and it throws a benign
   // "EEXIST" for one that is already there.
-  const parts = FOLDER.split("/");
+  const parts = dir.split("/");
   let path = "";
   for (const part of parts) {
     path = path ? `${path}/${part}` : part;
@@ -154,26 +194,26 @@ async function ensureFolder(): Promise<void> {
   }
 }
 
-async function readShard(shard: string): Promise<Capability[]> {
+/** A shard that has never been written is the normal case, not an error worth a console line. */
+async function readShard(dir: string, shard: string): Promise<Capability[]> {
   try {
-    const resp = await fetch(routeUrl(`${FOLDER}/${shard}.json`), { cache: "no-store" });
+    const resp = await fetch(routeUrl(`${dir}/${shard}.json`), { cache: "no-store" });
     if (!resp.ok) return [];
     const data = JSON.parse(await resp.text()) as Shard;
     return Array.isArray(data?.capabilities) ? data.capabilities : [];
   } catch {
-    // A shard that has never been written is the normal case, not an error worth a console line.
     return [];
   }
 }
 
-async function writeShard(shard: string): Promise<void> {
+async function writeShard(dir: string, shard: string): Promise<void> {
   const fp = filePicker();
   if (!fp?.upload)
     throw new Error("FilePicker.upload unavailable (GM upload permission required).");
   const capabilities = [...memory.values()].filter((cap) => shardOf(cap.id) === shard);
   const body: Shard = { format: CACHE_FORMAT, capabilities };
   const file = new File([JSON.stringify(body)], `${shard}.json`, { type: "application/json" });
-  await fp.upload("data", FOLDER, file, {}, { notify: false });
+  await fp.upload("data", dir, file, {}, { notify: false });
 }
 
 // ---- The cache ------------------------------------------------------------------------------
@@ -186,13 +226,18 @@ export async function warm(): Promise<void> {
   if (warmed) return;
   if (warming) return warming;
   warming = (async () => {
+    const dir = folder();
+    warmed = true;
+    if (!dir) {
+      log("capability cache: no world id, so nothing is stored or read this session");
+      return;
+    }
     const shards = Array.from({ length: SHARDS }, (_, i) => i.toString(16));
-    const loaded = await Promise.all(shards.map(readShard));
     const notes: string[] = [];
-    for (const capabilities of loaded) {
+    const stored = await Promise.all(shards.map((shard) => readShard(dir, shard)));
+    for (const capabilities of stored) {
       for (const cap of capabilities) admit(cap, notes);
     }
-    warmed = true;
     log(`capability cache: ${memory.size} compiled`);
     reportRepairs("reading the cache", notes);
   })();
@@ -230,16 +275,22 @@ export function put(capability: Capability): boolean {
   const existing = memory.get(capability.id);
   if (existing && (existing.status === "locked" || existing.status === "rejected")) return false;
   const notes: string[] = [];
-  admit(capability, notes);
+  admit(capability, notes, true);
   reportRepairs(`storing "${capability.label}"`, notes);
   dirty.add(shardOf(capability.id));
   return true;
 }
 
-/** A GM edit. Always wins, including over a lock, because this IS the human having the last word. */
+/**
+ * A GM edit. Always wins, including over a lock, because this IS the human having the last word.
+ *
+ * Restamped, which is what makes Lock a free answer to version drift: a GM who has read a rule and
+ * frozen it has certified it against the ruleset in front of them, and that is worth exactly as much as
+ * a fresh compile without costing a call. See `capability/age.ts`.
+ */
 export function putOverride(capability: Capability): void {
   const notes: string[] = [];
-  admit(capability, notes);
+  admit(capability, notes, true);
   reportRepairs(`saving "${capability.label}"`, notes);
   dirty.add(shardOf(capability.id));
 }
@@ -259,13 +310,20 @@ export async function flush(): Promise<number> {
     dirty.clear();
     return 0;
   }
+  const dir = folder();
+  if (!dir) {
+    // No world, no folder. Cleared rather than left pending: retrying every flush for a path that
+    // cannot be built would warn for ever, and the descriptors still serve this session from memory.
+    dirty.clear();
+    return 0;
+  }
   const shards = [...dirty];
   dirty.clear();
-  await ensureFolder();
+  await ensureFolder(dir);
   let written = 0;
   for (const shard of shards) {
     try {
-      await writeShard(shard);
+      await writeShard(dir, shard);
       written++;
     } catch (err) {
       // Put it back, so the next flush retries rather than losing the compile silently.

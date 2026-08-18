@@ -1,5 +1,7 @@
 {
   "NOODLRHOOKS.Capabilities.Compiled": "Read {count} new abilities off the sheets on this scene.",
+  "NOODLRHOOKS.Capabilities.Drift": "Read under {was}, which is not what this world is running now. Probably still right — the wording has not changed — but if your rules update touched this ability, read it again, or lock it to record that you have checked it.",
+  "NOODLRHOOKS.Capabilities.DriftUnstamped": "Read before this module started recording which rules version it read under, so there is no telling. Read it again, or lock it to record that you have checked it.",
   "NOODLRHOOKS.Capabilities.Hint": "When a scene loads, hand each creature's written abilities — Regeneration, Pack Tactics, a monster's own Multiattack — to the Noodlr module, which asks an AI to turn them into rules this module can actually run. Each distinct wording is read once and then remembered forever, so a scene of twenty goblins costs one reading. It needs Noodlr installed and configured with your own AI provider key, and it spends a little of that credit the first time it meets an ability, which is why it is off until you ask for it. With it off, everything else in this module works exactly as before.",
   "NOODLRHOOKS.Capabilities.Name": "Read written abilities off creature sheets (uses Noodlr, costs AI credit)",
   "NOODLRHOOKS.Capabilities.Sheet.Compile": "Read it",

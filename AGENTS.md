@@ -134,7 +134,8 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
 - `src/integration/contract.ts` — `requestCompile()`, protocol **2**. Same `callAll` + `waitFor` +
   `handled` shape as `requestBehavior`, with one deliberate difference: it hands over a **batch**, so
   the listener can run a whole scene concurrently instead of one feature at a time.
-- `src/capability/cache.ts` — file-backed shards under `assets/noodlr-hooks-55e/capabilities/`,
+- `src/capability/cache.ts` — file-backed shards under `worlds/<id>/assets/noodlr-hooks-55e/capabilities/`
+ (install-wide `assets/` before v0.7.4, and that tree is never read — see the multi-world note),
   in-memory `Map` warmed at ready, keyed by normalized prose hash.
 - `src/capability/collect.ts` — walks the scene's actors, extracts features, dedups by prose hash,
   consults the cache, batches the misses into one request.
@@ -2495,24 +2496,116 @@ certain and that asymmetry is the design:**
 - **Nothing runs automatically.** A sweep on scene load would eventually delete something paid for, and
   quietly. The GM presses the button having read what it would take.
 
-#### THE CACHE IS PER INSTALL AND `absent` IS ANSWERED PER WORLD (2026-08-17)
+#### THE CACHE WAS PER INSTALL, AND `absent` IS ANSWERED PER WORLD (2026-08-17, fixed v0.7.4)
 
-Sharpened the moment a second test world appeared on the reference host — smaller, different scenes,
-different PCs and NPCs, deliberately varied to make testing obvious. The shards live under the shared
-`assets/` tree while `findOrphans` reads only `game.actors` and the loaded scenes, so **every wording
-belonging to the other world is `absent` in this one**, and `pruneOrphans({includeAbsent: true})` would
-have deleted most of a 1,022-wording cache bought over 87 minutes of real credit. The compendium caveat
-above understates this badly: it reads as a corner case about unplaced monsters, and the real exposure is
+Found the moment a second test world appeared on the reference host — smaller, different scenes, different
+PCs and NPCs, deliberately varied to make testing obvious. The shards lived under `assets/`, which is a
+**sibling** of `worlds/` rather than a child of any one of them, while `findOrphans` reads only
+`game.actors` and the loaded scenes. So **every wording belonging to the other world was `absent` in this
+one**: `surveyOrphans()` reported 878 of 1,099, and `pruneOrphans({includeAbsent: true})` would have
+deleted most of a 1,022-wording cache bought over 87 minutes of real credit. The compendium caveat above
+understated it badly — it reads as a corner case about unplaced monsters, and the real exposure was
 routine multi-world hosting.
 
-- **A large `absent` count on a fresh world is the expected reading, not a finding.** Say so before
-  anybody acts on it, because the number is alarming and the safe action is to do nothing.
-- **The sharing is a benefit in the other direction and is why the design stays.** Templated trait prose
-  is byte-identical across creatures (one wording covers 270 of them), so a new world inherits every hit
-  its predecessor paid for — Regeneration, Pack Tactics and friends are already answered for monsters this
-  world has never seen. Scoping the cache per world would buy safety by re-purchasing the corpus.
-- **`includeAbsent` is therefore a switch for a single-world install and nothing else.** Its default is
-  the whole safety property; do not add a caller that passes it, and do not put it on a button.
+- **Two faults were worse than the prune hazard and neither had been noticed, both silent.** `writeShard`
+  serialises a whole shard from this client's `memory`, so **two open worlds clobber each other** — world
+  B flushing shard 3 overwrites everything world A had added to it, and the loss surfaces as a descriptor
+  simply not being there on the next warm. And **a world backup did not carry the cache**, so restoring a
+  world restored an empty one.
+- **`folder()` is `worlds/<id>/assets/<module>/capabilities`, and THE OLD SHARED TREE IS NEVER READ.**
+  A one-time adoption was built and then **removed before release on the user's instruction
+  (2026-08-17)**, and the reasoning is worth keeping because the arithmetic argues the other way. The
+  cache key is normalised prose, so an inherited wording genuinely would answer for any world's sheets,
+  and abandoning 1,022 of them is real credit and 87 minutes thrown away. **It was still the wrong
+  trade: a descriptor arriving in a world that never asked for it is a rule behaving oddly weeks later
+  with nothing traceable to an adoption, and a day of that costs more than the recompile.** A cache
+  rebuys itself as the world is used; a cross-world contamination is diagnosed by somebody who does not
+  know it happened. Do not restore it. **`noodlr` took the same decision on the same day for RAG Lite's
+  silos**, so there is now no legacy read-through anywhere in either module — which also means the
+  `null`-versus-`[]` distinction in `readShard` (a missing file is not a deliberately emptied one) no
+  longer guards anything and is gone with it.
+- **A world whose id cannot be read stores NOTHING and reads nothing**, rather than falling back. A path
+  built from `undefined` scatters shards into a folder literally named "undefined", and there is no
+  longer any shared tree to fall back to. `flush` clears its dirty set instead of warning on every
+  attempt for ever. Pinned in `test/cache.test.ts`.
+- **`includeAbsent` remains a switch for a single-world install and nothing else.** Post-v0.7.4 a
+  world's `absent` count decays as the world is used, because only that world writes to it — but any
+  cache that predates the move, or one imported from somebody else, holds wordings that answer for no
+  sheet here. Do not add a caller that passes it, and do not put it on a button.
+- **`worlds/<id>/assets/` is core's own home for a world's extracted media, and a module MAY write there —
+  the FilePicker's refusal is its BROWSER UI, not the server.** Verified against the live server before
+  anything moved: `createDirectory` per segment succeeds, `upload` succeeds, and the file is fetchable over
+  the routed URL exactly like one under `assets/` (`world.json` fetches 200 too; every *directory* path
+  301s, same as `assets/`). Do not re-derive this from the picker — the picker refuses and the API does not.
+- **Survey reports moved too** (`write-file.ts`, `worlds/<id>/noodlr-hooks/`), and that one had a quieter
+  version of the same fault: a census is of ONE world's sheets, the filename is fixed, so the second world
+  on a host overwrote the first world's report with no warning and nothing in the file said which world it
+  described. Every census number quoted in this file came out of that folder.
+- **Unfixed by any of this, and it is a licensing question rather than a bug:** a shard stores the `prose`
+  it was compiled from, and the Data tree is served unauthenticated, so a named shard is publicly readable
+  — premium book text at a guessable URL. Moving to `worlds/` changes nothing about that (measured). The
+  remedy is a narrow nginx deny or dropping `prose` from what is written; `exportable()` already strips it
+  for sharing, and the capability sheet reads `feature.prose` off the live item rather than the cache, so
+  the stored copy may well be droppable. Not yet decided.
+
+#### Aging the cache: a version bump is a REPORT, never a bill (v0.7.4, `capability/age.ts`)
+
+Asked in the same breath as the world-scoping — "we likely need a mechanism of aging out our old server
+cache; how about every time there's a Foundry server version change and/or a new game system update?" —
+and the answer is yes to the *trigger* and no to the *eviction*. Those are two decisions and the second
+one is where the money is.
+
+- **EVICTING ON A VERSION BUMP IS A BILL NOBODY AGREED TO.** A dnd5e patch release is routine; a patch
+  release that silently starts an 87-minute unattended spend at the next scene load is not something a
+  GM can consent to after the fact. `recompileWorld` is deliberately called by no hook for exactly this
+  reason, and an automatic eviction is that hook wearing a different name.
+- **AND IT WOULD MOSTLY BE WRONG.** Version equality is a proxy for staleness so coarse it is nearly
+  useless here: almost every one of these readings is of prose that did not change and whose meaning did
+  not change, so 5.3.3 → 5.3.4 would re-buy a thousand identical answers to catch the handful that moved.
+- So the trigger is honoured as a **stamp and a census**. `compiledIn: {foundry, system}` is written by
+  `cache.admit` and `capability/age.ts` compares it back: one italic line on the sheet row naming what
+  the reading was made under, and `api.surveyCacheAge()` grouping the whole cache by stamp. **The two
+  responses were already built** — Recompile buys a fresh reading for one row, and **Lock restamps for
+  free**, which is the important half: a GM who has read a rule and frozen it has certified it against
+  the ruleset in front of them, and that is worth as much as a fresh compile at no cost. `putOverride`
+  restamps for that reason.
+- **THE STAMP IS THE CACHE'S JOB, NOT THE COMPILER'S**, and that division is not cosmetic. The compiler
+  answers a question about prose and knows nothing about the ruleset the answer will execute under —
+  it lives in `noodlr`, which has no opinion about which game is being played. `compiledBy` (model,
+  timestamp, schema) is the compiler's account of itself; `compiledIn` is ours of the world.
+- **Only two callers stamp: a fresh compile and a GM save.** A warm read must not, or every page load
+  would claim the whole cache was read today and this could never report anything. **An import must not
+  either** — an imported descriptor was compiled on somebody else's world and its own stamp is the
+  honest account of that, drift and all.
+- **SCHEMA IS THE ONE AXIS THAT COULD JUSTIFY A REFUSAL AND STILL DOES NOT GET ONE.** A bump means the
+  descriptor's SHAPE may be unreadable, which sounds like grounds for failing closed — but a blanket
+  refusal on a bump switches every rule in the world off at once, silently, which is the failure this
+  repo documents at length under "a silent stand-aside is a bug report waiting to happen". Per-rule
+  machinery already covers it *with a reason*: `normalizeCapability` repairs known shape drift on the
+  way in, `validateCapability` reports an unrecognised key, `isExecutable` refuses what it cannot read
+  and the sheet says so. What was missing is that **`compiledBy.schema` had never been read by
+  anything at all** — enforcing it means counting it, not vetoing on it.
+- **Three readings that are each easy to get backwards, all pinned in `test/age.test.ts`.** An
+  UNSTAMPED entry is `"unstamped"` and never a version mismatch — there is no version to mismatch and
+  calling it one invents a fact. A stamp NEWER than the current schema is **not** drift: a cache
+  written by a later build and read by an earlier one is a downgrade, and the normaliser is what has to
+  cope, not a report. And an **unreadable world** compares as nothing-to-say rather than as drift on
+  every row, or one missing global lights up the entire cache at once — the noise that teaches a GM to
+  ignore the line.
+- **`0` is the absence of a schema, not schema zero.** `CAPABILITY_SCHEMA` is 1 today, so
+  `schema - 1` is zero and a test written against the shipped constant cannot express
+  "older but stated" — it silently asserts nothing and passes. `test/age.test.ts` builds its `now` by
+  hand for that reason, and pins the unstated case separately.
+- **Its own module rather than part of `hygiene.ts`**, because the two answer different questions:
+  hygiene is *reachability* (does any sheet still produce this) and age is *freshness* (was this read
+  under the rules it will run under). A drifted entry is perfectly reachable and a locked one is
+  perfectly current.
+- **`util/provenance.ts` exists to avoid a cycle**, and only for that: `cache.ts` stamps and `age.ts`
+  compares, so whichever owned `worldStamp()` the other would import across. A cycle between two files
+  that both run at load works under ESM right up until somebody moves an initialiser to module scope.
+- Deliberately absent: any automatic action, and any per-row "stale" badge styled as a warning. The
+  drift line is italic and understated because **the reading is very probably still correct**, and a
+  red banner on a third of a cache is a channel a GM learns to dismiss.
 
 ### The honest baseline, and the two ways 12.4% was wrong at once (v0.6.6)
 
@@ -4047,6 +4140,47 @@ from scratch rather than assumed to be covered.
 - **The `absent` hazard is now measured, not predicted: 878 orphans, every one `absent`, `prunable` 0.**
   Those 878 are the first world's paid-for wordings, and `pruneOrphans({includeAbsent: true})` run from
   here would delete them. See the hygiene note above.
+
+### The clean-world smoke test, and the refusal predicate finally firing in the field (v0.7.3, 2026-08-17)
+
+13 DDB-imported player characters plus the Troll, dropped one at a time onto a scene with no combat, on the
+world described above — the first test of this module against content that has never met midi-qol or Chris's
+Premades. **1,696 features read off 14 creatures, zero errors from either noodlr module in the whole session.**
+The only errors in the log are Polyglot failing to parse its own fonts. Worth recording because the question
+the world was built to answer — does any of this need those modules — is now answered by a run rather than by
+an argument.
+
+- **The `on_hit` refusal predicate fired on live imported content, four times, and this is its first
+  confirmation outside a test.** `Fire Bolt`, `Create Bonfire` and `Infestation` each compiled to a rule
+  restating the damage the activity already rolls, and each is refused by `duplicatesActivityDamage` with the
+  reason on the capability sheet; `Sneak Attack` is refused by `sneakClaimedNatively` because we deal it. That
+  is 45-of-71 damage restatement, met and declined in the wild. **The whole `on_hit` dispatch rests on this
+  guard**, and a doubling is arithmetic rather than an error, so a live confirmation is worth more here than
+  in most places.
+- **DDB IMPORTER GIVES UNARMED STRIKE THE FINESSE PROPERTY, so it qualifies for Sneak Attack.** Measured:
+  `Unarmed Strike | type=natural | props=fin`. RAW it has neither Finesse nor a ranged attack, so this is
+  content drift and not a reading error — `qualifyingWeapon` is doing exactly what this file says it must,
+  believing the sheet over the book. **Consequence to expect reported: a rogue is offered Sneak Attack on a
+  punch.** Left alone deliberately. The alternative is a hard-coded exception for one item name, which is the
+  opposite of every other judgement in `system/`, and the sheet is the authority the whole module is built on.
+  If a table objects, the property comes off the item.
+- **`hits` in `CollectReport` counted OCCURRENCES where every other number in this layer counts WORDINGS.**
+  Twenty goblins sharing one cached Pack Tactics reported `hits: 20`, and `distinct` was derived as
+  `hits + misses`, so the same scene reported twenty distinct wordings as well. Live, that read as
+  **1,252 distinct / 438 known** against `surveyScene`'s honest **997 / 183** — a cache covering a third of
+  the scene when it covered all of what it had been asked. Functionally nothing: `misses` was always a Map and
+  was always the thing bought. **But the number goes straight into a log line, and this file's own second-world
+  census quotes collector output.** Counted through a Set now, and pinned — the existing hit test used ONE
+  creature, so it passed with the bug in place and certified nothing.
+- **A diagnostic list is joined with ` | `, not `, `.** dnd5e weapon names contain commas, so two hand
+  crossbows rendered as `Crossbow, Hand, Crossbow, Hand` and read as four weapons. Same doctrine as the
+  flat-output rule: a list that cannot be counted has not been reported.
+- Noted and left: `qualifyingWeapons` filters on `equipped` and the runtime predicate does not, so a stowed
+  dagger is absent from the survey and would still qualify on a swing. Under-reporting raises a false alarm
+  somebody investigates; over-reporting answers the question wrongly and closes it. The doc comment says so.
+- **`DAE | Deprecated special duration: turnStartSource` is DAE warning about ITS OWN vocabulary**, on the 196
+  inert `specialDuration` entries above. It is not addressed to us and there is nothing here to change; it is
+  the same finding arriving as a console line.
 
 ## Open items carried over from noodlr
 

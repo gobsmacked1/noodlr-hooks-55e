@@ -601,6 +601,13 @@ export interface Capability {
   rules: CapabilityRule[];
   compiledBy?: { model: string; at: number; schema: number };
   /**
+   * WHAT THE WORLD WAS WHEN THIS READING WAS MADE. Stamped by the cache rather than by the compiler:
+   * the compiler answers a question about prose and knows nothing about the ruleset that prose will be
+   * executed under, and this is the ruleset. See `capability/age.ts` for what is done with it —
+   * reported, never acted on.
+   */
+  compiledIn?: { foundry: string; system: string };
+  /**
    * `locked` survives recompilation. Once a GM has corrected a bad compile, a model upgrade or a cache
    * miss must never quietly undo that work.
    */

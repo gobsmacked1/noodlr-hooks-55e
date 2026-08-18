@@ -101,6 +101,7 @@ import {
   surveyScene,
 } from "./capability/collect";
 import { pruneOrphans, surveyOrphans } from "./capability/hygiene";
+import { surveyCacheAge } from "./capability/age";
 import { surveyStanding } from "./capability/standing";
 import { openCapabilitySheet, registerCapabilitySheet } from "./apps/capability-sheet";
 
@@ -164,6 +165,7 @@ export interface NoodlrHooksApi {
   surveyScene(): Promise<unknown>;
   surveyStanding(): unknown;
   surveyOrphans(): Promise<unknown>;
+  surveyCacheAge(): Promise<unknown>;
   pruneOrphans(options?: { includeAbsent?: boolean }): Promise<unknown>;
   compileScene(): Promise<unknown>;
   recompileWorld(options?: { since?: number }): Promise<unknown>;
@@ -327,6 +329,8 @@ const api: NoodlrHooksApi = {
   surveyStanding: () => surveyStanding(),
   /** Cached descriptors nothing can reach any more, and which of them are safe to remove. */
   surveyOrphans: () => surveyOrphans(),
+  /** Which ruleset each cached reading was made under. Reports; never spends. */
+  surveyCacheAge: () => surveyCacheAge(),
   /** Remove them. `declined` only by default; `{includeAbsent: true}` for the probable ones too. */
   pruneOrphans: (options?: { includeAbsent?: boolean }) => pruneOrphans(options),
   /** Read the scene now, rather than waiting for the next load. */
