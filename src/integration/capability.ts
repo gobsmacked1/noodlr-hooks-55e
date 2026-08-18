@@ -122,6 +122,22 @@ const WIRED: Partial<Record<TriggerEvent, RunsOn>> = {
   // therefore inherits.
   on_hit: "primary-gm",
   on_miss: "primary-gm",
+  // Dispatched from `rules/saves.ts` once the save's verdict has settled, same client that rolls
+  // NPC saves, offers Barbs and legendary resistance, and applies save-for-half damage. See
+  // `capability/saves.ts` for why they fire from the caster's side and for the settings this
+  // therefore inherits. A save with no damage (Hold Person) still fires.
+  on_save_failed: "primary-gm",
+  on_save_succeeded: "primary-gm",
+  // Chat-message dispatch, not the hit verdict — Reckless Attack and Pack Tactics fire when the
+  // roll lands, not when damage is applied. See `capability/attack-roll.ts`. Independent of
+  // auto-damage, unlike `on_hit`.
+  on_attack_roll: "primary-gm",
+  // `createActiveEffect` is a document hook: every client sees the new status.
+  // See `capability/condition-applied.ts` — afflicted creature's side only.
+  on_condition_applied: "primary-gm",
+  // `updateToken` fires everywhere for a move made by any means, including forced movement.
+  // See `capability/move.ts` — mover's side only. Unset damage targets are refused.
+  on_move: "primary-gm",
 };
 
 export const WIRED_TRIGGERS: readonly TriggerEvent[] = Object.keys(WIRED) as TriggerEvent[];

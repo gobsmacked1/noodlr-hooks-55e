@@ -57,6 +57,7 @@ import {
   tokenFromActorUuid,
   type DamagePart,
 } from "./cards";
+import { fireSaveTriggers, type SaveVerdict } from "../capability/saves";
 
 /** How long an unfinished activation is kept. A save nobody ever rolls must not pin a target forever. */
 const ACTIVATION_TTL_MS = 5 * 60 * 1000;
@@ -84,6 +85,8 @@ interface TargetState {
 /** One use of a save activity, and everything still outstanding about it. */
 interface Activation {
   usageId: string;
+  /** The usage card itself, so the caster and the activity are readable without a chat-log lookup. */
+  usage: any;
   /** "half" | "none" | "full". Known once the damage arrives; before that, unused. */
   onSave: string;
   damage: { message: any; parts: DamagePart[] } | null;
@@ -183,6 +186,7 @@ async function onUsage(message: any): Promise<void> {
   if (!usageId) return;
 
   const act = activation(usageId);
+  act.usage = message;
   act.deals = Number(activity?.damage?.parts?.length ?? 0) > 0;
   act.source = String(item?.name ?? activity?.name ?? "");
   act.ask = {
@@ -264,6 +268,7 @@ function activation(usageId: string): Activation {
   if (existing) return existing;
   const act: Activation = {
     usageId,
+    usage: null,
     onSave: "half",
     damage: null,
     ask: null,
@@ -328,6 +333,12 @@ async function settle(act: Activation): Promise<void> {
   act.asking = asking;
   await asking;
 
+  // Compiled save riders (Hold Person restrain, Charm Person) fire whether or not this activity
+  // deals damage. The damage loop below returns early when none has arrived; that must not take
+  // the riders with it. After `spoilAndResist`, so a spoiled success and a bought failure have
+  // already moved between the two lists.
+  await dispatchSaveTriggers(act);
+
   if (!act.damage) return;
 
   const entries: DamageEntry[] = [];
@@ -349,6 +360,31 @@ async function settle(act: Activation): Promise<void> {
   }
   if (!entries.length) return;
   await applyRolledDamage(act.damage.message, entries, act.damage.parts);
+}
+
+/**
+ * Hand every target whose verdict is final to the capability layer.
+ *
+ * A failure that can still be bought with a legendary resistance is not final — `offered` is what
+ * `offerResistances` sets, including when it waits on a damage roll that has not arrived yet. A
+ * success is final once Barbs has had its pass (which `spoilAndResist` already awaited).
+ */
+async function dispatchSaveTriggers(act: Activation): Promise<void> {
+  const usage = act.usage ?? (game.messages as any)?.get?.(act.usageId) ?? null;
+  const verdicts: SaveVerdict[] = [];
+  for (const state of act.targets.values()) {
+    verdicts.push({
+      doc: state.doc,
+      success: state.success,
+      saveMessage: state.saveMessage,
+      pendingResistance: state.success === false && !state.offered && canResist(state.doc?.actor),
+    });
+  }
+  try {
+    await fireSaveTriggers(usage, verdicts);
+  } catch (err) {
+    log("save resolution: compiled save triggers failed:", err);
+  }
 }
 
 /**

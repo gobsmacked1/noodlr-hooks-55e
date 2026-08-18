@@ -27,17 +27,17 @@ export interface EvalContext {
   self: Subject;
   target?: Subject;
   /**
-   * Whoever swung. On `on_damage_taken` that is the other creature; on `on_hit` it is `self`, because
-   * these fire from the ATTACKER's side — the creature carrying the rule is the one attacking.
+   * Whoever swung, or whoever forced the save. On `on_damage_taken` that is the other creature; on
+   * `on_hit` and the save triggers it is `self`, because those fire from the ability owner's side.
    */
   attacker?: Subject;
   /**
    * The creature the event is ABOUT, where that is neither of the above by default.
    *
    * Exists because `attacker` and `trigger` collapse onto the same creature the moment an event fires
-   * from the attacker's side, and the fallback below would then resolve `trigger` to the attacker —
-   * the opposite of what it means everywhere else. Nothing sets it but the attack dispatch, so every
-   * older call site keeps the behaviour it had.
+   * from the ability owner's side, and the fallback below would then resolve `trigger` to the owner —
+   * the opposite of what it means everywhere else. Set by the attack dispatch and the save dispatch;
+   * every older call site keeps the behaviour it had.
    */
   trigger?: Subject;
   spellLevel?: number;

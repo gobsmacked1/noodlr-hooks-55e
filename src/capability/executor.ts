@@ -53,6 +53,10 @@ import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from ".
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
 import { sneakClaimedNatively } from "../rules/sneak";
+import { ruleMatchesApplied } from "./applied";
+import { registerAttackRollTriggers } from "./attack-roll";
+import { registerConditionTriggers } from "./condition-applied";
+import { registerMoveTriggers } from "./move";
 
 // ---- Firing -------------------------------------------------------------------------------------
 
@@ -80,11 +84,17 @@ export interface TriggerContext extends EvalContext {
   /** Populated on `on_damage_taken`, so a rule can react to what actually landed. */
   damage?: { amount: number; types: string[] };
   /**
-   * Populated on `on_activity_use`, and on `on_hit`/`on_miss` — where it is load-bearing rather than
-   * informational, because `duplicatesActivityDamage` below cannot refuse a restated damage line
-   * without it. Dispatching an attack trigger with this unset silently doubles every weapon's damage.
+   * Populated on `on_activity_use`, and on `on_hit`/`on_miss`/`on_save_failed`/`on_save_succeeded` —
+   * where it is load-bearing rather than informational, because `duplicatesActivityDamage` below
+   * cannot refuse a restated damage line without it. Dispatching an attack or save trigger with this
+   * unset silently doubles every weapon's or spell's damage.
    */
   activity?: any;
+  /**
+   * Populated on `on_condition_applied`. `fireTrigger` uses it to drop rules that are not about
+   * the statuses that just landed — Nature's Ward must not strip poison because frightened did.
+   */
+  appliedStatuses?: string[];
 }
 
 export interface RuleOutcome {
@@ -155,7 +165,13 @@ export async function fireTrigger(
     // everything else keeps the order it was written in.
     const firing = (capability.rules ?? [])
       .map((rule, index) => ({ rule, index }))
-      .filter(({ rule }) => rule.trigger?.event === event)
+      .filter(({ rule }) => {
+        if (rule.trigger?.event !== event) return false;
+        if (event === "on_condition_applied") {
+          return ruleMatchesApplied(rule, ctx.appliedStatuses ?? []);
+        }
+        return true;
+      })
       .sort(
         (a, b) =>
           Number(b.rule.effect?.kind === "spend_resource") -
@@ -174,6 +190,21 @@ export async function fireTrigger(
         continue;
       }
       try {
+        if (
+          event === "on_move" &&
+          rule.effect?.kind === "damage" &&
+          (rule.effect.target === undefined || rule.effect.target === null)
+        ) {
+          // Ashardalon's Stride in the live cache left target unset; `subjectOf` would default
+          // that to the mover and the caster would burn themselves. See `capability/move.ts`.
+          outcomes.push({
+            capability: capability.label,
+            ruleIndex: index,
+            fired: false,
+            reason: "on_move damage left its target unset — refusing to guess the mover",
+          });
+          continue;
+        }
         const outcome = await runRule(capability, rule, index, ctx, binding.item);
         if (!outcome.fired && rule.effect?.kind === "spend_resource") {
           unpaid = outcome.reason ?? "the resource could not be spent";
@@ -611,6 +642,13 @@ export function registerCapabilityExecutor(): void {
       spellLevel: Number(activity?.item?.system?.level) || undefined,
     });
   });
+
+  // The three remaining Phase 3 events. Each lives in its own file for the same reason `on_hit`
+  // does: the compiler has one word for two opposite readings, and the direction has to be
+  // decided once, in the open. Hooks stay in those files; `runsOn` still gates execution.
+  registerAttackRollTriggers();
+  registerConditionTriggers();
+  registerMoveTriggers();
 
   log("capability executor registered");
 }

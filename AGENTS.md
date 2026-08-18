@@ -248,10 +248,13 @@ off a binding did nothing and the action ledger could not see a compiled Multiat
 `registerCapabilityExecutor()` attaches a hook to `on_damage_taken`, `on_zero_hp`, `on_turn_start`,
 `on_turn_end` and `on_activity_use`; v0.7.0 added `on_short_rest` and `on_long_rest`, and v0.7.1 added
 `on_hit` and `on_miss`, which are dispatched from `capability/attack.ts` rather than from a hook of their
-own because nothing in dnd5e reports a hit. The other eight never fire. That is fine and was always the
-design — the compiler is offered all seventeen because "the cloak recharges on a long rest" is a true
-reading whether or not this build listens for one, and a vocabulary that hid the unheard events would
-teach the model to mis-file rules rather than skip them.
+own because nothing in dnd5e reports a hit. v0.7.6 finished Phase 3: `on_save_failed` /
+`on_save_succeeded`, `on_attack_roll`, `on_condition_applied`, `on_move`. **Fourteen of seventeen
+now fire.** The three that do not: `always` (answered by query, see `standing.ts`), `on_enter_area`
+(needs `create_area`) and `on_leave_reach` (opportunity attacks already cover the printed case).
+That is fine and was always the design — the compiler is offered all seventeen because "the cloak
+recharges on a long rest" is a true reading whether or not this build listens for one, and a
+vocabulary that hid the unheard events would teach the model to mis-file rules rather than skip them.
 
 **What was wrong is that `isExecutable()` never looked at the trigger.** It gated on adjudication, the
 effect kind and the predicates, so a rule with a perfectly executable `heal` hanging off
@@ -375,8 +378,8 @@ in a way nothing on the descriptor resolves.
  were already right; `trigger` means "the creature this event is about" everywhere else, and its old
  `attacker ?? target` fallback resolves to the ATTACKER the moment an event fires from the attacker's side —
  which is `self`. A guard reading `who: "trigger"` would have tested the biter's hit points instead of the
- bitten creature's, silently and in the plausible direction. Nothing but this dispatch sets it, so every
- older call site keeps the behaviour it had.
+ bitten creature's, silently and in the plausible direction. Set by this dispatch and by the save
+ dispatch below; every older call site keeps the behaviour it had.
 - **`ctx.activity` IS NOT OPTIONAL ON THIS PATH.** `duplicatesActivityDamage` is the only thing standing
  between a compiled "on a hit, deal 1d10 fire" and a cantrip's damage being rolled twice — and it can only
  refuse when the activity is in hand. Dispatching without it doubles the damage of every attack in the
@@ -406,6 +409,112 @@ in a way nothing on the descriptor resolves.
  placeable or the document and in their `getActiveTokens` arguments. That is a real duplication and a
  different question from `speakerToken`, which this dispatch uses. Consolidating it touches perception and
  readying and is not required by anything here.
+
+### `on_save_failed` / `on_save_succeeded` (2026-08-18)
+
+The highest-yield remaining trigger — **289 `on_save_failed` and 39 `on_save_succeeded`**,
+`npm run census:trigger -- <cache> on_save_failed on_save_succeeded` over the 1,105-wording
+noodlr-test cache — and it is dispatched from `capability/saves.ts`, called by `rules/saves.ts`
+after `spoilAndResist`. Same shape as `on_hit`, arriving at the other verdict this module already
+reads.
+
+- **"ON A FAILED SAVE" IS TRUE OF THE CASTER AND OF THE CREATURE THAT ROLLED, AND THE COMPILER HAS
+ ONE WORD FOR BOTH.** Hold Person restrains what failed; Evasion is a property of the creature
+ saving. So the direction is decided once, here, **on evidence**: 188 of 249 engine-adjudicated
+ save rules point `effect.target` at `target` (52 unset, 7 `self`, 2 `trigger`). Every common one
+ reads "when I force a save and it fails, do this to what failed". **These fire from the CASTER's
+ side and only from the caster's side.**
+- **The saver's reading is NOT implemented, deliberately**, for the same reason the defender's
+ `on_hit` is not. It needs `on_save_failed_by` / `on_save_succeeded_by`. Until then Evasion,
+ Avoidance, Circle of Power and Prone Deficiency compile, bind, and never fire, which the
+ capability sheet shows. The seven `self` engine rules are not a counter-example: Contact Other
+ Plane is a caster saving against their own spell (`target === self`), and the rest are those
+ saver-side traits.
+- **A SAVE WITH NO DAMAGE STILL FIRES.** Hold Person is the specimen and `deals === false`. The
+ early `if (!act.damage) return` in `settle()` is why this cannot be tacked onto the damage-apply
+ loop — that return is load-bearing for damage and would have silently dropped every condition
+ rider.
+- **THE VERDICT IS FINAL ONLY AFTER BARBS AND LEGENDARY RESISTANCE.** A spoiled success becomes a
+ failure; a bought failure becomes a success. Firing `on_save_failed` and then `on_save_succeeded`
+ on the same message when Resist lands would apply both halves of Hold Person. `pendingResistance`
+ waits on a failure that `canResist` and has not been `offered` yet — including the pass that is
+ still waiting on a damage roll to price the stake.
+- **Idempotency is per SAVE message, not per usage card.** One Fireball is five saves and five
+ events. A second `settle` (damage arriving, a card re-render, a hand-pressed Resist) must not
+ restrain twice.
+- **`ctx.activity` IS NOT OPTIONAL**, same as `on_hit`. A Fireball compiled to "on a failed save,
+ deal 8d6 fire" is the restated `damage.parts` line. `test/saves-trigger.test.ts` validates every
+ damage specimen first, for the same reason `attack.test.ts` does.
+- **Coupled to auto-saves, and `capabilityAdvisories()` says so.** The reading lives in one place;
+ switching the layer off, or letting midi own saves or damage, takes the riders with it. A second
+ parallel `readSave` would be two answers to "did that save". The on-save advisory is independent
+ of the on-hit one, because a table can have auto-damage on and auto-saves off.
+- **Subjects match the attack dispatch.** `self` / `attacker` = caster (read off the *usage* card,
+ never the save — the save's speaker is the saver). `target` / `trigger` = the creature that
+ rolled. `EvalContext.trigger` is set explicitly for the same inversion the attack path found.
+
+### `on_attack_roll` (v0.7.6, 2026-08-18)
+
+34 rules in the live 1,105-wording cache, and almost every engine one is `grant_advantage` /
+`impose_disadvantage` / `modify_speed` — none of which this build executes (Phase 4 `duration`).
+Wiring it still matters: the sheet badges those as waiting on an effect kind rather than as an
+unheard trigger, and a rule that DOES run (a future advantage injector, or a `spend_resource`)
+fires without a second hook.
+
+- **THIS IS NOT `on_hit`.** It fires when the roll lands in chat, before anyone knows whether it
+ connected — Reckless Attack, Pack Tactics, Faerie Fire. Coupling it to auto-damage would make
+ those inert on every table that switched damage off, for no reason. `capabilityAdvisories()`
+ says so on the on-hit line.
+- **Chat, not `dnd5e.rollAttack`.** That hook fires only on the rolling client. `createChatMessage`
+ and `updateChatMessage` fire everywhere, which is the same reason Ready and Stealth read attacks
+ off the card. Midi fills the roll onto an existing workflow card, hence the update hook.
+- **THE DIRECTION IS THE ATTACKER'S**, on the same evidence as `on_hit`. Reckless Attack and Zephyr
+ Strike read "when I roll". Warding Flare, Shadowy Dodge and Soul of Vengeance are the defender's
+ or a third party's reading and are NOT implemented — they need `on_attack_roll_by`. Until then
+ they compile, bind, and never fire usefully.
+- **One event per MESSAGE, not per target.** Zephyr Strike's speed bump is one change.
+- Idempotency is the message id, cap 64. No speaker token means no fire, not a throw.
+
+### `on_condition_applied` (v0.7.6, 2026-08-18)
+
+8 rules in that cache. Dispatched from `createActiveEffect` after the effect exists, so a
+`has_status` guard on the same status can see it — Nature's Ward is "when you are poisoned, you
+are not", and the poison has to be on the actor for that guard to pass before the remove runs.
+
+- **THE DIRECTION IS THE AFFLICTED CREATURE'S.** Nature's Ward, Wild Shape and Mindless Rage all
+ name `self`. Melody of Sheltered Rest strips Surprise from allies in an aura and is the
+ watcher's reading — NOT implemented. It needs `on_condition_applied_on`. Until then those
+ compile, bind, and never fire usefully.
+- **A hook that names no status must not run every bound rule.** `ruleMatchesApplied` in
+ `capability/applied.ts` is the filter: a `has_status` / `lacks_status` guard names what it is
+ watching for, and a `remove_status` / `apply_status` with no such guard names the status in the
+ effect. A rule that names no status at all is skipped. Guessing would fire every bound rule on
+ every effect, which is how Wild Shape would cancel itself the moment `transformed` landed (its
+ effect removes `transformed`; its guard is `incapacitated`).
+- **Wild Shape is the specimen that proves the filter.** Matching `effect.status` alone would
+ drop the form on arrival. Matching the guard's named status does not.
+- Idempotency is the effect id, cap 64.
+
+### `on_move` (v0.7.6, 2026-08-18)
+
+9 rules in that cache. Dispatched from `updateToken` when `x` / `y` / `elevation` changes, 150 ms
+debounce, 400 ms settle window keyed on token + destination so walking to A, then B, then back
+to A is three events.
+
+- **THE DIRECTION IS THE MOVER'S.** Ashardalon's Stride is that reading. Crown of Radiance and
+ Booming Blade wait for someone ELSE to walk near them and need `on_move_by`. Until then those
+ compile, bind, and never fire usefully.
+- **FORCED MOVEMENT FIRES.** Ashardalon's fire does not care why the caster moved, and
+ opportunity-attack-style riders are the other reading, which this file does not implement.
+ `isForcedMovement` is not consulted.
+- **UNSET DAMAGE TARGETS ARE REFUSED, not defaulted to the mover.** `subjectOf` treats a missing
+ `effect.target` as `self`, and Ashardalon's Stride in the live cache left the target unset with
+ a `within_distance` guard that compares the mover to itself (0 ft ≤ 5). Wiring that without a
+ refusal burns the caster for 1d6 fire every turn they walk. The refusal reason is on the
+ capability sheet: `"on_move damage left its target unset — refusing to guess the mover"`. An
+ explicit `target: "self"` still runs — that is a stated reading, not a guess.
+- **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
+ hook — a token update is not an area entry.
 
 ### Sneak Attack, and the refusal predicate proved in the allow direction (v0.7.2, 2026-08-16)
 
@@ -2698,6 +2807,10 @@ conclusion drawn from the subset that morning.**
 `on_hit` first — and `readSave` already exists, so the cheaper build is also now the higher-yield one.
 `on_long_rest` at 9 is real yield rather than the 2 that made it look like a wiring proof only.
 
+**Phase 3 dispatch is complete as of v0.7.6.** Every trigger in that ordering except `on_enter_area`
+now has a hook. `on_enter_area` stays Phase 4 — it needs `create_area`. Yield on `on_attack_roll`
+is almost entirely advantage / disadvantage / modify_speed, which still wait on `duration`.
+
 **The subject whitelist worked, and what it left behind is a different shape than predicted.** 105 → 23,
 and `"caster"` ×20 — the entire basis of the planned aliasing — **is gone from the histogram**. What
 remains sorts into three kinds, and only the first is an aliasing job:
@@ -4219,12 +4332,15 @@ an argument.
  innocent.** None of them was ever measured; they were the plausible candidates, and writing plausible
  candidates into a durable note turns them into received facts. Name what was measured.
  - The one still-live residue: **`movement: core allowed X's move but its position was stripped before
- saving`** appeared in the same logs with all four documented culprits off, so that message's advice
- ("grappled, mounted, or on a teleport cooldown?") is incomplete. Active modules that touch movement
- in that world are `terrainmapper@14.0.1`, `patrol@4.0.3`, `about-face@3.29.1`, `item-piles@3.3.4`
- and `routinglib@1.1.0` — **suspect Terrain Mapper first**, since it is the one with region
+ saving`** appeared in the same logs with all four documented culprits off, so that message's
+ advice used to name Rideable and Monk's Active Tiles even when they were disabled. `strippedAdvice`
+ in `core/movement.ts` (v0.7.6) names what is actually active, plus grappled/restrained/etc. and
+ the token's region count. Active modules that touch movement in that world are
+ `terrainmapper@14.0.1`, `patrol@4.0.3`, `about-face@3.29.1`, `item-piles@3.3.4` and
+ `routinglib@1.1.0` — **suspect Terrain Mapper first**, since it is the one with region
  behaviours that intercept a move. Not yet reproduced since the measurement fix, and it may simply
- have been the sub-square step being refused in a second way.
+ have been the v0.6.4 sub-square step being refused in a second way. Diagnosis is not a release
+ blocker; the log line is now honest about who could have done it.
 - **UNVERIFIED CONFLICT — `wm5e` (Weapon Mastery 5e) versus our Push mastery.** Active in the user's world
   at 14.533.6, a version scheme matching AC5e's, so probably the same author. `system/dnd5e-forced-movement.ts`
   implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`) and

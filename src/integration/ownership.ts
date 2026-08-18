@@ -552,17 +552,17 @@ export function advisories(): Advisory[] {
 /**
  * Compiled rules that cannot fire because something they ride on is switched off.
  *
- * `on_hit` and `on_miss` are dispatched from inside the auto-damage layer, because that is the only
- * place in the world that knows whether an attack connected — dnd5e decides it in its chat card's
- * RENDERER and stores the answer nowhere. So switching auto-damage off takes the attack riders with
- * it: a bite compiled to poison on a hit is bound, badged as running on the capability sheet, and
- * never fires.
+ * `on_hit` / `on_miss` ride on auto-damage; `on_save_failed` / `on_save_succeeded` ride on
+ * auto-saves. In both cases the reason is the same: dnd5e decides the verdict in a chat-card
+ * renderer and stores the answer nowhere, so the only reading in the world lives inside those
+ * layers. Switching either off takes the matching riders with it — bound, badged as running, and
+ * never firing.
  *
- * That is a real coupling rather than an oversight, and the alternative was worse — a second, parallel
- * hit reading purely to feed the triggers, which is two answers to "did that connect" and the exact
- * divergence this repo keeps finding. What is NOT acceptable is it being silent, which is the same
- * doctrine as greying "Behavioral automation" and as the ownership resolver: a capability that
- * switches itself off has to say so in the interface.
+ * That is a real coupling rather than an oversight, and the alternative was worse — a second,
+ * parallel hit or save reading purely to feed the triggers, which is two answers to one question
+ * and the exact divergence this repo keeps finding. What is NOT acceptable is it being silent,
+ * which is the same doctrine as greying "Behavioral automation" and as the ownership resolver: a
+ * capability that switches itself off has to say so in the interface.
  */
 function capabilityAdvisories(): Advisory[] {
   const out: Advisory[] = [];
@@ -572,20 +572,44 @@ function capabilityAdvisories(): Advisory[] {
     // one-line reads.
     if (!settingOn(SETTINGS.compileCapabilities)) return out;
     const damages = AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.autoDamage, a)));
-    if (damages && !midiOwnsDamage()) return out;
-    out.push({
-      level: "warn",
-      title: "Compiled on-hit rules will not fire",
-      detail: midiOwnsDamage()
-        ? "Midi QoL is applying damage, so this module never reads whether an attack connected — and " +
-          "that reading is what dispatches a compiled ability's on-hit and on-miss rules. They stay " +
-          "bound and inert. Everything else a compiled ability does (turn start and end, damage " +
-          "taken, dropping to 0, rests, standing facts) is unaffected."
-        : "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
-          "is what dispatches a compiled ability's on-hit and on-miss rules. A bite compiled to " +
-          "poison the creature it hits will not fire. Turn triggers, damage-taken, rests and " +
-          "standing facts are unaffected.",
-    });
+    if (!damages || midiOwnsDamage()) {
+      out.push({
+        level: "warn",
+        title: "Compiled on-hit rules will not fire",
+        detail: midiOwnsDamage()
+          ? "Midi QoL is applying damage, so this module never reads whether an attack connected — and " +
+            "that reading is what dispatches a compiled ability's on-hit and on-miss rules. They stay " +
+            "bound and inert. Everything else a compiled ability does (turn start and end, damage " +
+            "taken, dropping to 0, rests, standing facts) is unaffected."
+          : "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
+            "is what dispatches a compiled ability's on-hit and on-miss rules. A bite compiled to " +
+            "poison the creature it hits will not fire. Compiled on-attack-roll rules still fire; " +
+            "they read the chat card, not the hit verdict. Turn triggers, damage-taken, rests and " +
+            "standing facts are unaffected.",
+      });
+    }
+    // Independent of the on-hit coupling: save resolution stands down when auto-saves is off OR
+    // when midi owns saves or damage (`rules/saves.ts` `active()`). Hold Person restrain rides on
+    // that layer, so either switch takes it with it. Two advisories rather than one, because a
+    // table can have auto-damage on and auto-saves off.
+    const saves = settingOn(COMBAT_SETTINGS.autoSaves);
+    if (!saves || midiOwnsSaves() || midiOwnsDamage()) {
+      out.push({
+        level: "warn",
+        title: "Compiled on-save rules will not fire",
+        detail:
+          midiOwnsSaves() || midiOwnsDamage()
+            ? "Midi QoL is resolving saves or applying damage, so this module never reads whether a " +
+              "save succeeded — and that reading is what dispatches a compiled ability's on-save-" +
+              "failed and on-save-succeeded rules. They stay bound and inert. A Hold Person compiled " +
+              "to restrain on a failed save will not fire. Turn triggers, rests and standing facts " +
+              "are unaffected."
+            : "Automatic saves are off, so nothing reads whether a save succeeded — and that reading " +
+              "is what dispatches a compiled ability's on-save-failed and on-save-succeeded rules. A " +
+              "Hold Person compiled to restrain on a failed save will not fire. Turn triggers, rests " +
+              "and standing facts are unaffected.",
+      });
+    }
   } catch {
     // Reading a setting is not worth taking the advisory list down for.
   }

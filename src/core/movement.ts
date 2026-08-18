@@ -354,9 +354,63 @@ function state(doc: any): string {
  *    not apply to programmatic moves — core reads it only in the drag workflow — so "I can drag the token
  *    there myself" proves nothing about this call.
  *  - `true` with the token still in place means something removed the position from the update after core
- *    had already approved it, which is a `preUpdateToken` handler: a grappled or mounted creature
- *    (Rideable), or one on a teleport cooldown (Monk's Active Tiles).
+ *    had already approved it (`preUpdateToken`), or the destination snapped back onto this square (a
+ *    sub-square step under the scene's diagonal rule does that). The old advice named Rideable and
+ *    Monk's Active Tiles; those were installed-and-disabled in the world that produced the residue, so
+ *    `strippedAdvice` names what is actually active and what statuses/regions are on the token.
  */
+/**
+ * What actually looks able to have stripped a move, rather than a stale shortlist.
+ *
+ * Rideable / Monk's Active Tiles / Token Warp / NotYourTurn were the original suspects and are
+ * still named when they are *active*. When they are not, the line used to keep blaming them —
+ * which is how a world with all four disabled still printed that advice. Terrain Mapper region
+ * behaviours are the first remaining suspect on this table; a same-square snap is the other.
+ */
+function strippedAdvice(doc: any): string {
+  const clues: string[] = [];
+  const actor = doc?.actor;
+  const statuses = [...(actor?.statuses ?? [])].map((s) => String(s).toLowerCase());
+  for (const status of ["grappled", "restrained", "dead", "unconscious", "stunned", "paralyzed"]) {
+    if (statuses.includes(status)) clues.push(status);
+  }
+
+  const regions = doc?.regions ?? doc?.object?.document?.regions;
+  const regionCount = Number(regions?.size ?? regions?.length ?? 0);
+  if (regionCount > 0) {
+    clues.push(`standing in ${regionCount} region(s) — Terrain Mapper stairs pause a move`);
+  }
+
+  const named: Array<[string, string]> = [
+    ["terrainmapper", "Terrain Mapper"],
+    ["rideable", "Rideable"],
+    ["monks-active-tiles", "Monk's Active Tiles"],
+    ["tokenwarp", "Token Warp"],
+    ["NotYourTurn", "NotYourTurn"],
+    ["patrol", "Patrol"],
+    ["about-face", "About Face"],
+    ["item-piles", "Item Piles"],
+    ["routinglib", "routinglib"],
+  ];
+  const live: string[] = [];
+  try {
+    const modules = (game as any)?.modules;
+    for (const [id, label] of named) {
+      if (modules?.get?.(id)?.active) live.push(label);
+    }
+  } catch {
+    // Reading the module list is not worth taking the log line down for.
+  }
+  if (live.length) clues.push(`active modules that touch movement: ${live.join(", ")}`);
+
+  if (clues.length) return clues.join("; ");
+  return (
+    "no known movement interceptor is active — the destination may have snapped back onto this " +
+    "square (a sub-square step under the scene's diagonal rule does that), or a region behaviour " +
+    "paused the move"
+  );
+}
+
 function reportRefusal(doc: any, completed: unknown, waypoint: Record<string, unknown>): void {
   const movement: any = doc?.movement;
   const detail = {
@@ -369,8 +423,7 @@ function reportRefusal(doc: any, completed: unknown, waypoint: Record<string, un
 
   if (completed === true) {
     log(
-      `movement: core allowed ${describe(doc)}'s move but its position was stripped before saving — is ` +
-        `it grappled, mounted, or on a teleport cooldown?`,
+      `movement: core allowed ${describe(doc)}'s move but its position was stripped before saving — ${strippedAdvice(doc)}`,
       detail,
     );
     return;
@@ -403,7 +456,9 @@ export async function moveToward(
 ): Promise<number> {
   const goal = centerOf(target);
   if (!goal) {
-    log(`movement: ${describe(token?.document ?? token)} cannot step toward a target with no position`);
+    log(
+      `movement: ${describe(token?.document ?? token)} cannot step toward a target with no position`,
+    );
     return 0;
   }
   return moveTowardPoint(token, goal, budget, desired, {

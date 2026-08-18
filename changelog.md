@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.6
+
+**Compiled abilities now fire when a save fails or succeeds.** Hold Person restraining what failed
+its save, a rider that lands only on a successful save — those were sitting on the capability sheet
+as live and doing nothing, because nothing was listening for the save's verdict. They run now, after
+Silvery Barbs and legendary resistance have had their say, so a bought success does not also apply
+the failure half. A save with no damage still counts: Hold Person never rolls damage.
+
+**Compiled abilities also fire on the attack roll, on a new condition, and on a move.** Reckless
+Attack and Pack Tactics are the attack-roll case: they care that you rolled, not that you hit, so
+they do not wait on automatic damage. Nature's Ward clearing poison when poison lands is the
+condition case. Walking while Ashardalon's Stride is up is the move case.
+
+Two honest limits, both visible on the capability sheet rather than silent:
+
+- Most attack-roll rules grant Advantage or change Speed. Those still wait on a later release; they
+  are now marked as waiting on the effect, not as unheard.
+- A move rule that deals damage but never says *who* is refused rather than guessed. The live
+  reading of Ashardalon's Stride left that blank, and guessing would have burned the caster.
+
+The log line that said a token's position was stripped after a successful move now names the
+modules that are actually on, instead of blaming four that were installed and switched off.
+
 ## 0.7.5
 
 **A spell that slows what it hits could not say whose Speed it changed.** The vocabulary Noodlr hands
