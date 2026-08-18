@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.5
+
+**A spell that slows what it hits could not say whose Speed it changed.** The vocabulary Noodlr hands
+the AI listed no target on a speed change, so every ability that slowed its victim was rejected and had
+to be asked again - 13 of 114 problems in a full-world compile. The capability sheet had been showing a
+target for those rules all along, so the vocabulary was contradicting our own display. Fixed.
+
+When a rule does use a parameter that genuinely does not exist, the message now names which kind of
+effect refused it, so a gap in our vocabulary reads differently from the AI inventing a field.
+
 ## 0.7.4
 
 **Each world now keeps its own compiled abilities.** They were previously stored beside the module rather

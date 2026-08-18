@@ -214,6 +214,30 @@ test("an invented parameter is rejected, which is the whole point of closing the
   });
   assert.equal(ok, false);
   assert.match(errors.join("\n"), /unknown parameter "healingFlavour"/);
+  // NAMES THE KIND. The parameter set is per-kind and the label ("rules[0].effect") does not carry
+  // it, so the bare message could not tell a reader whether the model had invented a field or our
+  // vocabulary had a gap — which is precisely the call that had to be made 13 times over one live
+  // recompile, on a parameter (`modify_speed.target`) that turned out to be a real omission of ours.
+  assert.match(errors.join("\n"), /"heal" does not take it/);
+});
+
+/**
+ * `target` on `modify_speed`, added on evidence rather than mined.
+ *
+ * 13 of 114 validation errors across a live 960-wording recompile were an `unknown parameter "target"`
+ * on this one kind — a spell that slows what it hits having no way to say whose Speed changed — and
+ * `describe.ts` was ALREADY rendering `who(effect.target)` for it, so the omission contradicted our own
+ * renderer. The model was right and the vocabulary was short.
+ */
+test("modify_speed can say whose Speed it changes", () => {
+  const slowed = (effect: Record<string, unknown>) =>
+    validateCapability({
+      ...regeneration,
+      rules: [{ ...regeneration.rules[0], effect }],
+    });
+  assert.equal(slowed({ kind: "modify_speed", target: "target", amount: { value: -10 } }).ok, true);
+  // Still closed on everything else: widening one parameter on one kind is not opening the level.
+  assert.equal(slowed({ kind: "modify_speed", subject: "target" }).ok, false);
 });
 
 test("a missing required parameter is named, not merely counted", () => {

@@ -318,9 +318,13 @@ export const EFFECT_PARAMS: Record<EffectKind, ParamSpec> = {
   },
   substitute_ability: { required: ["use", "insteadOf"], optional: ["rollType"], executable: false },
 
+  // `target` was measured onto this one rather than mined: 13 of 114 validation errors across a live
+  // 960-wording recompile were an `unknown parameter "target"` here, which is a spell that slows what
+  // it hits having no way to say whose Speed changed. `describe.ts` was already rendering
+  // `who(effect.target)` for this kind, so the omission contradicted our own renderer.
   modify_speed: {
     required: [],
-    optional: ["amount", "multiplier", "movementType", "setTo", "costMultiplier"],
+    optional: ["amount", "multiplier", "movementType", "setTo", "costMultiplier", "target"],
     quantities: ["amount", "setTo"],
     executable: false,
   },
@@ -759,6 +763,7 @@ function checkParams(
   spec: ParamSpec | undefined,
   node: Record<string, unknown>,
   label: string,
+  kind: string,
   errors: string[],
 ): void {
   if (!spec) return;
@@ -779,7 +784,14 @@ function checkParams(
   for (const key of Object.keys(node)) {
     // The whole point of closing the parameter level: an unknown key is a model inventing a field,
     // which is how one effect kind ended up with 1,367 of them.
-    if (!allowed.has(key)) errors.push(`${label} has unknown parameter "${key}"`);
+    //
+    // NAMES THE KIND, because the parameter set is per-kind and the label ("rules[0].effect") does
+    // not carry it. 13 of 114 errors in a live recompile were one plausible parameter on one kind
+    // that had simply never been declared, and the bare message could not tell that story: whoever
+    // reads it cannot decide between "the model invented a field" and "our vocabulary has a gap".
+    if (!allowed.has(key)) {
+      errors.push(`${label} has unknown parameter "${key}" — "${kind}" does not take it`);
+    }
   }
   for (const key of spec.quantities ?? []) {
     if (node[key] !== undefined && !isQuantity(node[key])) {
@@ -872,7 +884,13 @@ export function validateCapability(input: unknown): {
     if (!(EFFECT_KINDS as readonly string[]).includes(rule.effect?.kind)) {
       errors.push(`${at}.effect.kind "${rule.effect?.kind}" is not in the closed vocabulary`);
     } else {
-      checkParams(EFFECT_PARAMS[rule.effect.kind], rule.effect, `${at}.effect`, errors);
+      checkParams(
+        EFFECT_PARAMS[rule.effect.kind],
+        rule.effect,
+        `${at}.effect`,
+        String(rule.effect.kind),
+        errors,
+      );
       checkStatus(rule.effect as Record<string, unknown>, `${at}.effect`);
     }
 
@@ -885,7 +903,13 @@ export function validateCapability(input: unknown): {
           errors.push(`${pAt}.kind "${predicate?.kind}" is not in the closed vocabulary`);
           return;
         }
-        checkParams(PREDICATE_PARAMS[predicate.kind], predicate, pAt, errors);
+        checkParams(
+          PREDICATE_PARAMS[predicate.kind],
+          predicate,
+          pAt,
+          String(predicate.kind),
+          errors,
+        );
         checkStatus(predicate as Record<string, unknown>, pAt);
         // The parameter the closed vocabulary forgot to close. An unresolvable `who` is not a near
         // miss: `subjectFor` returns nobody, the guard refuses, and the rule refuses with it — so a

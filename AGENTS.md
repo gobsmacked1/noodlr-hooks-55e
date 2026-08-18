@@ -2751,6 +2751,29 @@ just watches a ten-damage cantrip deal twenty.
   prepared activity and an `Array` in raw source data; both are read, because a descriptor may be
   compared against an activity loaded from source.
 
+### `modify_speed` had no `target`, and our own renderer already disagreed (v0.7.5, 2026-08-18)
+
+Measured, not mined: **13 of 114 validation errors across a live 960-wording recompile were one
+`unknown parameter "target"` on `modify_speed`** — a spell that slows what it hits having no way to say
+whose Speed changed. `describe.ts` had been rendering `who(effect.target)` for that kind since it was
+written, so **the vocabulary contradicted our own renderer** and the model was right every time. Added
+to `optional`.
+
+- **In a log a vocabulary gap and a hallucination are the same sentence, and that is the durable half of
+  this.** `checkParams` names the kind now — `"modify_speed" does not take it` rather than a bare
+  `unknown parameter "target" — remove it` — because the label (`rules[0].effect`) does not carry the
+  kind and the parameter set is per kind. The bare message invites the conclusion that the model
+  invented a field, which closes the question; naming the kind invites the right one.
+- **The census is what settled it rather than a reading of the schema.** Eight other kinds also lack
+  `target` (`substitute_ability`, `modify_action_cost`, `replace_action`, `spend_resource`,
+  `recover_resource`, `summon_creature`, `object_statistics`, `require_prerequisite`) and **none of them
+  produced an error** — so widening them would be inventing a gap. Widen on evidence, per kind, the same
+  discipline as `api.surveyGlossary()`.
+- The three prompt-side halves of that same census — a `gm` rule's `note` described as optional, the
+  missing envelope, the unenumerated `adjudication` values — are `noodlr-main`'s and are recorded in
+  [its AGENTS.md](../noodlr-main/AGENTS.md) under "three rules the validator enforced and no generated
+  prompt ever stated".
+
 ## A DIAGNOSTIC THAT RETURNS AN OBJECT HAS NOT REPORTED ANYTHING (v0.6.3)
 
 v0.6.2 added `guards` to `surveyCapabilities()` precisely so the Troll's missing "while Bloodied" would be
