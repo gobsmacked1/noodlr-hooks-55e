@@ -2829,7 +2829,7 @@ is almost entirely advantage / disadvantage / modify_speed, which now write time
 (duration job A, below). Job B — translating imported DAE `specialDuration` onto those same
 fields — is a separate follow-up.
 
-### Phase 4 duration — job A (2026-08-18)
+### Phase 4 duration — job A (v0.7.11, 2026-08-18)
 
 Core v14 already expires Active Effects: `duration.{value, units, expiry, expired}` plus
 `start.{time, round, turn, combat, combatant}`. `CONST.ACTIVE_EFFECT_EXPIRY_EVENTS` is

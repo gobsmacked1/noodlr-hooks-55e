@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.11
+
+**Reckless Attack's first swing of the turn now has Advantage, and Ray of Frost now actually
+slows.** Compiled `grant_advantage` / `impose_disadvantage` / `modify_speed` write a timed Active
+Effect that Foundry expires — default one turn, until the *source's* next turn starts, so a slow
+lasts through the target's walk rather than ending when they begin their turn. A second Ray of Frost
+in the same turn refreshes the cut instead of stacking it. Advantage is also applied on the roll
+itself, because waiting for the attack card would miss the swing that triggered it.
+
+Hold Person with no duration still stays until the save; that was never a one-turn effect. Compile
+must be on, and the feature has to have compiled as `engine` — a `gm` badge means this release never
+sees it.
+
 ## 0.7.10
 
 **A melee hit on a Paralyzed creature now offers critical damage the same way a natural 20 does.**
