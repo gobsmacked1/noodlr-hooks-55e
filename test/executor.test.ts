@@ -130,6 +130,8 @@ beforeEach(() => {
     combat: null,
     actors: { getName: () => null },
     packs: [],
+    release: { generation: 14 },
+    time: { worldTime: 0 },
   };
   (globalThis as any).canvas = {
     grid: { size: 100, distance: 5 },
@@ -673,7 +675,7 @@ test("an effect with no executor is inert rather than approximated", async () =>
           {
             trigger: { event: "on_turn_start" },
             condition: [],
-            effect: { kind: "grant_advantage", rollType: "attack" },
+            effect: { kind: "teleport", destination: "chosen location" },
             adjudication: "engine",
           },
         ],
@@ -754,4 +756,102 @@ test("a descriptor that throws does not take the turn down with it", async () =>
 
 test("nothing bound means nothing happens, which is the no-compiler world", async () => {
   assert.deepEqual(await fireTrigger("on_turn_start", { self: { actor: troll() } }), []);
+});
+
+function withEffects(actor: any) {
+  actor.effects = [];
+  actor.createEmbeddedDocuments = async (_type: string, data: any[]) => {
+    const docs = data.map((d: any, i: number) => ({
+      ...d,
+      id: `ae-${actor.effects.length + i}`,
+      async update(patch: any) {
+        Object.assign(this, patch);
+      },
+    }));
+    actor.effects.push(...docs);
+    return docs;
+  };
+  return actor;
+}
+
+test("grant_advantage writes a timed effect rather than approximating the roll", async () => {
+  const actor = withEffects(troll());
+  bindCapabilities(actor.uuid, [
+    {
+      capability: {
+        id: "hash-reckless",
+        label: "Reckless Attack",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_turn_start" },
+            condition: [],
+            effect: { kind: "grant_advantage", rollType: "attack" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  const outcomes = await fireTrigger("on_turn_start", { self: { actor } });
+  assert.equal(outcomes[0].fired, true, outcomes[0].reason);
+  assert.equal(actor.effects.length, 1);
+  assert.equal(actor.effects[0].flags["noodlr-hooks-55e"].timed.kind, "grant_advantage");
+  assert.equal(actor.effects[0].duration?.units, "turns");
+});
+
+test("modify_speed refuses a costMultiplier it cannot write", async () => {
+  const actor = withEffects(troll());
+  bindCapabilities(actor.uuid, [
+    {
+      capability: {
+        id: "hash-slow",
+        label: "Slow",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_turn_start" },
+            condition: [],
+            effect: { kind: "modify_speed", costMultiplier: 2, target: "self" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  const outcomes = await fireTrigger("on_turn_start", { self: { actor } });
+  assert.equal(outcomes[0].fired, false);
+  assert.match(String(outcomes[0].reason), /costMultiplier/);
+  assert.equal(actor.effects.length, 0);
+});
+
+test("modify_speed writes an ADD change on walk Speed", async () => {
+  const actor = withEffects(troll());
+  bindCapabilities(actor.uuid, [
+    {
+      capability: {
+        id: "hash-frost",
+        label: "Ray of Frost",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_hit" },
+            condition: [],
+            effect: { kind: "modify_speed", amount: { value: -10 }, target: "target" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  const victim = withEffects(troll());
+  const outcomes = await fireTrigger("on_hit", {
+    self: { actor },
+    target: { actor: victim },
+    activity: FIRE_BOLT_ACTIVITY,
+  });
+  assert.equal(outcomes[0].fired, true, outcomes[0].reason);
+  assert.equal(victim.effects.length, 1);
+  assert.equal(victim.effects[0].changes[0].key, "system.attributes.movement.walk");
+  assert.equal(victim.effects[0].changes[0].value, "-10");
 });

@@ -206,7 +206,7 @@ export function describeEffect(effect: Effect): string {
     case "teleport":
       return `teleport ${who(effect.target)} to ${String(effect.destination)}`;
     case "apply_status":
-      return `make ${who(effect.target, "the target")} ${String(effect.status)}`;
+      return `make ${who(effect.target, "the target")} ${String(effect.status)}${howLong(effect)}`;
     case "remove_status":
       return `end ${String(effect.status)} on ${who(effect.target)}`;
     case "summon_creature": {
@@ -224,11 +224,13 @@ export function describeEffect(effect: Effect): string {
     case "recover_resource":
       return `recover ${describeQuantity(effect.amount)} of ${String(effect.resource)}`;
     case "grant_advantage":
-      return `grant advantage on ${String(effect.rollType)}${target}`;
+      return `grant advantage on ${String(effect.rollType)}${target}${howLong(effect)}`;
     case "impose_disadvantage":
-      return `impose disadvantage on ${String(effect.rollType)}${target}`;
+      return `impose disadvantage on ${String(effect.rollType)}${target}${howLong(effect)}`;
     case "modify_speed":
-      return `change ${who(effect.target)} Speed${effect.amount ? ` by ${describeQuantity(effect.amount)}` : ""}`;
+      return `change ${who(effect.target)} Speed${
+        effect.amount ? ` by ${describeQuantity(effect.amount)}` : ""
+      }${howLong(effect)}`;
     case "resist_damage":
       return `${String(effect.treatment)} ${list(effect.damageTypes)} damage`;
     case "voice_entity":
@@ -245,6 +247,13 @@ export function describeEffect(effect: Effect): string {
       return `${String(effect.kind).replace(/_/g, " ")}${params ? `: ${params}` : ""}`;
     }
   }
+}
+
+function howLong(effect: Effect): string {
+  const stated = describeQuantity(effect.duration);
+  if (stated) return ` for ${stated}`;
+  if (effect.until) return ` until ${String(effect.until)}`;
+  return "";
 }
 
 function plain(value: unknown): string {

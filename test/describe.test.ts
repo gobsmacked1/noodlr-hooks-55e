@@ -49,6 +49,26 @@ test("an effect with no hand-written phrase still renders honestly", () => {
   assert.match(text, /stealth/);
 });
 
+test("a duration rides the effect clause rather than disappearing", () => {
+  assert.equal(
+    describeEffect({
+      kind: "grant_advantage",
+      rollType: "attack",
+      duration: { value: 1, units: "turns" },
+    } as any),
+    "grant advantage on attack for 1 turns",
+  );
+  assert.equal(
+    describeEffect({
+      kind: "apply_status",
+      status: "slowed",
+      target: "target",
+      until: "sourceStart",
+    } as any),
+    "make the target slowed until sourceStart",
+  );
+});
+
 test("a unit the sentence already says is not said twice", () => {
   assert.equal(
     describeEffect({ kind: "heal", amount: { value: 15, units: "hp" } } as any),

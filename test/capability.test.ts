@@ -444,6 +444,14 @@ test("an effect kind with no executor is valid and inert", () => {
   };
   assert.equal(validateCapability({ ...regeneration, rules: [rule] }).ok, true);
   assert.equal(isExecutable(rule), false);
+  // `always` is why it is inert, not the kind. The same grant on a wired trigger now runs.
+  const live: CapabilityRule = {
+    trigger: { event: "on_attack_roll" },
+    condition: [],
+    effect: { kind: "grant_advantage", rollType: "attack" },
+    adjudication: "engine",
+  };
+  assert.equal(isExecutable(live), true);
 });
 
 test("narration and gm rules never execute here", () => {

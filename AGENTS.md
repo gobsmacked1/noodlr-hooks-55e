@@ -458,10 +458,10 @@ reads.
 ### `on_attack_roll` (v0.7.6, 2026-08-18)
 
 34 rules in the live 1,105-wording cache, and almost every engine one is `grant_advantage` /
-`impose_disadvantage` / `modify_speed` — none of which this build executes (Phase 4 `duration`).
-Wiring it still matters: the sheet badges those as waiting on an effect kind rather than as an
-unheard trigger, and a rule that DOES run (a future advantage injector, or a `spend_resource`)
-fires without a second hook.
+`impose_disadvantage` / `modify_speed`. Those now write a timed Active Effect (Phase 4 duration,
+below). Advantage on the roll that just posted is still a turn too late from this hook alone —
+`capability/grants.ts` applies it on `preRollAttack` as well, and must never call `fireTrigger`
+or the card posts twice.
 
 - **THIS IS NOT `on_hit`.** It fires when the roll lands in chat, before anyone knows whether it
  connected — Reckless Attack, Pack Tactics, Faerie Fire. Coupling it to auto-damage would make
@@ -2825,7 +2825,46 @@ conclusion drawn from the subset that morning.**
 
 **Phase 3 dispatch is complete as of v0.7.6.** Every trigger in that ordering except `on_enter_area`
 now has a hook. `on_enter_area` stays Phase 4 — it needs `create_area`. Yield on `on_attack_roll`
-is almost entirely advantage / disadvantage / modify_speed, which still wait on `duration`.
+is almost entirely advantage / disadvantage / modify_speed, which now write timed Active Effects
+(duration job A, below). Job B — translating imported DAE `specialDuration` onto those same
+fields — is a separate follow-up.
+
+### Phase 4 duration — job A (2026-08-18)
+
+Core v14 already expires Active Effects: `duration.{value, units, expiry, expired}` plus
+`start.{time, round, turn, combat, combatant}`. `CONST.ACTIVE_EFFECT_EXPIRY_EVENTS` is
+combatStart / roundStart / turnStart / combatEnd / roundEnd / turnEnd. Source-turn versus
+target-turn is `start.combatant`, not a different event name — DAE's `sourceStart` is
+`turnStart` plus the caster's combatant id.
+
+Two jobs, and they must not be conflated:
+
+- **A (this).** When we apply `grant_advantage` / `impose_disadvantage` / `modify_speed` /
+  `apply_status`, write an AE with core expiry. `src/capability/duration.ts` is the payload
+  (pure; no Foundry). `timed.ts` writes or stamps. `grants.ts` is the pre-roll reader.
+- **B (later).** Translate existing DAE `specialDuration` on imported items into the same
+  fields. 196 declarations on the second test world never expire. Do not start B until A
+  has been seen at the table.
+
+What was locked:
+
+- **Quantity units that are time:** `rounds | turns | minutes | hours | days`.
+  `{value: 10, units: "ft"}` is a distance that happened to be filed under `duration` — null,
+  refuse. `apply_status` with no duration stays permanent (Hold Person until the save).
+- **`until`:** `sourceStart | sourceEnd | targetStart | targetEnd | combatEnd`. Default when
+  units are `turns` and `until` is unset: **`sourceStart`**. Guessing the target's turn ends
+  Ray of Frost before they walk.
+- **v13 fallback** still written (`duration.{rounds, turns, seconds, startTime, …}`). Module
+  floor is v13.
+- **`grant_advantage` on `on_attack_roll` is too late if only the executor runs.** Reckless
+  Attack's first swing needs the pre-roll reader. `grants.ts` never calls `fireTrigger`.
+- **Standing `always` grants stay queried.** `isExecutable` requires a wired trigger, so a
+  rule cannot be both.
+- **`modify_speed`:** AE changes on `system.attributes.movement.walk` (or a named
+  `movementType`). Unset type → walk only. `costMultiplier` has no core key — refuse.
+  Refresh rather than stack (same kind + capability + rule index).
+- **Grants and Speed cuts default to one turn** when the descriptor omitted a duration.
+  A stated non-time duration is still a refusal.
 
 **The subject whitelist worked, and what it left behind is a different shape than predicted.** 105 → 23,
 and `"caster"` ×20 — the entire basis of the planned aliasing — **is gone from the histogram**. What

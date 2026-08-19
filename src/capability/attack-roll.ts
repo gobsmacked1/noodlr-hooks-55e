@@ -20,9 +20,9 @@
 // creature the attack named.
 //
 // Almost every engine rule on this event is `grant_advantage` / `impose_disadvantage` /
-// `modify_speed`, none of which this build executes (Phase 4 `duration`). Wiring it still matters:
-// the sheet badges them as waiting on an effect kind rather than as an unheard trigger, and the
-// kinds that DO run (a future advantage injector) will fire without a second hook.
+// `modify_speed`. Those now write a timed Active Effect (Phase 4 duration). Advantage on the
+// roll that just posted is a turn too late from this hook alone — `grants.ts` applies it on
+// `preRollAttack` as well, and must never call `fireTrigger` or the card posts twice.
 
 import { log } from "../constants";
 import {

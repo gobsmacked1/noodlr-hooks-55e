@@ -307,7 +307,7 @@ export const EFFECT_PARAMS: Record<EffectKind, ParamSpec> = {
   // status(3249) of 3253 atoms. The rest of the 110 keys mined for this kind are noise.
   apply_status: {
     required: ["status"],
-    optional: ["target", "duration", "dc", "ability", "escapeDc"],
+    optional: ["target", "duration", "dc", "ability", "escapeDc", "until"],
     quantities: ["duration"],
     executable: true,
   },
@@ -315,13 +315,15 @@ export const EFFECT_PARAMS: Record<EffectKind, ParamSpec> = {
 
   grant_advantage: {
     required: ["rollType"],
-    optional: ["target", "ability", "skill", "against"],
-    executable: false,
+    optional: ["target", "ability", "skill", "against", "duration", "until"],
+    quantities: ["duration"],
+    executable: true,
   },
   impose_disadvantage: {
     required: ["rollType"],
-    optional: ["target", "ability", "skill", "against"],
-    executable: false,
+    optional: ["target", "ability", "skill", "against", "duration", "until"],
+    quantities: ["duration"],
+    executable: true,
   },
   auto_fail: { required: ["rollType"], optional: ["target", "ability"], executable: false },
   auto_succeed: { required: ["rollType"], optional: ["target", "ability"], executable: false },
@@ -340,9 +342,18 @@ export const EFFECT_PARAMS: Record<EffectKind, ParamSpec> = {
   // `who(effect.target)` for this kind, so the omission contradicted our own renderer.
   modify_speed: {
     required: [],
-    optional: ["amount", "multiplier", "movementType", "setTo", "costMultiplier", "target"],
-    quantities: ["amount", "setTo"],
-    executable: false,
+    optional: [
+      "amount",
+      "multiplier",
+      "movementType",
+      "setTo",
+      "costMultiplier",
+      "target",
+      "duration",
+      "until",
+    ],
+    quantities: ["amount", "setTo", "duration"],
+    executable: true,
   },
   // action(2472), cost(1897).
   modify_action_cost: {

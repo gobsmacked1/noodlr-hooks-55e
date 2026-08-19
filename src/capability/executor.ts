@@ -57,6 +57,9 @@ import { ruleMatchesApplied } from "./applied";
 import { registerAttackRollTriggers } from "./attack-roll";
 import { registerConditionTriggers } from "./condition-applied";
 import { registerMoveTriggers } from "./move";
+import { durationPayload, worldOf } from "./duration";
+import { effectForStatus, effectModes, stampDuration, writeTimedEffect } from "./timed";
+import { registerGrantHooks } from "./grants";
 
 // ---- Firing -------------------------------------------------------------------------------------
 
@@ -308,7 +311,7 @@ async function runRule(
   const guards = conditionsMet(rule.condition, { ...ctx, combat, combatant });
   if (!guards.met) return no(guards.blockedBy ?? "a condition was not met");
 
-  const ran = await applyEffect(capability, rule, ctx);
+  const ran = await applyEffect(capability, rule, ctx, index);
   if (!ran.ok) return no(ran.reason ?? "the effect did nothing");
 
   if (rule.uses) await spendUse(actor, key, rule.uses, combat, combatant);
@@ -329,6 +332,7 @@ async function applyEffect(
   capability: Capability,
   rule: CapabilityRule,
   ctx: TriggerContext,
+  index: number,
 ): Promise<EffectResult> {
   const effect = rule.effect;
   const self = ctx.self;
@@ -380,6 +384,14 @@ async function applyEffect(
         if (Number.isFinite(dc) && ability) {
           await noteRepeatSave(who, { status, ability, dc, source: capability.label });
         }
+      }
+      // A stated duration is stamped on the effect `toggleStatusEffect` just created (or the one
+      // already there). No duration means permanent — Hold Person until the repeat save. A duration
+      // that is not time is ignored rather than refusing a status that already landed.
+      const timed = durationPayload(asQuantity(effect.duration), effect.until, worldOf(ctx));
+      if (timed) {
+        const ae = effectForStatus(who, status);
+        if (ae) await stampDuration(ae, timed);
       }
       return { ok, reason: ok ? undefined : `already ${status}`, detail: `is ${status}` };
     }
@@ -513,9 +525,116 @@ async function applyEffect(
       // `capabilityAttacksPerAction`; there is nothing to do at the moment it "fires".
       return { ok: false, reason: "a standing grant, applied by the action ledger" };
 
+    case "grant_advantage":
+    case "impose_disadvantage": {
+      const who = subject?.actor ?? self.actor;
+      if (!who) return { ok: false, reason: "no target for the grant" };
+      const timed = grantDuration(effect, ctx);
+      if ("error" in timed) return { ok: false, reason: timed.error };
+      const created = await writeTimedEffect({
+        actor: who,
+        name: `${capability.label}: ${effect.kind === "grant_advantage" ? "Advantage" : "Disadvantage"}`,
+        origin: capability.id,
+        duration: timed.payload,
+        key: { kind: String(effect.kind), capability: capability.id, ruleIndex: index },
+        params: {
+          rollType: effect.rollType,
+          ability: effect.ability,
+          skill: effect.skill,
+        },
+      });
+      if (!created) return { ok: false, reason: "could not write the effect" };
+      return {
+        ok: true,
+        detail: effect.kind === "grant_advantage" ? "has Advantage" : "has Disadvantage",
+      };
+    }
+
+    case "modify_speed": {
+      const who = subject?.actor ?? self.actor;
+      if (!who) return { ok: false, reason: "no target for the Speed change" };
+      const changes = speedChanges(effect);
+      if ("error" in changes) return { ok: false, reason: changes.error };
+      const timed = grantDuration(effect, ctx);
+      if ("error" in timed) return { ok: false, reason: timed.error };
+      const created = await writeTimedEffect({
+        actor: who,
+        name: `${capability.label}: Speed`,
+        origin: capability.id,
+        changes: changes.changes,
+        duration: timed.payload,
+        key: { kind: "modify_speed", capability: capability.id, ruleIndex: index },
+      });
+      if (!created) return { ok: false, reason: "could not write the Speed change" };
+      return { ok: true, detail: "Speed changes" };
+    }
+
     default:
       return { ok: false, reason: `no executor for effect "${String(effect.kind)}"` };
   }
+}
+
+const TIME_UNITS = new Set(["rounds", "turns", "minutes", "hours", "days"]);
+
+/**
+ * Grants and Speed cuts default to one turn (`sourceStart`) when the descriptor omitted a duration —
+ * Ray of Frost, Reckless Attack. A duration that is not time is a refusal: inventing a turn for
+ * `{value: 10, units: "ft"}` would be a number the rule never stated.
+ */
+function grantDuration(
+  effect: CapabilityRule["effect"],
+  ctx: TriggerContext,
+): { payload: NonNullable<ReturnType<typeof durationPayload>> } | { error: string } {
+  const qty = asQuantity(effect.duration);
+  if (qty?.units && !TIME_UNITS.has(qty.units)) {
+    return { error: `duration units "${qty.units}" are not a time` };
+  }
+  const world = worldOf(ctx);
+  const stated = durationPayload(qty, effect.until, world);
+  if (stated) return { payload: stated };
+  const fallback = durationPayload({ value: 1, units: "turns" }, "sourceStart", world);
+  if (!fallback) return { error: "no duration could be written" };
+  return { payload: fallback };
+}
+
+function speedChanges(
+  effect: CapabilityRule["effect"],
+): { changes: Array<{ key: string; mode: number; value: string }> } | { error: string } {
+  if (effect.costMultiplier != null) {
+    return { error: "costMultiplier has no Active Effect key — refusing" };
+  }
+  const modes = effectModes();
+  const types = movementTypes(effect.movementType);
+  const changes: Array<{ key: string; mode: number; value: string }> = [];
+  const setTo = asQuantity(effect.setTo);
+  const amount = asQuantity(effect.amount);
+  if (setTo && typeof setTo.value === "number" && Number.isFinite(setTo.value)) {
+    for (const t of types) {
+      changes.push({ key: `system.attributes.movement.${t}`, mode: modes.override, value: String(setTo.value) });
+    }
+  } else if (amount && typeof amount.value === "number" && Number.isFinite(amount.value)) {
+    for (const t of types) {
+      changes.push({ key: `system.attributes.movement.${t}`, mode: modes.add, value: String(amount.value) });
+    }
+  } else if (typeof effect.multiplier === "number" && Number.isFinite(effect.multiplier)) {
+    for (const t of types) {
+      changes.push({
+        key: `system.attributes.movement.${t}`,
+        mode: modes.multiply,
+        value: String(effect.multiplier),
+      });
+    }
+  }
+  if (!changes.length) return { error: "modify_speed stated no amount, multiplier or setTo" };
+  return { changes };
+}
+
+function movementTypes(raw: unknown): string[] {
+  const text = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (!text || text === "all" || text === "any") return ["walk"];
+  return [text];
 }
 
 function findCombatant(actor: any): any {
@@ -681,6 +800,7 @@ export function registerCapabilityExecutor(): void {
   registerAttackRollTriggers();
   registerConditionTriggers();
   registerMoveTriggers();
+  registerGrantHooks();
 
   log("capability executor registered");
 }
