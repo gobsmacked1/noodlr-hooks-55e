@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.9
+
+**An automated creature that cannot act no longer takes a turn.** Hold Person applied Paralyzed (and
+nested Incapacitated) and the Assassin still walked, because the planner only skipped the dead. A
+creature that is Incapacitated — or Paralyzed, Stunned, Unconscious, or Petrified, even when the
+sheet forgot the nest — is now skipped past immediately, the same as a corpse. Grappled and
+Restrained still get their turn. Hold Person's one-minute clock stays the spell's own concentration
+duration; this is not a second timer.
+
 ## 0.7.8
 
 **A compile request now names the model Noodlr will ask.** The slug lives in Noodlr's Text Generation

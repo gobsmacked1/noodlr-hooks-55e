@@ -17,7 +17,7 @@ import { isPrimaryGM } from "../util/gm";
 import { runTurnFor } from "./npc-turn";
 import { shouldAutomate } from "./registry";
 import { hasResolved } from "./encounter";
-import { readHp } from "../core/tracker";
+import { isUnableToAct, skipReason } from "./skip";
 
 /**
  * Floor on how long an automated turn occupies the table, in milliseconds.
@@ -101,19 +101,6 @@ export function initiativeSettled(combat: any): boolean {
   return true;
 }
 
-/**
- * Is this creature out of the fight?
- *
- * Read from the tracker's own defeated mark AND from hit points, because the two disagree often enough
- * to matter: a creature killed by a module that never set the status is still a corpse, and a GM who
- * ticked the skull on something at full health has still said it is out.
- */
-function isDown(combatant: any): boolean {
-  if (combatant?.isDefeated) return true;
-  const hp = readHp(combatant?.actor);
-  return Boolean(hp && hp.value !== null && hp.value <= 0);
-}
-
 /** The turn currently being played, as combat:round:combatant, so no route plays it twice. */
 let playing: string | null = null;
 
@@ -151,11 +138,14 @@ function takeTurn(combat: any): void {
   if (playing === token) return;
   playing = token;
 
-  // A creature that ran, gave up, stood down or died does not get played again if the tracker still
-  // holds a turn for it. It still needs skipping past, though, or the fight stalls on it — and it is
-  // skipped without the pace, because there is nothing to watch.
+  // A creature that ran, gave up, stood down, died, or cannot act (Incapacitated and everything that
+  // grants it) does not get played if the tracker still holds a turn for it. It still needs skipping
+  // past, or the fight stalls on it — and it is skipped without the pace, because there is nothing
+  // to watch. Hold Person on the Assassin was the specimen: paralyzed landed, then the planner walked.
   const startedAt = Date.now();
-  if (hasResolved(id) || isDown(combatant)) {
+  if (hasResolved(id) || isUnableToAct(combatant)) {
+    const why = hasResolved(id) ? "already resolved" : (skipReason(combatant) ?? "unable to act");
+    log(`automation skipping ${combatant?.name ?? "?"}'s turn: ${why}`);
     void endAutomatedTurn(combat, id, startedAt, { pace: false });
     return;
   }

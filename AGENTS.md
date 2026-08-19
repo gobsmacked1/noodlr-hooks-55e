@@ -1450,7 +1450,13 @@ edits closed without saving are lost. Same trade `noodlr` makes.
   what decides whether Noodlr plays a creature, and playing one now includes ending its turn and
   advancing initiative (user's call, 2026-08-03). Consequences that must not be regressed: advancement is
   skipped if the tracker moved while the turn resolved (the GM got there first, or a surrender ended the
-  fight); a resolved creature is skipped PAST rather than replayed, or the fight stalls on its corpse;
+  fight); a resolved or unable-to-act creature is skipped PAST rather than replayed, or the fight stalls
+  on its corpse. **Incapacitated (and Paralyzed / Stunned / Unconscious / Petrified, which grant it) is
+  unable-to-act** — `isUnableToAct` in `tactics/skip.ts`, asked by `takeTurn` and `runTurnFor`. Hold
+  Person on the Assassin (2026-08-18) applied the status and then the planner walked, because the skip
+  only knew about the dead. Grappled / Restrained still get a turn. Not Phase 4 duration and not a
+  compiled "skip this turn" rule: the general condition is already the strategy. A turn that has
+  *already started* when the status lands is not aborted — that was the opening walk before the save.
   the console entry point deliberately does not advance; and a runaway brake (`RUNAWAY_LIMIT` in
   `combat/auto/hooks.ts`) stops the chain after 24 consecutive automated turns, because an NPC-vs-NPC
   fight or a wiped party is otherwise an unbounded loop issuing real rolls unattended.

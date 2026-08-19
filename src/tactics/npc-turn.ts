@@ -33,6 +33,7 @@ import { banterProfile } from "./banter";
 import { announceTurn } from "../integration/contract";
 import { noteDossierEvent } from "./dossier";
 import { TIER_CAVEAT } from "./tiers";
+import { isUnableToAct, skipReason } from "./skip";
 
 /** The three ways a creature leaves a fight alive. */
 const OUTCOMES: Partial<Record<PlanKind, Outcome>> = {
@@ -173,6 +174,14 @@ export async function runCurrentNpcTurn(): Promise<void> {
 /** Plan and announce one specific combatant's turn. */
 export async function runTurnFor(combatant: any): Promise<void> {
   try {
+    // Same predicate `takeTurn` uses. The console entry point reaches here without that gate, and
+    // a second opinion that walked a paralyzed creature is how Hold Person looked broken after the
+    // status had already landed.
+    if (isUnableToAct(combatant)) {
+      log(`automation skipping ${combatant?.name ?? "?"}: ${skipReason(combatant)}`);
+      return;
+    }
+
     // Planning is synchronous, but a monster's spells usually live behind a feat pointing into a
     // compendium pack, and resolving that pointer needs an await. Warm them first or the creature reads
     // as having no spells at all.

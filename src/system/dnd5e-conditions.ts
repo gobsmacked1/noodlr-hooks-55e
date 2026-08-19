@@ -4,7 +4,9 @@
 // system's own `CONFIG.DND5E.conditionEffects.attackDisadvantage` lists Poisoned and is never read
 // anywhere in the module (verified 5.3.3). Target-relative rules — advantage against Paralyzed,
 // auto-fail Str/Dex, crit-on-hit within 5 ft — live only as journal prose. Nested statuses DO apply
-// Incapacitated for Paralyzed/Stunned/Unconscious/Petrified; nothing consults that either.
+// Incapacitated for Paralyzed/Stunned/Unconscious/Petrified. `isIncapacitated` names those four as
+// well as the status itself, so a sheet that applied Paralyzed without the nest still cannot act —
+// and so the planner skip, the activity veto, and Dodge expiry cannot disagree.
 //
 // This file is the rule table. The hook engine that applies it lives in `rules/conditions.ts`.
 
@@ -90,8 +92,23 @@ export function hasAnyStatus(actor: any, statuses: ReadonlySet<string>): string 
   return null;
 }
 
+/**
+ * Statuses that are Incapacitated, or that grant it.
+ *
+ * dnd5e nests `incapacitated` on the four; a DDB or premade effect sometimes ships Paralyzed
+ * without the nest. The printed rule is the same either way. Grappled / Restrained / Prone stay
+ * out — those restrict movement, not the turn.
+ */
+export const INCAPACITATED_BY: ReadonlySet<string> = new Set([
+  "incapacitated",
+  "paralyzed",
+  "petrified",
+  "stunned",
+  "unconscious",
+]);
+
 export function isIncapacitated(actor: any): boolean {
-  return hasStatus(actor, "incapacitated");
+  return hasAnyStatus(actor, INCAPACITATED_BY) !== null;
 }
 
 export function autoFailsSave(actor: any, ability: string): string | null {
