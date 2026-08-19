@@ -79,6 +79,32 @@ export function originatingId(message: any): string {
   return String(message?.flags?.dnd5e?.originatingMessage ?? "");
 }
 
+/**
+ * The usage-card id a PENDING roll is about, read the same two ways dnd5e itself does.
+ *
+ * `originatingId` reads a posted message. This reads the roll CONFIG, which is what a
+ * `preRollSavingThrow` handler has — `buildPost` (`basic-roll.mjs:171-174`) has not run
+ * yet, so a click-originated save has no `flags.dnd5e.originatingMessage` until then.
+ * Cancelling at pre-roll (Paralyzed auto-fail Str/Dex) would otherwise lose the only
+ * thread back to the activation.
+ *
+ * An explicit stamp beats the click event: `rollMissing` writes one onto the message
+ * data, and a second roll can still carry a stale event from another card.
+ */
+export function originatingUsageIdFromRoll(config: any, message: any): string {
+  const stamped = String(
+    message?.data?.flags?.dnd5e?.originatingMessage ??
+      message?.flags?.dnd5e?.originatingMessage ??
+      "",
+  );
+  if (stamped) return stamped;
+  try {
+    return String(config?.event?.target?.closest?.("[data-message-id]")?.dataset?.messageId ?? "");
+  } catch {
+    return "";
+  }
+}
+
 /** The TokenDocument a chat message speaks for, or null when it does not name one. */
 export function speakerToken(speaker: any): any {
   const sceneId = String(speaker?.scene ?? "");

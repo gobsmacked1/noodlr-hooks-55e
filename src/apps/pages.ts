@@ -260,8 +260,10 @@ const HOUSE: Page = {
           id: "critWithin5",
           label: "Critical on a hit within 5 feet of a helpless creature",
           hint:
-            "Paralyzed and Unconscious make a hit within 5 feet a critical. Part of the condition " +
-            "rules on the Mechanics page, so it follows that switch rather than having its own.",
+            "Paralyzed and Unconscious make a hit within 5 feet a critical — Incapacitated itself " +
+            "does not. The damage dialog defaults to Critical the same way a natural 20 does. Part " +
+            "of the condition rules on the Mechanics page, so it follows that switch rather than " +
+            "having its own.",
           state: "live",
           ownership: "conditions",
         },

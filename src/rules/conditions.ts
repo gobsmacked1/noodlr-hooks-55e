@@ -28,6 +28,13 @@ import {
 import { sightModifiers } from "./unseen";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { blocked, centerOf } from "../core/positioning";
+import { originatingUsageIdFromRoll, targetsOf, tokenFromActorUuid } from "./cards";
+import {
+  applyDamageCritDefault,
+  damageActivityMayCrit,
+  markAttackCritical,
+  shouldForceCrit,
+} from "./crit";
 
 function enabled(): boolean {
   return isDnd5e() && isConditionAutomationEnabled() && !ac5eOwnsConditions();
@@ -267,11 +274,17 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
   );
   try {
     const ChatMessage = (globalThis as any).ChatMessage;
+    const usageId = originatingUsageIdFromRoll(config, message);
     await ChatMessage.create({
       content: summary,
-      speaker: speakerFor(actor, name),
+      speaker: speakerFor(actor?.token ?? actor, name),
       flags: {
         [MODULE_ID]: { conditionAutoFail: { ability, status: reason } },
+        // The save layer joins this card to the activation the same way it joins a real
+        // save. Without it, cancelling the roll leaves `success === null` forever, auto-damage
+        // stands aside because auto-saves is on, and Apply sits there — Disintegrate vs a
+        // paralyzed target is the specimen.
+        ...(usageId ? { dnd5e: { originatingMessage: usageId } } : {}),
       },
     });
   } catch (err) {
@@ -289,43 +302,126 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
   return false;
 }
 
+function targetsForCrit(roll: any): Array<{ token: any; actor: any; ac: number | null }> {
+  const out: Array<{ token: any; actor: any; ac: number | null }> = [];
+  for (const listed of targetsOf(roll?.parent ?? {})) {
+    const doc = tokenFromActorUuid(listed.uuid);
+    if (!doc) continue;
+    let actor = doc.actor;
+    if (!actor) {
+      try {
+        actor = (globalThis as any).fromUuidSync?.(listed.uuid);
+      } catch {
+        actor = null;
+      }
+    }
+    if (!actor) continue;
+    out.push({ token: doc, actor, ac: listed.ac });
+  }
+  if (out.length) return out;
+  const one = primaryTarget();
+  return one ? [one] : [];
+}
+
+function qualifyingCritTarget(
+  attacker: any,
+  roll: any,
+  targets: Array<{ token: any; actor: any; ac: number | null }>,
+): { target: { token: any; actor: any; ac: number | null }; reason: string; distance: number } | null {
+  const aTok = controlledTokenFor(attacker);
+  const total = Number(roll?.total);
+  const fumble = Boolean(roll?.isFumble);
+  for (const target of targets) {
+    const reason = critOnHitWithin5(target.actor);
+    const dist = aTok ? tokenDistance(aTok, target.token) : Number.POSITIVE_INFINITY;
+    const ac = target.ac ?? Number(roll?.options?.target);
+    if (
+      shouldForceCrit({
+        reason,
+        distance: dist,
+        isFumble: fumble,
+        total,
+        ac: Number.isFinite(ac) ? ac : null,
+      })
+    ) {
+      return { target, reason: reason as string, distance: dist };
+    }
+  }
+  return null;
+}
+
 /**
  * After a hit against Paralyzed/Unconscious within 5 ft, mark the attack critical so the damage
- * button reads `isCritical`. Never pre-set criticalSuccess=1 (chat treats crits as non-misses).
+ * dialog reads `isCritical`.
+ *
+ * `dnd5e.rollAttack` fires AFTER `buildPost` has already serialized the roll onto the chat card.
+ * Mutating the live object is not enough — `#rollDamage` reads `lastAttack.rolls[0].isCritical`
+ * off that stored copy. Write the card back. Never pre-set criticalSuccess=1 (chat treats crits
+ * as non-misses).
  */
 function forceCritOnHit(rolls: any[], data: { subject?: any }): void {
   if (!enabled()) return;
   const roll = rolls?.[0];
   if (!roll) return;
-  const activity = data?.subject;
-  const attacker = activity?.actor;
-  const target = primaryTarget();
-  if (!attacker || !target?.actor) return;
-  const reason = critOnHitWithin5(target.actor);
-  if (!reason) return;
-
-  const aTok = controlledTokenFor(attacker);
-  const dist = aTok ? tokenDistance(aTok, target.token) : Number.POSITIVE_INFINITY;
-  if (dist > 5 + 0.01) return;
-
-  if (roll.isFumble) return;
-  const ac = target.ac ?? Number(roll.options?.target);
-  const total = Number(roll.total);
-  if (!Number.isFinite(ac) || !Number.isFinite(total) || total < ac) return;
+  const attacker = data?.subject?.actor;
+  if (!attacker) return;
+  const hit = qualifyingCritTarget(attacker, roll, targetsForCrit(roll));
+  if (!hit) return;
 
   try {
-    const d20 = roll.d20 ?? roll.dice?.[0];
-    if (d20?.options) {
-      d20.options.criticalSuccess = Number(d20.total ?? total);
-    }
-    roll.options ??= {};
-    roll.options.criticalSuccess = Number(d20?.total ?? total);
+    if (!markAttackCritical(roll)) return;
     log(
-      `conditions: ${attacker.name} hit ${target.actor.name} within 5 ft (${reason}) — forced critical`,
+      `conditions: ${attacker.name} hit ${hit.target.actor.name} within 5 ft (${hit.reason}) — forced critical`,
     );
+    const message = roll.parent;
+    if (typeof message?.update === "function") {
+      void message.update({ rolls: rolls.map((r: any) => r.toJSON?.() ?? r) }).catch((err: unknown) => {
+        log("conditions: could not persist forced critical onto the attack card:", err);
+      });
+    }
   } catch (err) {
     log("conditions: could not force critical:", err);
   }
+}
+
+/**
+ * Default the damage dialog to Critical when the stored attack card still says it was not.
+ *
+ * Belt for the persist above: a click that wins the race, or a card we could not write, still
+ * has to offer the extra dice. Only Attack activities — Fireball and a heal are not this rule.
+ */
+function defaultCritOnDamage(config: any, dialog: any): void {
+  if (!enabled()) return;
+  if (!damageActivityMayCrit(config?.subject?.type)) return;
+  const attacker = config?.subject?.actor;
+  if (!attacker) return;
+
+  const associated = associatedAttackMessage(config);
+  const roll = associated?.rolls?.[0];
+  if (!roll) return;
+  const targets = targetsForCrit({ parent: associated });
+  const fallback = targets.length ? targets : primaryTarget() ? [primaryTarget()!] : [];
+  const hit = qualifyingCritTarget(attacker, roll, fallback);
+  if (!hit) return;
+
+  applyDamageCritDefault(config, dialog);
+  log(
+    `conditions: damage dialog defaulted to critical vs ${hit.target.actor.name} (${hit.reason})`,
+  );
+}
+
+function associatedAttackMessage(config: any): any {
+  try {
+    const el = config?.event?.target?.closest?.("[data-message-id]");
+    const id = String(el?.dataset?.messageId ?? "");
+    if (!id) return null;
+    const usage = (game as any).messages?.get?.(id);
+    const attacks = usage?.getAssociatedRolls?.("attack");
+    if (Array.isArray(attacks) && attacks.length) return attacks[attacks.length - 1];
+  } catch {
+    // fall through
+  }
+  return null;
 }
 
 /**
@@ -384,6 +480,8 @@ export function registerConditionHooks(): void {
     }
   });
 
+  // One of the pair, not both — they fire for the same rolls (`basic-roll.mjs`). Persisting
+  // twice would rewrite the card twice.
   Hooks.on("dnd5e.rollAttack", (rolls: any[], data: any) => {
     try {
       forceCritOnHit(rolls, data);
@@ -391,11 +489,13 @@ export function registerConditionHooks(): void {
       log("conditions: rollAttack crit hook failed:", err);
     }
   });
-  Hooks.on("dnd5e.rollAttackV2", (rolls: any[], data: any) => {
+
+  // Same: one of preRollDamage / V2. The dialog default is what a new player actually looks at.
+  Hooks.on("dnd5e.preRollDamage", (config: any, dialog: any) => {
     try {
-      forceCritOnHit(rolls, data);
+      defaultCritOnDamage(config, dialog);
     } catch (err) {
-      log("conditions: rollAttackV2 crit hook failed:", err);
+      log("conditions: preRollDamage crit default failed:", err);
     }
   });
 }

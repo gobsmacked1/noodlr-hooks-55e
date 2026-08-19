@@ -1191,6 +1191,14 @@ encounter initiation (`rules/perception.ts`); the Speed budget and Dash (v0.4.39
 (2026-08-09). That is four of the five leads in the conditions audit and four of the five in the movement
 audit.
 
+**The auto-crit is Paralyzed/Unconscious within 5 feet, not Incapacitated, and the damage dialog is
+a second object (v0.7.10).** 2024 Incapacitated is Inactive / no Concentration / Speechless /
+Surprised. The auto-crit sentence lives on Paralyzed and Unconscious only. `forceCritOnHit` used to
+mutate the live attack die after `buildPost` had already serialized it onto the chat card, so
+`#rollDamage` kept reading `isCritical === false` and defaulted the dialog to Normal — the UI a new
+player trusts. The card is rewritten now, and `preRollDamage` defaults the dialog as well.
+`src/rules/crit.ts` is the arithmetic. Do not widen `CRIT_ON_HIT_WITHIN_5` to Incapacitated.
+
 **Reassigned to the compiler — there is no engine to build.** The spellcasting audit's own lead sentence is
 the pivot's thesis stated three days early: *"Activity schemas cannot express most spell rules … those must
 be macros or GM adjudication."* Everything downstream of it — persistent and ongoing damage, saves-to-end,
@@ -3169,6 +3177,14 @@ button press.
   crossbow in that same fight was the Assassin's opening turn (init 29 vs 12), before the spell, not
   impatience after it. `test/gm.test.ts` pins the gate. The usage card's speaker is the system's and is
   not rewritten here; the Assassin's own save card is what tells a new player who is rolling.
+- **A cancelled auto-fail is a failed save, not a missing verdict (2026-08-18).** Disintegrate vs a
+  Paralyzed Assassin rolled Dex DC 20, the condition layer cancelled it (`Assassin auto-fails DEX —
+  no roll`), and Apply sat on 70 force. `settle` skips `success === null`; `damage.ts` silently
+  stands aside when auto-saves is on. The auto-fail card now carries `originatingMessage` and
+  `route` treats `conditionAutoFail` as `success: false`. `preRollSavingThrow` is client-local, so
+  the card — not the hook — is what the GM's apply path can see. Same doctrine as a clean miss:
+  "we have no answer" and "the answer is no" must not share a path. Pinned by
+  `test/saves-autofail.test.ts`.
 - **The Assassin's Light Crossbow in that same fight was a planned turn, not a Ready.** Combat
   started at 16:32:56 (`Assassin spots Bardo`), automation took the turn at 16:33:01, Hold Person
   landed ~47 s later. The usage card posted and the Attack Roll dialog waited, because

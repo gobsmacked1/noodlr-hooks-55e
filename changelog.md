@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.10
+
+**A melee hit on a Paralyzed creature now offers critical damage the same way a natural 20 does.**
+The rule was already being applied to the live attack die; the damage dialog reads the *stored*
+chat card, which had already been posted as a normal hit. The card is rewritten, and the dialog
+defaults to Critical. Incapacitated, Stunned and Petrified still do not auto-crit — only Paralyzed
+or Unconscious, and only within 5 feet.
+
+**A Paralyzed (or Unconscious) creature's auto-failed Dexterity or Strength save now settles
+damage.** Disintegrate against a held Assassin left the 70-damage Apply button sitting there
+because cancelling the roll produced no verdict, and auto-damage stands aside whenever auto-saves
+is on. The auto-fail card is now a failed save. A cancelled roll is "they failed", not "nobody
+has answered yet".
+
 ## 0.7.9
 
 **An automated creature that cannot act no longer takes a turn.** Hold Person applied Paralyzed (and

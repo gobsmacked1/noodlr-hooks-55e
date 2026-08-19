@@ -110,6 +110,27 @@ interface Activation {
 
 const activations = new Map<string, Activation>();
 
+/**
+ * Record that a save was cancelled as an automatic failure.
+ *
+ * Cancelling the roll (Paralyzed / Unconscious auto-fail Str/Dex) produces no save
+ * message, so `onSave` never runs and `success` stays null. The damage layer then
+ * stands aside because auto-saves is on, and Apply sits there forever. An auto-fail
+ * is a failed save — "the answer is no", not "we have no answer".
+ *
+ * Returns false when a verdict is already in, so a later card cannot overwrite a
+ * real roll. Exported so a test can pin the distinction without a Foundry world.
+ */
+export function applyAutoFailedSave(state: {
+  success: boolean | null;
+  rolling: boolean;
+}): boolean {
+  if (state.success !== null) return false;
+  state.success = false;
+  state.rolling = false;
+  return true;
+}
+
 export function registerSaveResolution(): void {
   if (!isDnd5e()) return;
 
@@ -149,6 +170,15 @@ function active(): boolean {
 async function route(message: any): Promise<void> {
   try {
     const dnd5e = message?.flags?.dnd5e ?? {};
+
+    // A cancelled auto-fail is a failed save. The condition layer posts this instead of a
+    // roll, because a dialog would invite a total that contradicts Paralyzed / Unconscious.
+    // It has to be read here — `preRollSavingThrow` is client-local, so a player's auto-fail
+    // would otherwise never reach the GM who applies the damage.
+    if (message?.flags?.[MODULE_ID]?.conditionAutoFail) {
+      await onAutoFailedSave(message);
+      return;
+    }
 
     // A usage card: no `messageType`, but an activity. This is the earliest moment the NPCs' saves can be
     // rolled, which is the whole point of watching it — a Hold Person has no damage roll to wait for.
@@ -240,6 +270,73 @@ async function onSave(message: any): Promise<void> {
   state.rolling = false;
   act.targets.set(id, state);
   await settle(act);
+}
+
+/**
+ * The condition layer cancelled the roll and posted a card instead. Treat it as a failed save
+ * so `settle` can apply damage the same way it would after a rolled 1.
+ */
+async function onAutoFailedSave(message: any): Promise<void> {
+  const doc = speakerToken(message?.speaker);
+  if (!doc) {
+    log("save resolution: an auto-fail named no token, so it cannot be matched to a target");
+    return;
+  }
+
+  const act = activationForAutoFail(message, doc);
+  if (!act) {
+    log(
+      `save resolution: ${String(doc.name)} auto-failed a save with no activation to attach to`,
+    );
+    return;
+  }
+
+  const id = String(doc.id);
+  const fail = message.flags[MODULE_ID].conditionAutoFail;
+  const state = act.targets.get(id) ?? {
+    doc,
+    name: String(doc.name ?? "?"),
+    success: null,
+    rolling: false,
+    applied: false,
+    saveMessage: null,
+    offered: false,
+    barbed: false,
+  };
+  if (!applyAutoFailedSave(state)) {
+    log(`save resolution: ${state.name} already has a save verdict; ignoring a later auto-fail`);
+    return;
+  }
+  // The auto-fail card is not a d20, so legendary resistance cannot stamp `forceSuccess` on a
+  // real roll. `considerResistance` still spends the resource and this layer flips `success`.
+  state.saveMessage = message;
+  act.targets.set(id, state);
+  log(
+    `save resolution: ${state.name} auto-fails ${String(fail?.ability ?? "?")} (${String(fail?.status ?? "?")}) — recorded as a failed save`,
+  );
+  await settle(act);
+}
+
+/** Prefer the stamped usage id; fall back to the one unfinished activation that names this token. */
+function activationForAutoFail(message: any, doc: any): Activation | null {
+  const usageId = originatingId(message);
+  if (usageId) {
+    const act = activations.get(usageId);
+    if (act) return act;
+  }
+  const tokenId = String(doc.id ?? "");
+  const matches: Activation[] = [];
+  for (const act of activations.values()) {
+    const state = tokenId ? act.targets.get(tokenId) : undefined;
+    if (state && state.success === null) matches.push(act);
+  }
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    log(
+      `save resolution: auto-fail of ${String(doc.name)} matches ${matches.length} activations; not guessing`,
+    );
+  }
+  return null;
 }
 
 /** The damage has been rolled. Everything that has saved can be settled; the rest waits. */
@@ -358,7 +455,17 @@ async function settle(act: Activation): Promise<void> {
       ),
     });
   }
-  if (!entries.length) return;
+  if (!entries.length) {
+    const waiting = Array.from(act.targets.values()).filter((s) => !s.applied && s.success === null);
+    if (waiting.length) {
+      log(
+        `save resolution: ${act.source || act.usageId} damage is waiting on ${waiting
+          .map((s) => s.name)
+          .join(", ")} — no save verdict yet`,
+      );
+    }
+    return;
+  }
   await applyRolledDamage(act.damage.message, entries, act.damage.parts);
 }
 
@@ -526,8 +633,12 @@ async function rollMissing(act: Activation): Promise<void> {
         },
       );
     } catch (err) {
-      state.rolling = false;
       log(`save resolution: could not roll a save for ${state.name}:`, err);
+    } finally {
+      // A cancelled auto-fail returns [] without throwing. Leave `rolling` set only while a
+      // verdict is still outstanding so a later settle can retry; `onAutoFailedSave` clears
+      // it itself when the card arrives.
+      if (state.success === null) state.rolling = false;
     }
   }
 }
