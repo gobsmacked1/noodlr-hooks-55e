@@ -18,9 +18,10 @@ Thumbs.db
 # Foundry packaging artifacts
 *.zip
 
-# Scratch notes handed to `gh release create --notes-file`; the real record is changelog.md
+# Scratch notes handed to `gh release create --notes-file` / `git commit -F`; the real record is
+# changelog.md and the commit itself. PowerShell has no heredoc, so these files are the way a
+# multi-line message is passed at all.
 release-notes-*.md
-# Scratch files the release ritual writes so a multi-line message never has to survive a shell quoting
-# round. The message itself lands in the commit and the release; a copy in the tree is noise.
-.commit-msg.txt
 .release-notes.md
+.commit-msg.txt
+msg.txt
