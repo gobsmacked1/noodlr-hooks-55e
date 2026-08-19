@@ -27,7 +27,7 @@ import { log } from "../constants";
 import { narrator, speakerFor } from "../util/speaker";
 import { prewarmCastSpells } from "./actions";
 import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./planner";
-import { performPlan } from "./execute";
+import { performPlan, type Performed } from "./execute";
 import { resolveCombatant, type Outcome } from "./encounter";
 import { banterProfile } from "./banter";
 import { announceTurn } from "../integration/contract";
@@ -125,8 +125,20 @@ const TRAVEL_ONLY = new Set<PlanKind>(["advance", "search", "help"]);
  * creature sitting in place — it had in fact walked its full Speed each time and was being outrun by a
  * Dashing rogue. One number tells those two apart, and nothing else does.
  */
-function amend(text: string, plan: TurnPlan, moved: number): string {
+function amend(text: string, plan: TurnPlan, performed: Performed): string {
+  // A close that never reached is not an attack. Leaving "closes 33 ft and attacks with Bite"
+  // on the card after a failed walk is how two Dire Wolves looked like they had a 40-foot reach.
+  if (plan.chosen.kind === "close" && !performed.used) {
+    const me = plan.board.self.name;
+    const target = plan.chosen.target?.name ?? "its quarry";
+    const units = plan.board.units;
+    return performed.moved > 0
+      ? `${me} closes ${Math.round(performed.moved)} ${units} on ${target}, still too far to strike.`
+      : `${me} tries to close on ${target}, and covers no ground at all.`;
+  }
+
   if (!TRAVEL_ONLY.has(plan.chosen.kind)) return text;
+  const moved = performed.moved;
   // Appended rather than spliced in. The sentences these plans produce differ in shape, and a regex
   // that has to find the right clause in each of them is one more thing to get wrong when a phrasing
   // changes; a trailing clause reads correctly whatever precedes it.
@@ -239,7 +251,7 @@ export async function runTurnFor(combatant: any): Promise<void> {
     // narration has to read ahead of the dice), but for a movement-only plan the distance is not known
     // until afterwards — and a separate "it moved 30 ft" line would double the log for every advance.
     // A failed edit is a card that is merely vague, so it is logged and nothing else.
-    const settled = amend(intent, plan, performed.moved);
+    const settled = amend(intent, plan, performed);
     if (settled !== intent) {
       await card
         ?.update?.({ content: `<p>${foundry.utils.escapeHTML(settled)}</p>` })

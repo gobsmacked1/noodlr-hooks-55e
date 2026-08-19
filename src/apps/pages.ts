@@ -548,9 +548,9 @@ const SHARED_ROLLS: Section = {
   title: "Rolling and reporting",
   blurb:
     "Applying damage is built and lives in the next section, per side; a saving throw settling that damage " +
-    "is here. What is still missing is rolling an attack for you and deciding who a template caught — " +
-    "this module reads rolls off the chat log and acts on them, but it does not make them. Worth being " +
-    "clear about before you disable midi.",
+    "is here. What is still missing is rolling an attack for you, placing an area, and deciding who a " +
+    "template caught — this module reads rolls off the chat log and acts on them, but it does not make " +
+    "them. Worth being clear about before you disable midi.",
   rows: [
     {
       id: "autoAttack",
@@ -583,9 +583,24 @@ const SHARED_ROLLS: Section = {
     {
       id: "targeting",
       label: "Targeting: automatic from a template, manual, or with cover applied",
-      hint: "Selecting who a template caught, and whether cover modifies them.",
+      hint:
+        "Selecting who a template caught, and whether cover modifies them. The reading half. " +
+        "Placing the cone is the NPC-turn row (Phase 5). Cleaning it up is the next row (Phase 4).",
       state: "planned",
-      today: "Midi QoL.",
+      today:
+        "Midi QoL for who the template caught. Leftover single-targets (the last Ray of Frost) " +
+        "are dropped when a template spell is used, so auto-saves do not roll them early.",
+    },
+    {
+      id: "templateLifetime",
+      label: "Templates leave when the effect does",
+      hint:
+        "An instantaneous Fireball, breath or wail must not stay painted after the six-second turn " +
+        "that placed it. A Wall of Fire, Darkness or Moonbeam dies with its duration or when the " +
+        "caster's concentration breaks — including templates the system did not register as " +
+        "dependents. Players and hostiles alike. Phase 4, beside create_area.",
+      state: "planned",
+      today: "Nobody. Concentration sometimes cascades a dependent; leftover cones stay.",
     },
     {
       id: "recharge",
@@ -835,6 +850,17 @@ const PER_SIDE_TURN: Section = {
             "plays is held to one action, one bonus action and one reaction — it asks the ledger before " +
             "it swings, so there is nothing to warn about.",
           state: "live",
+        },
+        {
+          id: "aoeAim",
+          label: "Area spells and breaths aimed without a click",
+          hint:
+            "Fireball, Cone of Cold, Lightning Bolt, Wall of Fire, a breath, a gaze, a wail — placed " +
+            "to catch as many of the party as the shape allows and as few allied hostiles as it can. " +
+            "Heals invert the score. The planner already picks the spell; it still stops for a human " +
+            "to draw the template. Phase 5.",
+          state: "planned",
+          today: "A human. configure:false skips the usage dialog, not the placement.",
         },
       ],
     },

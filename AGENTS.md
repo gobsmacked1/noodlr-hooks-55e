@@ -2102,10 +2102,12 @@ edits closed without saving are lost. Same trade `noodlr` makes.
   containment primitives as the sight-screen test, and rings outward for the nearest clear, walkable,
   unoccupied point. **Which areas hurt is not a geometric question** — a template knows its radius and
   nothing about what is inside it — so that judgement is a name table in `systems/dnd5e-hazards.ts`,
-  quarantined exactly like the concealment table. Persistent areas only: an instantaneous Fireball leaves
+  quarantined exactly like the concealment table.   Persistent areas only: an instantaneous Fireball leaves
   its template on the canvas long after the fire is gone, and a creature fleeing yesterday's explosion
-  looks broken. Gated on the new tier-2 `understandsHazards`, so mindless things still burn where they
-  stand.
+  looks broken. **That leftover is now a Phase 4 requirement** (template lifetime, 2026-08-19) rather
+  than an accepted stain — the hazard layer still ignores instantaneous templates on purpose, and
+  cleanup is what makes that safe. Gated on the new tier-2 `understandsHazards`, so mindless things
+  still burn where they stand.
 
 - **Nobody implements forced movement at all (v0.4.40, 2026-08-06).** The third finding of this shape, and
   the starkest. Verified against dnd5e 5.3.3, core v13.351, midi-qol v14, Gambit's Premades and Chris's
@@ -2824,7 +2826,8 @@ conclusion drawn from the subset that morning.**
 `on_long_rest` at 9 is real yield rather than the 2 that made it look like a wiring proof only.
 
 **Phase 3 dispatch is complete as of v0.7.6.** Every trigger in that ordering except `on_enter_area`
-now has a hook. `on_enter_area` stays Phase 4 — it needs `create_area`. Yield on `on_attack_roll`
+now has a hook. `on_enter_area` stays Phase 4 — it needs `create_area`, and `create_area` now ships with
+template lifetime (orphaned Fireballs and broken-concentration cones, 2026-08-19). Yield on `on_attack_roll`
 is almost entirely advantage / disadvantage / modify_speed, which now write timed Active Effects
 (duration job A, below). Job B — translating imported DAE `specialDuration` onto those same
 fields — is a separate follow-up.
@@ -2858,6 +2861,28 @@ What was locked:
   floor is v13.
 - **`grant_advantage` on `on_attack_roll` is too late if only the executor runs.** Reckless
   Attack's first swing needs the pre-roll reader. `grants.ts` never calls `fireTrigger`.
+- **`config.subject` is the Activity, not the Actor (Barb Arian, 2026-08-19).** dnd5e 5.x
+  sets `rollConfig.subject = this` on the activity (`attack.mjs:128`). The first `grants.ts`
+  reader took `subject` as the creature, so `bindingsFor` and `actor.effects` both walked
+  the Halberd's Attack activity. Executor cards still posted ("Reckless Attack: Barb Arian
+  has Advantage") because `createChatMessage` resolves the speaker. The die stayed
+  `advantageMode: 0`. Unwrap `subject.actor`. Same shape as AC5e's pre-roll reader.
+- **A `sourceStart` AE written mid-turn can expire immediately.** Reckless's default is
+  one turn until the source's next turn start; written after the first swing, Foundry
+  labelled copies "1 Turn Ago (expired)" while a live twin sat beside them. The pre-roll
+  binding path is what covers the rest of the turn; `fromEffect` skips `duration.expired`
+  so a dead copy cannot grant next round. `ourTimedEffect` prefers the live twin.
+- **`start.combat` must be the Combat document, never its id (Ray of Frost, 2026-08-19).**
+  `start.combat` is a ForeignDocumentField. `_prepareCombatBasedDuration` and
+  `isExpiryEvent` both decide whose turn matters with `combat === start.combat`. A string
+  id fails that, and the fallback is `getCombatantsByActor(this.actor)` — the wolf wearing
+  the Slow. The executor fired (`Ray of Frost: Dire Wolf Speed changes`, change key
+  `movement.walk` ADD −10); the AE expired at the first wolf's turnStart, so the sheet
+  never showed 40. `worldOf` now hands over `game.combat` itself.
+- **`units: "turns"` remaining is every initiative slot, not a creature's turn.** value:1
+  hits remaining 0 the moment the next combatant acts. Who's-turn expiry writes
+  `units: "rounds"` so the Slow lasts the rest of the round; `expiry: turnStart` plus the
+  caster's combatant is what ends it.
 - **Standing `always` grants stay queried.** `isExecutable` requires a wired trigger, so a
   rule cannot be both.
 - **`modify_speed`:** AE changes on `system.attributes.movement.walk` (or a named
@@ -2865,6 +2890,70 @@ What was locked:
   Refresh rather than stack (same kind + capability + rule index).
 - **Grants and Speed cuts default to one turn** when the descriptor omitted a duration.
   A stated non-time duration is still a refusal.
+
+### Phase 4 remaining — template lifetime (user, 2026-08-19)
+
+`create_area` is already on this phase because `on_enter_area` cannot fire without a placeable.
+**Orphaned templates are a hard requirement of the same job, not a Phase 5 nicety.** An
+instantaneous Fireball already leaves its MeasuredTemplate on the canvas after the fire is gone
+(`dnd5e-hazards.ts` records that as why a creature fleeing yesterday's explosion looks broken).
+Concentration *can* cascade a dependent — Wall of Fire's template dies with the AE — and plenty
+of templates are not registered as dependents, so a broken concentration still leaves a cone
+painted on the map. The user's words: they are hugely distracting, and automatic clean-up is why
+these modules exist.
+
+Two lifetimes, both sides of the table (a player's leftover Fireball is the same stain as an
+Archmage's):
+
+- **Instantaneous** (Fireball, Lightning Bolt, Cone of Cold, a breath, a Banshee wail): in
+  combat the template must not outlive the six-second turn that placed it. Key off the combat
+  clock, not `worldTime` — Hold Person already showed that the world clock can run minutes
+  during one round. Out of combat, a short real-time TTL is the backstop.
+- **Valued duration** (Wall of Fire, Darkness, Fog Cloud, Moonbeam): delete when the source
+  expires **or** the caster's concentration breaks, whichever comes first. Do not trust the
+  dependent-effect cascade alone; walk templates that still name an origin whose AE or
+  concentration is gone.
+
+This is bookkeeping, not tactics. It is the sibling of `create_area` rather than a new
+vocabulary kind: dnd5e already places the MeasuredTemplate; we own when it leaves. Do not
+conflate it with "who the template caught" (the existing planned targeting row) or with
+placing one in the first place (Phase 5, below). A template that vanished before the saves
+resolved is worse than one that lingered, so cleanup waits on the application having settled.
+
+Still on this phase, unchanged: `request_save`, dice over `dnd5e-reroll.ts`, named counters,
+the small kinds (reduce-to-1-HP / initiative swap / flat bonus), and duration job B
+(DAE `specialDuration` → core expiry). Do not start B until Reckless and Ray of Frost have
+been seen working at the table.
+
+### Phase 5 — hostile NPCs place their own areas (user, 2026-08-19)
+
+The planner already picks a verb, an implement and a single target, then `activity.use`
+with the usage dialog suppressed. That is enough for a Halberd. It is not enough for
+Fireball. dnd5e's area activities still stop for a human to place the template, and
+`configure: false` does not skip that step — the same shape as the Attack Roll dialog the
+Assassin's Light Crossbow sat behind. A hostile that "casts Cone of Cold" and then waits
+is not an automated GM.
+
+This is tactics, not a compiler primitive. `create_area` answers "a compiled Moonbeam
+becomes a Region"; this answers "the Archmage's own Cone of Cold activity is aimed and
+placed without a click." Specimens the user named: Fireball, Cone of Cold, Lightning Bolt,
+Wall of Fire, breath weapons, a Medusa's gaze, a Banshee's wail. Heals that cover an area
+are the same search with the scoring inverted.
+
+**The aim is a score, not a centre-on-the-nearest-PC.** Maximise enemies (the party) inside
+the shape; minimise allies (other hostiles). A Fireball that cooks three PCs and two
+hobgoblins is a worse plan than one that cooks two PCs and none of ours, and a cone that
+clips the caster's own front rank is the failure this exists to prevent. The board already
+knows who is a friend; `core/screens.ts` already tests containment against a template
+shape. What is missing is the search (candidate origins and facings) and writing the
+placement into the activity so `use` does not prompt.
+
+The existing planned row — "who a template caught" — is the *reading* half and stays
+separate. Leftover `game.user.targets` are already dropped on a template use
+(`rules/template-targets.ts`), so auto-saves wait rather than rolling the last Ray of
+Frost. Placement without a catch-list still leaves auto-saves with nobody to roll for;
+a catch-list without placement still needs a human to draw the cone. Build placement
+first: without it, a fully automated hostile cannot take the turn.
 
 **The subject whitelist worked, and what it left behind is a different shape than predicted.** 105 → 23,
 and `"caster"` ×20 — the entire basis of the planned aliasing — **is gone from the histogram**. What
@@ -3248,6 +3337,17 @@ button press.
   fires. `bindingAppliesToActivity` is the split, pinned in `test/saves-trigger.test.ts`.
 - **What a failed save INFLICTS is not applied.** Restrained, Prone and the rest are prose on the item, which
   is the compiler's problem. Guessing at them would start an argument at the table.
+- **A leftover target is not who a Fireball is for (2026-08-19).** dnd5e writes `game.user.targets`
+  onto the usage card in `messageFlags` *before* `preUseActivity` and *before* `#placeTemplate`.
+  Auto-saves then rolled that list immediately, so a Dire Wolf still targeted from Ray of Frost
+  Dex-saved against a sphere the caster had not placed — and could have put anywhere.
+  `rules/template-targets.ts` is the one door: on a template activity it empties the live
+  selection *and* `messageConfig.data.flags.dnd5e.targets`. Clearing only the selection leaves
+  the snapshot on the card. Never a veto (a second `preUseActivity` that returns false is how
+  Hide and Dash double-charged). Skipped while `isAutomating()` so Phase 5 can set a catch-list
+  and not have it wiped. `onUsage` also refuses to `noteTargets` when `placesTemplate`, because
+  without a catch-list there is nobody honest to roll; Hold Person is unchanged. Pinned by
+  `test/template-targets.test.ts`.
 
 ### The prompt primitive — `util/prompt.ts`
 
@@ -3666,9 +3766,15 @@ read as a creature sitting in place; it had in fact walked its full Speed each t
 by a Dashing rogue. One number tells those two apart and nothing else does.
 
 - `TRAVEL_ONLY` is the set of plans whose entire content is the movement, and `amend()` in `npc-turn.ts`
-  rewrites the card with `performed.moved` once the move has resolved. `close` and `kite` are deliberately
-  excluded: they end in a real item use, so the swing is the news and the distance already rides in the
-  sentence from `option.approach`.
+  rewrites the card with `performed.moved` once the move has resolved. `close` and `kite` are excluded
+  when they land a use: the swing is the news. **A close that never reached is rewritten** — see
+  below — because leaving "and attacks with Bite" on the card after a failed walk is a lie.
+- **A close that cannot reach must not swing (Dire Wolves, 2026-08-19).** Reported as a 50-foot
+  Bite. The sheet is `range.reach: 5` and the chat flavor says so. Both wolves announced
+  "closes 33 ft … and attacks with Bite", `moveToward` threw then shortened to nothing (walls),
+  and `performPlan` used the activity anyway. Attack cards had empty `targets`; auto-damage
+  said nobody was targeted; nothing applied. `meleeReached` gates the use; the public card
+  becomes "still too far to strike" / "covers no ground at all". Not a reach bug.
 - **Amended rather than followed by a second message**, because announcing first is deliberate (narration
   has to read ahead of the dice) and a separate "it moved 30 ft" line would double the log for every
   advance. A failed edit leaves a card that is merely vague, so it is logged and nothing else.

@@ -41,14 +41,17 @@ export function effectForStatus(actor: any, status: string): any | null {
 }
 
 export function ourTimedEffect(actor: any, key: TimedEffectSpec["key"]): any | null {
+  let expired: any = null;
   for (const effect of actor?.effects ?? []) {
     const flag = effect?.flags?.[MODULE_ID]?.timed;
     if (!flag) continue;
-    if (flag.kind === key.kind && flag.capability === key.capability && flag.ruleIndex === key.ruleIndex) {
-      return effect;
+    if (flag.kind !== key.kind || flag.capability !== key.capability || flag.ruleIndex !== key.ruleIndex) {
+      continue;
     }
+    if (!effect?.duration?.expired && !effect?.disabled) return effect;
+    expired ??= effect;
   }
-  return null;
+  return expired;
 }
 
 export async function stampDuration(effect: any, payload: EffectDurationPayload | null): Promise<boolean> {

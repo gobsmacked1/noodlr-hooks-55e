@@ -57,6 +57,7 @@ import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerDamageGate, surveyGate } from "./rules/gate";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
+import { registerTemplateTargets } from "./rules/template-targets";
 import { surveyLegendary } from "./rules/legendary";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
@@ -394,6 +395,9 @@ Hooks.once("ready", () => {
   // Action economy and condition combat math. These hooks fire on the ROLLING client — often a player
   // — so they must not live inside the GM-only block below.
   registerEconomyHooks();
+  // Drop leftover single-targets on template spells. Same hook, never a veto, and it must
+  // run on the using client — that is whose `game.user.targets` dnd5e snapshots onto the card.
+  registerTemplateTargets();
   registerConditionHooks();
   // Drop-to-0 Unconscious/Dead and damage-at-0 death failures. Writes on the updating client.
   registerDyingHooks();

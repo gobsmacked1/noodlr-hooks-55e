@@ -19,6 +19,7 @@ import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from 
 import { duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
 import { declareReadied } from "../rules/ready";
+import { separation } from "../rules/sight";
 import type { PlanOption, TurnPlan } from "./planner";
 
 export interface Performed {
@@ -248,6 +249,18 @@ function reachOf(option: PlanOption): number {
 }
 
 /**
+ * May this melee close swing from here?
+ *
+ * Unknown separation fails closed. Swinging from 33 ft with an empty target list is how two
+ * Dire Wolves looked like they had a 40-foot Bite after a wall refused the walk — the planner
+ * was honest (`must close 33 ft`); `performPlan` attacked anyway.
+ */
+export function meleeReached(distance: number, reach: number): boolean {
+  if (!Number.isFinite(distance) || !Number.isFinite(reach) || reach <= 0) return false;
+  return distance <= reach + 0.01;
+}
+
+/**
  * Perform a plan. Returns what actually happened, for the announcement to reflect.
  *
  * Note what is NOT here: ending the turn. Advancing the tracker is the GM's prerogative — Noodlr
@@ -278,12 +291,16 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         break;
 
       case "close": {
-        result.moved = await moveToward(
-          selfToken,
-          option.target?.token,
-          speedOf(plan),
-          reachOf(option),
-        );
+        const reach = reachOf(option);
+        result.moved = await moveToward(selfToken, option.target?.token, speedOf(plan), reach);
+        const gap = option.target?.token ? separation(selfToken, option.target.token) : Number.POSITIVE_INFINITY;
+        if (!meleeReached(gap, reach)) {
+          result.problem =
+            result.moved === 0
+              ? "the token would not move — still out of reach, so the attack was not made"
+              : `closed ${Math.round(result.moved)} ${plan.board.units} but still ${Math.round(gap)} ${plan.board.units} away`;
+          break;
+        }
         result.used = await at(option.target);
         break;
       }

@@ -797,7 +797,7 @@ test("grant_advantage writes a timed effect rather than approximating the roll",
   assert.equal(outcomes[0].fired, true, outcomes[0].reason);
   assert.equal(actor.effects.length, 1);
   assert.equal(actor.effects[0].flags["noodlr-hooks-55e"].timed.kind, "grant_advantage");
-  assert.equal(actor.effects[0].duration?.units, "turns");
+  assert.equal(actor.effects[0].duration?.units, "rounds");
 });
 
 test("modify_speed refuses a costMultiplier it cannot write", async () => {

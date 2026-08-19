@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.12
+
+**A leftover target no longer makes a Fireball.** Casting a spell that places a template
+(Fireball, Cone of Cold, a breath) now drops whoever you last clicked. A Dire Wolf still
+targeted from Ray of Frost is not forced to Dex-save before the sphere is on the map — you
+could have put that Fireball anywhere. Auto-saves wait until someone is actually in the
+area. "Who a template caught" is still unbuilt; waiting is the honest state, not a guess.
+
+**Ray of Frost's Slow now lasts until the caster's next turn.** The Speed cut was applied
+and then expired on the next wolf's turn, because the combat was stored as an id string
+(Foundry compares the Combat document itself) and "1 turn" was counted as the next
+initiative slot. The sheet stayed at 50 ft the whole time.
+
+**A close that cannot reach no longer swings.** Two Dire Wolves announced a 33-foot close
+and Bite, walked into a wall, and used the activity anyway. Attack cards named nobody.
+The use now waits until the creature is actually in reach; the card becomes "still too
+far to strike".
+
+**Reckless Attack's first swing now has Advantage on the die, not only on the card.**
+v0.7.11 wrote the timed effect, but dnd5e hands the Attack *activity* as `config.subject`.
+Reading that as the creature walked an empty effect list, so the card said Advantage and
+the die stayed Normal.
+
 ## 0.7.11
 
 **Reckless Attack's first swing of the turn now has Advantage, and Ray of Frost now actually

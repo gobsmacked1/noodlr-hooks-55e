@@ -58,6 +58,7 @@ import {
   type DamagePart,
 } from "./cards";
 import { fireSaveTriggers, type SaveVerdict } from "../capability/saves";
+import { placesTemplate } from "./template-targets";
 
 /** How long an unfinished activation is kept. A save nobody ever rolls must not pin a target forever. */
 const ACTIVATION_TTL_MS = 5 * 60 * 1000;
@@ -226,7 +227,15 @@ async function onUsage(message: any): Promise<void> {
     abilities: Array.from(activity?.save?.ability ?? []).map((a) => String(a)),
     dc: Number.isFinite(Number(activity?.save?.dc?.value)) ? Number(activity.save.dc.value) : null,
   };
-  noteTargets(act, message);
+  // A Fireball's leftover Ray-of-Frost target is not who the sphere will catch. The
+  // usage card is stamped before `#placeTemplate`, so auto-rolling here would Dex-save
+  // a creature the caster has not even aimed at. Who the template caught is still
+  // unbuilt; waiting is the honest state. Hold Person and other aimed saves still roll.
+  if (placesTemplate(activity)) {
+    log("save resolution: waiting on the template, not leftover targets");
+  } else {
+    noteTargets(act, message);
+  }
   await settle(act);
 }
 

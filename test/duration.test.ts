@@ -3,8 +3,11 @@ import { test } from "node:test";
 
 import { durationPayload, type DurationWorld } from "../src/capability/duration";
 
+const combatDoc = { id: "Combat.1" };
+
 const combat: DurationWorld["combat"] = {
   id: "Combat.1",
+  document: combatDoc,
   round: 2,
   turn: 1,
   sourceCombatantId: "c-caster",
@@ -17,10 +20,31 @@ const v13: DurationWorld = { generation: 13, worldTime: 1000, combat };
 test("a one-turn duration with no until expires at the caster's next turn start", () => {
   const payload = durationPayload({ value: 1, units: "turns" }, undefined, v14);
   assert.ok(payload);
-  assert.equal(payload.duration.units, "turns");
+  // Remaining must be a ROUND, not an initiative slot — Foundry's units:"turns"
+  // decrements on every combatant, which killed Ray of Frost before the wolves walked.
+  assert.equal(payload.duration.units, "rounds");
   assert.equal(payload.duration.value, 1);
   assert.equal(payload.duration.expiry, "turnStart");
   assert.equal(payload.start?.combatant, "c-caster");
+  assert.equal(payload.start?.combat, combatDoc);
+});
+
+test("start.combat is the Combat document, never a bare id", () => {
+  const payload = durationPayload({ value: 1, units: "turns" }, "sourceStart", v14);
+  assert.ok(payload);
+  assert.equal(payload.start?.combat, combatDoc);
+  assert.notEqual(typeof payload.start?.combat, "string");
+});
+
+test("without a document, a bare id is still written rather than omitting combat", () => {
+  const world: DurationWorld = {
+    generation: 14,
+    worldTime: 1000,
+    combat: { id: "Combat.orphan", sourceCombatantId: "c-caster" },
+  };
+  const payload = durationPayload({ value: 1, units: "turns" }, "sourceStart", world);
+  assert.ok(payload);
+  assert.equal(payload.start?.combat, "Combat.orphan");
 });
 
 test("a distance filed under duration is not a duration", () => {

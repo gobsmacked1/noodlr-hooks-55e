@@ -12,6 +12,11 @@
 //
 // Fail toward leaving the roll alone. An unreadable effect or an unmet guard is silence, not a
 // forced Advantage.
+//
+// `config.subject` IS THE ACTIVITY (`AttackActivity#rollAttack` sets `rollConfig.subject = this`).
+// Treating it as the creature — the first reading of the hook's name — walked an empty effect
+// list and an empty binding map, so Reckless Attack announced Advantage after every Halberd
+// swing and never changed the die. Unwrap via `subject.actor`. AC5e does the same.
 
 import { MODULE_ID, log } from "../constants";
 import { isStanding } from "../integration/capability";
@@ -65,7 +70,7 @@ function matchesRoll(
 
 function fromEffect(effect: any, kind: RollKind, ability: string, skill: string): GrantHit | null {
   const flag = effect?.flags?.[MODULE_ID]?.timed;
-  if (!flag || effect?.disabled) return null;
+  if (!flag || effect?.disabled || effect?.duration?.expired) return null;
   if (flag.kind !== "grant_advantage" && flag.kind !== "impose_disadvantage") return null;
   const params = (flag.params ?? {}) as Record<string, unknown>;
   if (!matchesRoll(params, kind, ability, skill)) return null;
@@ -144,6 +149,9 @@ function applyToConfig(config: any, hits: GrantHit[]): void {
   if (!hits.length) return;
   const adv = hits.filter((h) => h.advantage);
   const dis = hits.filter((h) => h.disadvantage);
+  // dnd5e's applyKeybindings reads these flags, THEN stamps advantageMode. Setting the
+  // mode ourselves as well is what survives a dialog that already decided "Normal".
+  const modes = (globalThis as any).CONFIG?.Dice?.D20Roll?.ADV_MODE ?? { ADVANTAGE: 1, DISADVANTAGE: -1, NORMAL: 0 };
   if (adv.length) config.advantage = true;
   if (dis.length) config.disadvantage = true;
   const roll = config.rolls?.[0];
@@ -151,8 +159,10 @@ function applyToConfig(config: any, hits: GrantHit[]): void {
     roll.options ??= {};
     if (adv.length) roll.options.advantage = true;
     if (dis.length) roll.options.disadvantage = true;
+    if (adv.length && !dis.length) roll.options.advantageMode = modes.ADVANTAGE;
+    else if (!adv.length && dis.length) roll.options.advantageMode = modes.DISADVANTAGE;
   }
-  const actor = config?.subject ?? config?.actor;
+  const actor = actorOf(config);
   log(
     `grants: ${String(actor?.name ?? "?")}` +
       (adv.length ? ` ADV[${adv.map((h) => h.source).join(",")}]` : "") +
@@ -161,9 +171,32 @@ function applyToConfig(config: any, hits: GrantHit[]): void {
 }
 
 function abilityOf(config: any): string {
-  return String(config?.ability ?? config?.rolls?.[0]?.data?.ability ?? "")
+  return String(
+    config?.ability ?? config?.subject?.ability ?? config?.rolls?.[0]?.data?.ability ?? "",
+  )
     .trim()
     .toLowerCase();
+}
+
+/**
+ * dnd5e 5.x puts the Activity on `config.subject`, not the Actor (`attack.mjs:128`).
+ * Reading `subject` as the creature is why Reckless Attack wrote AEs after every
+ * Halberd swing and never touched the die that just posted.
+ */
+function actorOf(config: any): any {
+  const subject = config?.subject ?? null;
+  if (isActor(subject)) return subject;
+  if (subject?.actor) return subject.actor;
+  if (isActor(config?.actor)) return config.actor;
+  return config?.actor ?? null;
+}
+
+function isActor(doc: any): boolean {
+  if (!doc) return false;
+  if (doc.documentName === "Actor") return true;
+  const uuid = String(doc.uuid ?? "");
+  if (uuid.startsWith("Actor.") && !uuid.includes(".Item.") && !uuid.includes(".Activity.")) return true;
+  return false;
 }
 
 function skillOf(config: any): string {
@@ -186,7 +219,7 @@ function targetActorOf(config: any): any {
 }
 
 function onPreRoll(config: any, kind: RollKind): void {
-  const actor = config?.subject ?? config?.actor ?? null;
+  const actor = actorOf(config);
   const hits = collect(actor, kind, abilityOf(config), skillOf(config), kind === "attack" ? targetActorOf(config) : undefined);
   applyToConfig(config, hits);
 }
@@ -242,5 +275,5 @@ export function registerGrantHooks(): void {
 
 /** Exported so a test can pin the rollType matching without a scene. */
 export function __grantsInternals() {
-  return { rollTypesOf, matchesRoll, collect };
+  return { rollTypesOf, matchesRoll, collect, actorOf, abilityOf, applyToConfig };
 }

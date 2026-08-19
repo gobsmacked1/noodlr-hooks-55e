@@ -10,6 +10,13 @@
 // target-turn is `start.combatant`, not a different event name — DAE's `sourceStart` is
 // `turnStart` plus the caster's combatant id, and that is the translation this file owns.
 //
+// TWO WRITES THAT LOOKED CORRECT AND EXPIRED ON THE NEXT WOLF (Ray of Frost, 2026-08-19).
+// `start.combat` is a ForeignDocumentField. Core does `combat === start.combat` to decide whether
+// `start.combatant` is the expiry combatant; an id string fails that, and the fallback is
+// `getCombatantsByActor(this.actor)` — the creature wearing the Slow, not the caster. And
+// `units: "turns"` remaining counts initiative slots, so value:1 dies the moment anyone else
+// acts. Write the Combat document, and count remaining in rounds.
+//
 // v13 still uses `duration.{rounds, turns, seconds, startTime, startRound, startTurn}`. The live
 // host is v14; the module's compatibility floor is 13. Both shapes are written so a downgrade
 // does not silently become a permanent Slow.
@@ -54,6 +61,13 @@ export interface DurationWorld {
   worldTime: number;
   combat?: {
     id?: string | null;
+    /**
+     * The Combat document itself. `start.combat` is a ForeignDocumentField compared by
+     * identity (`combat === start.combat`) in both remaining-math and `isExpiryEvent`.
+     * An id string makes every comparison fail: Foundry then treats the afflicted
+     * creature as the expiry combatant, so Ray of Frost dies on the wolf's turn.
+     */
+    document?: { id?: string } | null;
     round?: number | null;
     turn?: number | null;
     sourceCombatantId?: string | null;
@@ -119,7 +133,8 @@ function v14(
   const start: Record<string, unknown> = { time: world.worldTime };
 
   if (world.combat) {
-    if (world.combat.id) start.combat = world.combat.id;
+    if (world.combat.document) start.combat = world.combat.document;
+    else if (world.combat.id) start.combat = world.combat.id;
     if (Number.isFinite(Number(world.combat.round))) start.round = Number(world.combat.round);
     if (Number.isFinite(Number(world.combat.turn))) start.turn = Number(world.combat.turn);
   }
@@ -147,11 +162,16 @@ function v14(
   }
 
   if (units === "turns" && amount !== null) {
-    duration.value = amount;
-    duration.units = "turns";
     const mapped = mapUntil(until, world);
     duration.expiry = mapped.expiry;
     if (mapped.combatant) start.combatant = mapped.combatant;
+    // Foundry's units:"turns" remaining counts every initiative SLOT. "Until the start
+    // of your next turn" is one of the caster's turns, which is a ROUND of remaining
+    // plus a turnStart event on that combatant. Writing value:1 / units:turns made
+    // Ray of Frost's remaining hit 0 the moment the next wolf acted — the sheet never
+    // showed 40 ft even when the expiry event was aimed at the right creature.
+    duration.value = amount;
+    duration.units = "rounds";
     return { duration, start };
   }
 
@@ -222,6 +242,7 @@ export function worldOf(ctx: {
     combat: combat
       ? {
           id: combat.id ?? null,
+          document: combat,
           round: combat.round ?? null,
           turn: combat.turn ?? null,
           sourceCombatantId: combatantIdOf(ctx.self?.actor, combat),
