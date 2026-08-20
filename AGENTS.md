@@ -3707,6 +3707,11 @@ descriptor, `judge` one event against it), the vocabulary on the request, `valid
  pressing Ready spends the world's credit from their own browser. `watchAvailable()` still answers correctly
  everywhere, because the hook is registered on every client.
 - Diagnostics: `api.surveyReady()`.
+- **Watch event/side/sense aliases live in noodlr's generated half (v0.7.9), filtered by the
+  names this module sent** — the same shape as the v0.7.8 subject aliases on `noodlrHooks.compile`.
+  Fusion asked this module to ship the rows; putting 5e `flee → creature_moves` text here would
+  have meant a hooks release for prompt copy noodlr already filters. A vocabulary that omitted
+  `creature_moves` must not be taught to write it. Schema and `WATCH_EVENTS` did not move.
 
 ### The planner chooses it too, at random, and random is only safe because of the pairing rule (v0.5.1)
 
