@@ -192,7 +192,14 @@ decision to cut the per-turn model call. The call moved to scene load, not into 
     deliberately not on the API — a public "wipe it" is the clear-then-ask mistake with a button.
   - **Chunked at `MAX_BATCH` rather than sent whole**, so a failed request leaves the earlier chunks
     stored. A null answer stops the loop rather than repeating the same nothing per chunk, and
-    `remaining` says what was skipped.
+    `remaining` says what was skipped. `collectScene` uses the same loop: 120 is a save-point, not a
+    scene ceiling. Stopping after the first chunk left thirteen level-20 PCs at 120 of 992 distinct
+    wordings (noodlr-test, 2026-08-20). The older "compendium folder" fuse does not apply — this path
+    only walks tokens the GM placed.
+  - **`ASK_CAP` is 32,768 unread wordings per pass**, on `collectScene` and `recompileWorld`. Thirteen
+    level-20 PCs were 992 distinct — the high side of a real table, not a bound. Past the cap we
+    compile the first 32,768 and `ui.notifications.error` the rest, so a packed map cannot post an
+    unbounded bill and a GM is not left guessing why the last row of tokens never compiled.
   - `locked` is skipped and counted; `rejected` is re-asked, because another go is what a recompile is
     for. Bindings for whatever is on the canvas are rebuilt at the end, so the new descriptors run
     without a scene reload.

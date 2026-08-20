@@ -1,9 +1,10 @@
 // Reading a scene's sheets, and asking for what is not already understood.
 //
 // This is the seam between the two halves of the compiler. It runs when a scene loads, walks every
-// creature on it, reduces each written ability to a cache key, and hands the misses to `noodlr` in
-// ONE batch. Everything it produces is then bound to the actor so `executor.ts` can run it without
-// touching the network again.
+// creature on it, reduces each written ability to a cache key, and hands every miss to `noodlr`
+// in chunks of `MAX_BATCH`. Everything it produces is then bound to the actor so `executor.ts`
+// can run it without touching the network again. A failed chunk leaves earlier ones stored;
+// the scene itself is not capped.
 //
 // THE ECONOMICS ARE THE DESIGN. The corpus measured it: 4,661 features across 436 SRD creatures
 // reduced to 1,387 distinct wordings, and one trait's text was shared by 270 creatures. Traits are
@@ -36,11 +37,64 @@ import { readableActors } from "./sheets";
 import { bindCapabilities, clearBindings, type Binding } from "./bindings";
 
 /**
- * A scene of many creatures is still a bounded job, but a compendium browser left open on a folder
- * of two hundred monsters is not. This is the fuse: past it we compile what we can and log the rest,
- * rather than posting a bill nobody agreed to.
+ * How many wordings ride on one `noodlrHooks.compile` request — a save-point, not a scene ceiling.
+ *
+ * Stopping after the first chunk is what left a party of thirteen level-20 characters at 120 of 992
+ * distinct wordings (noodlr-test, 2026-08-20). Keep the chunk small so a failed request leaves
+ * earlier ones stored. The scene itself is capped at `ASK_CAP`.
  */
 const MAX_BATCH = 120;
+
+/**
+ * Runaway brake on how many distinct unread wordings one pass will buy.
+ *
+ * Thirteen level-20 PCs on one scene measured 992 distinct (noodlr-test, 2026-08-20) — the high
+ * side of a real table, not a ceiling. A future world can squeeze far more onto a map, so this is
+ * set well above any honest scene and still finite: past it we compile the first 32,768 and tell
+ * the GM, rather than posting an unbounded bill.
+ */
+export const ASK_CAP = 32_768;
+
+let askCap = ASK_CAP;
+
+/** Test-only. `null` restores the shipped ceiling. */
+export function __setAskCap(n: number | null): void {
+  askCap = n == null ? ASK_CAP : Math.max(0, Math.floor(n));
+}
+
+export function applyAskCap<T>(items: readonly T[]): { kept: T[]; remaining: number } {
+  if (items.length <= askCap) return { kept: items.slice(), remaining: 0 };
+  return { kept: items.slice(0, askCap), remaining: items.length - askCap };
+}
+
+function chunksOf<T>(items: readonly T[]): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += MAX_BATCH) chunks.push(items.slice(i, i + MAX_BATCH));
+  return chunks;
+}
+
+function announceAskCap(place: "scene" | "world", total: number, remaining: number): void {
+  const cap = askCap;
+  warn(
+    `${total} unread ability wordings on this ${place} exceeds the ${cap} ceiling; ` +
+      `asking about the first ${cap}. ${remaining} skipped.`,
+  );
+  const text =
+    game.i18n?.format?.("NOODLRHOOKS.Capabilities.AskCap", { place, total, cap, remaining }) ??
+    `${total} unread abilities on this ${place} is over the ${cap} limit. ` +
+      `The first ${cap} will be read now; ${remaining} were skipped. ` +
+      `Remove some tokens and load again for the rest.`;
+  ui.notifications?.error?.(text);
+}
+
+function takeAskable(
+  items: Feature[],
+  place: "scene" | "world",
+): { kept: Feature[]; remaining: number } {
+  const { kept, remaining } = applyAskCap(items);
+  if (remaining) announceAskCap(place, items.length, remaining);
+  return { kept, remaining };
+}
 
 /** Below this, a description is a flavour line rather than a rule. "It is a big rock." teaches nothing. */
 const MIN_PROSE = 24;
@@ -337,6 +391,8 @@ export interface CollectReport {
   requested: number;
   compiled: number;
   rejected: number;
+  /** Unread wordings past `ASK_CAP`, or left unasked because nobody answered a chunk. */
+  remaining: number;
   /** True when nothing was listening — the ordinary state with no companion module installed. */
   noCompiler: boolean;
   /** Tooling instructions found in open rule text, as `label` → the sentences taken out. */
@@ -370,6 +426,7 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     requested: 0,
     compiled: 0,
     rejected: 0,
+    remaining: 0,
     noCompiler: false,
     scrubbed: {},
     declined: {},
@@ -424,24 +481,38 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     );
   }
 
-  // Pass two: buy the misses, once, in one batch. Only the primary GM, and only if asked to.
+  // Pass two: buy the misses. Only the primary GM, and only if asked to. Chunked at MAX_BATCH so a
+  // failed request leaves earlier chunks stored. Capped at ASK_CAP so a packed map cannot post an
+  // unbounded bill; the overflow is a toast, not a silent drop.
   if (misses.size > 0 && isPrimaryGM() && isCapabilityCompileEnabled()) {
     const wanted = [...misses.values()];
-    if (wanted.length > MAX_BATCH) {
-      warn(
-        `${wanted.length} uncompiled abilities on this scene; asking about the first ${MAX_BATCH}. ` +
-          `Run api.compileScene() again for the rest.`,
+    const { kept, remaining } = takeAskable(wanted, "scene");
+    report.remaining = remaining;
+    const chunks = chunksOf(kept);
+    if (chunks.length > 1) {
+      log(
+        `${kept.length} uncompiled abilities on this scene; asking in ${chunks.length} ` +
+          `request(s) of up to ${MAX_BATCH}.`,
       );
     }
-    const batch = wanted.slice(0, MAX_BATCH);
-    report.requested = batch.length;
-    const answers = await ask(batch, actorOf(batch, perActor));
-    report.noCompiler = answers === null;
-    if (answers) {
+    for (const [index, chunk] of chunks.entries()) {
+      const answers = await ask(chunk, actorOf(chunk, perActor));
+      report.noCompiler = answers === null;
+      if (!answers) {
+        report.remaining += kept.length - report.requested;
+        break;
+      }
+      report.requested += chunk.length;
       const accepted = absorb(answers, misses);
-      report.compiled = accepted.compiled;
-      report.rejected = accepted.rejected;
+      report.compiled += accepted.compiled;
+      report.rejected += accepted.rejected;
       if (accepted.compiled) await cache.flush();
+      if (chunks.length > 1) {
+        log(
+          `collectScene: request ${index + 1}/${chunks.length} — ` +
+            `${accepted.compiled} compiled, ${accepted.rejected} rejected.`,
+        );
+      }
     }
   }
 
@@ -557,6 +628,8 @@ export interface RecompileReport {
   rejected: number;
   /** Locked capabilities, which a recompile is never allowed to overwrite. */
   skipped: number;
+  /** Unread wordings past `ASK_CAP`. */
+  remaining: number;
   noCompiler: boolean;
   disabled: boolean;
 }
@@ -577,6 +650,7 @@ export async function recompileFeatures(actor: any, ids?: string[]): Promise<Rec
     compiled: 0,
     rejected: 0,
     skipped: 0,
+    remaining: 0,
     noCompiler: false,
     disabled: false,
   };
@@ -601,22 +675,25 @@ export async function recompileFeatures(actor: any, ids?: string[]): Promise<Rec
   }
   if (batch.length === 0) return report;
 
-  report.requested = batch.length;
-  const owners = new Map<string, any>(batch.map((f) => [f.id, actor]));
-  const answers = await ask(batch.slice(0, MAX_BATCH), owners);
-  if (!answers) {
-    report.noCompiler = true;
-    return report;
+  const { kept, remaining } = takeAskable(batch, "scene");
+  report.remaining = remaining;
+  const owners = new Map<string, any>(kept.map((f) => [f.id, actor]));
+  for (const chunk of chunksOf(kept)) {
+    const answers = await ask(chunk, owners);
+    if (!answers) {
+      report.noCompiler = true;
+      break;
+    }
+    report.requested += chunk.length;
+    // Now that a replacement exists, stand the old one down so `put` is not refused.
+    for (const id of Object.keys(answers)) {
+      if (cache.get(id)?.status !== "locked") cache.remove(id);
+    }
+    const accepted = absorb(answers, asked);
+    report.compiled += accepted.compiled;
+    report.rejected += accepted.rejected;
+    if (accepted.compiled) await cache.flush();
   }
-
-  // Now that a replacement exists, stand the old one down so `put` is not refused.
-  for (const id of Object.keys(answers)) {
-    if (cache.get(id)?.status !== "locked") cache.remove(id);
-  }
-  const accepted = absorb(answers, asked);
-  report.compiled = accepted.compiled;
-  report.rejected = accepted.rejected;
-  if (accepted.compiled) await cache.flush();
   rebindActor(actor);
   return report;
 }
@@ -634,7 +711,7 @@ export interface WorldRecompileReport {
   requested: number;
   compiled: number;
   rejected: number;
-  /** Over the per-request fuse and not asked about. Run it again for these. */
+  /** Unread wordings past `ASK_CAP`, or left unasked because nobody answered a chunk. */
   remaining: number;
   noCompiler: boolean;
   disabled: boolean;
@@ -745,16 +822,17 @@ export async function recompileWorld(
     return report;
   }
 
-  // Chunked rather than sent whole, and the fuse is kept on purpose: a single request carrying every
-  // wording in a large world is one failure away from having bought nothing, whereas a chunk that
-  // fails leaves the earlier ones stored.
-  const chunks: Feature[][] = [];
-  for (let i = 0; i < batch.length; i += MAX_BATCH) chunks.push(batch.slice(i, i + MAX_BATCH));
+  const { kept, remaining } = takeAskable(batch, "world");
+  report.remaining = remaining;
+
+  // Chunked rather than sent whole: a single request carrying every wording in a large world is one
+  // failure away from having bought nothing, whereas a chunk that fails leaves the earlier ones stored.
+  const chunks = chunksOf(kept);
   log(
     `recompileWorld: ${report.distinct} distinct wording(s) on ${report.actors} sheet(s), ` +
       `${report.locked} locked` +
       (since ? `, ${report.fresh} already re-read since ${new Date(since).toISOString()}` : "") +
-      `, asking about ${batch.length} in ${chunks.length} request(s). ` +
+      `, asking about ${kept.length} in ${chunks.length} request(s). ` +
       `This spends one compile per wording.`,
   );
 
@@ -765,7 +843,7 @@ export async function recompileWorld(
       // Nobody is listening. Every later chunk would answer the same way, so stop rather than
       // logging the same nothing a dozen times.
       report.noCompiler = true;
-      report.remaining = batch.length - report.requested;
+      report.remaining += kept.length - report.requested;
       break;
     }
     report.requested += chunk.length;

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.13
+
+**A scene of high-level characters is no longer cut off after 120 abilities.** Dropping thirteen
+level-20 player tokens compiled the first 120 distinct wordings and stopped, with 872 still unread.
+120 is still the size of one compile request — a save-point if a request fails — but the scene now
+keeps asking until every unread wording is done.
+
+**A packed map cannot post an unbounded bill.** One pass will read at most 32,768 distinct unread
+wordings. Past that the first 32,768 are still compiled and the GM gets an error naming how many
+were skipped, so the leftover is visible rather than silent. Thirteen level-20 PCs measured 992
+distinct; 32,768 is the runaway brake, not a target.
+
 ## 0.7.12
 
 **A leftover target no longer makes a Fireball.** Casting a spell that places a template

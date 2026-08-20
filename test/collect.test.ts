@@ -2,6 +2,9 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import {
+  ASK_CAP,
+  __setAskCap,
+  applyAskCap,
   collectScene,
   featuresOf,
   registerCapabilityCollector,
@@ -15,6 +18,7 @@ import type { Capability } from "../src/integration/capability";
 // ---- Fakes ---------------------------------------------------------------------------------------
 
 let compileCalls: any[];
+let errors: string[];
 let answer: (items: any[]) => Record<string, unknown>;
 let compileEnabled: boolean;
 let listening: boolean;
@@ -68,7 +72,9 @@ function scene(actors: any[]) {
 beforeEach(() => {
   cache.__reset();
   clearBindings();
+  __setAskCap(null);
   compileCalls = [];
+  errors = [];
   compileEnabled = true;
   listening = true;
   uploads = [];
@@ -86,7 +92,12 @@ beforeEach(() => {
     i18n: { format: (_k: string, d: any) => `read ${d.count}` },
     settings: { get: () => compileEnabled },
   };
-  (globalThis as any).ui = { notifications: { info: () => {} } };
+  (globalThis as any).ui = {
+    notifications: {
+      info: () => {},
+      error: (text: string) => errors.push(String(text)),
+    },
+  };
   (globalThis as any).canvas = { scene: { id: "scene-1", tokens: { contents: [] } } };
   (globalThis as any).foundry = {
     applications: {
@@ -235,6 +246,64 @@ test("tooling written into open rule text is reported to the GM", async () => {
 });
 
 // ---- Running a scene ---------------------------------------------------------------------------------
+
+test("the wording ceiling is 32768", () => {
+  assert.equal(ASK_CAP, 32_768);
+  assert.equal(applyAskCap(Array.from({ length: 32_768 }, (_, i) => i)).remaining, 0);
+  assert.equal(applyAskCap(Array.from({ length: 32_769 }, (_, i) => i)).remaining, 1);
+  assert.equal(applyAskCap(Array.from({ length: 32_769 }, (_, i) => i)).kept.length, 32_768);
+});
+
+test("hitting the wording ceiling tells the GM and still asks up to the cap", async () => {
+  __setAskCap(2);
+  (globalThis as any).game.i18n.format = (_k: string, d: any) =>
+    `${d.total} over ${d.cap}, skipped ${d.remaining}`;
+  const actor = creature(
+    "Actor.horde",
+    "Horde",
+    Array.from({ length: 3 }, (_, i) =>
+      item(
+        `Ability ${i}`,
+        `This is a unique compiled ability wording number ${i}, long enough to pass the prose floor.`,
+      ),
+    ),
+  );
+
+  const report = await collectScene(scene([actor]));
+  assert.equal(report.distinct, 3);
+  assert.equal(report.requested, 2);
+  assert.equal(report.remaining, 1);
+  assert.equal(compileCalls.length, 1);
+  assert.equal(compileCalls[0].items.length, 2);
+  assert.equal(errors.length, 1, "the GM gets one error toast, not a silent drop");
+  assert.match(errors[0], /3 over 2, skipped 1/);
+});
+
+test("a scene with more wordings than one request still asks about all of them", async () => {
+  // MAX_BATCH is 120. Stopping after the first chunk is what left a live party of level-20
+  // characters half-compiled. The per-request size stays; the scene is not capped.
+  const OVER = 121;
+  const actors = [
+    creature(
+      "Actor.party",
+      "Archmage",
+      Array.from({ length: OVER }, (_, i) =>
+        item(
+          `Ability ${i}`,
+          `This is a unique compiled ability wording number ${i}, long enough to pass the prose floor.`,
+        ),
+      ),
+    ),
+  ];
+
+  const report = await collectScene(scene(actors));
+  assert.equal(report.distinct, OVER);
+  assert.equal(report.requested, OVER, "every miss is asked about, not only the first chunk");
+  assert.equal(report.compiled, OVER);
+  assert.equal(compileCalls.length, 2, "two requests of up to 120, not one truncated batch");
+  assert.equal(compileCalls[0].items.length, 120);
+  assert.equal(compileCalls[1].items.length, 1);
+});
 
 test("twenty goblins with one wording cost one compile", async () => {
   const text = "While within 5 feet of an ally, the goblin has Advantage on attack rolls.";

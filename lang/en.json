@@ -1,4 +1,5 @@
 {
+  "NOODLRHOOKS.Capabilities.AskCap": "{total} unread abilities on this {place} is over the {cap} limit. The first {cap} will be read now; {remaining} were skipped. Remove some tokens and load again for the rest.",
   "NOODLRHOOKS.Capabilities.Compiled": "Read {count} new abilities off the sheets on this scene.",
   "NOODLRHOOKS.Capabilities.Drift": "Read under {was}, which is not what this world is running now. Probably still right — the wording has not changed — but if your rules update touched this ability, read it again, or lock it to record that you have checked it.",
   "NOODLRHOOKS.Capabilities.DriftUnstamped": "Read before this module started recording which rules version it read under, so there is no telling. Read it again, or lock it to record that you have checked it.",
