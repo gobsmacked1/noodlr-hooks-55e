@@ -617,7 +617,13 @@ From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from 
   `CONFIG.queries["auraeffects.applyAuraEffects"]` invoked as `activeGM.query(...)`, which is our
   `isPrimaryGM()` discipline in the newer core idiom. **No libWrapper anywhere in it.** Strictly better
   than the movement-hook distance scan we would otherwise have reached for, and the two cannot collide
-  because ours would carry our own origin flag.
+  because ours would carry our own origin flag. **Stand aside per item** when the source
+  already uses `type: "auraeffects.aura"` — two Regions for the same Spirit Guardians is
+  a stacked AE, not a geometry collision. DDB does not stamp `flags.auraeffects`; wipe +
+  re-import leaves scene Regions and `fromAura` copies until deleted by hand. Live
+  git.gay **2.2.1** also has a broken Wild Shape cleanup (`token.parent` typo,
+  `systems/dnd5e.mjs:20`). Full re-read:
+  [`stack-aura-vae-2026-08-19.md`](../_research/_audit/stack-aura-vae-2026-08-19.md).
 - **Effect Macro is the one real conflict, and it is ours to fix.** Its trigger list duplicates six of
   ours by meaning (`onTurnStart`, `onTurnEnd`, `onCreate` on a status-bearing effect, and via dnd5e
   `damageActor` and `restCompleted`). It fires nothing on its own — a human must paste JS into
@@ -627,6 +633,13 @@ From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from 
   Planned stand-aside, same shape as `alreadyAutomated()`: the collector skips a feature whose effects
   carry `flags.effectmacro` keys. Their executor election is `getDesignatedUser() ?? activeGM`, the
   same answer as our `rollerForActor`.
+  **Still unbuilt as of 2026-08-19** (`rg effectmacro` over `src/capability` and `src/system` is
+  empty). Re-audit of the live clones is
+  [`_research/_audit/community-effects-stack-2026-08-19.md`](../_research/_audit/community-effects-stack-2026-08-19.md):
+  Aura Effects' live remote is git.gay **2.2.1** (GitHub is still 2.1.1-3); it copies real Active
+  Effects onto actors, not decorations. DAE / Aura / Effect Macro are disable-before-DDB-reimport;
+  Visual Active Effects is cosmetic. None of the five change compile `gm%` — `featuresOf` walks items
+  only.
 - **Rest Recovery cancels dnd5e's `pre*` rest hooks and then re-enters `actor._rest()`**, so
   `dnd5e.restCompleted` still fires and is the hook to use when rest triggers are wired. It owns
   per-item recovery, so a descriptor restoring the same counter double-restores — harmless for
@@ -646,15 +659,24 @@ From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from 
     plausible number gets written down and then quoted. Full census with what each patch corrects:
     [`_research/_audit/mech-04-change-key-vocabulary.md`](../_research/_audit/mech-04-change-key-vocabulary.md) §3.
   - **`specialDuration` is midi's, not DAE's, and that inverts what it means for us.** DAE registers
-    the vocabulary only `if (game.modules.get("midi-qol")?.active)` (`DAEdnd5e.ts:632`) and checks
-    exactly two values itself (`combatEnd`, `joinCombat`); every one of the ~40 interesting ones
-    (`isHit`, `isDamaged.<type>`, `isSaveFailure.<abl>`, `1Attack`, `zeroHP`, `isMoved`) is checked
-    inside midi. So a DDB-imported item whose rider expires "when the target is next hit" is inert
-    on this table twice over, and DAE alone would not save it.
-- Convenient Effects 9.2.5 does **not** override `CONFIG.statusEffects` or the token HUD, and applies
-  nothing without the separate `dfreds-triggers` module, which is not installed. Its exhaustion code is
-  gated on its own `ceEffectId`, so a status we write natively never reaches it. Automated Evocations,
-  Polyglot and Visual Active Effects are inert with respect to everything here.
+    the interesting vocabulary only `if (game.modules.get("midi-qol")?.active)` (`DAEdnd5e.ts:632`)
+    and evaluates exactly two leftover flags itself (`combatEnd`, `joinCombat`); `1Attack`,
+    `isDamaged`, `isSkill.*`, `zeroHP`, `isMoved` are midi's. **`turnStartSource` is the exception
+    that is not a sticker:** at v14.0.13 DAE migrates that deprecated name to
+    `duration.expiry: "sourceStart"` on create/edit, and then **core** expires it. The 2026-08-17
+    “never expires” census mixed that family with `isDamaged`/`1Attack`, which still never expire
+    with midi off. Re-verified 2026-08-19: [`stack-dae-2026-08-19.md`](../_research/_audit/stack-dae-2026-08-19.md).
+  - **`dae.coreExpiryAction: "none"` kills core auto-expiry world-wide**, including our Phase 4
+    timed grants. Default `"update"` is aligned with `fromEffect` skipping `duration.expired`.
+- Convenient Effects 9.2.6 is still a library + click, **not** “applies nothing without
+  `dfreds-triggers`.” Triggers are optional event automation; the app, drop, macros, and
+  Argon call `api.toggleEffect` and write ordinary AEs without that module. Exhaustion
+  stays `ceEffectId`-gated, so a status we write natively never reaches it. Argon + CE
+  **Dodge** skips `activity.use` (our intercept misses the click); Hide has no CE effect
+  and stays on the item + `statusId` path. [`stack-ce-effectmacro-2026-08-19.md`](../_research/_audit/stack-ce-effectmacro-2026-08-19.md).
+- Visual Active Effects is **cosmetic as automation** (no apply/expiry engine) and **mutable
+  as a HUD** (double-click toggles `disabled`; Shift+right-click deletes). Automated
+  Evocations and Polyglot stay inert with respect to everything here.
 
 ### What the same audit found about space, sight and movement (2026-08-11)
 
@@ -2959,12 +2981,12 @@ first: without it, a fully automated hostile cannot take the turn.
 and `"caster"` ×20 — the entire basis of the planned aliasing — **is gone from the histogram**. What
 remains sorts into three kinds, and only the first is an aliasing job:
 
-- **Possessives meaning `self`:** `owner` ×6, `user`, `ability user`, `source`. The aliasing todo stands,
-  narrowed to these.
+- **Possessives meaning `self`:** `owner` ×6, `user`, `ability user`, `source`. **Shipped as prompt
+  aliases in noodlr v0.7.8** (caster / wielder / owner / user / you → `self`). Not extra subject
+  values — the validator still accepts only this module's `SUBJECTS` list.
 - **Role descriptors meaning `trigger`:** `saving creature` ×2, `moving creature`, `acting creature`,
-  `damaged creature`. Cheaper than aliasing and more general — the doctrine should say that the creature
-  an event is ABOUT is `trigger`, since every one of these is the model correctly identifying that
-  creature and having no word for it.
+  `damaged creature`. Same pass: those phrases → `trigger` in noodlr's generated half. The doctrine
+  already says the creature an event is ABOUT is `trigger`.
 - **NOT CREATURES AT ALL:** `rod` ×4, `weapon` ×2, `chosen location`. A genuine vocabulary gap of the
   same class as `secondary target` — a subject axis that only enumerates creatures cannot express a rule
   about the implement or the spot. Fold into the `secondary-map` work rather than aliasing it away.
@@ -4451,13 +4473,13 @@ from scratch rather than assumed to be covered.
   INSIDE are the capability question, and only the second one can tell you whether anything is broken.**
   Both censuses of this family have been wrong at first pass by reading the outer layer — the previous world
   by attributing CPR's items to DDB, this one by reading 1,302 namespace hits as 1,302 inert automations.
-- **THE ACTUAL LOSS IS DAE `specialDuration`, 196 DECLARATIONS, AND IT IS NOT FIXABLE BY RE-IMPORTING.**
-  DDB writes that key whenever DAE is present, which it is. Confirmed at runtime rather than inferred:
-  **`DAE.daeSpecialDurations` is an empty object**, because DAE registers the vocabulary only when midi is
-  active (`DAEdnd5e.ts:632`) and every interesting value is checked inside midi. So `turnStartSource` ×59
-  (Absorb Elements, Booming Blade), the twenty `isSkill.*` variants ×~120 (Guidance), `1Attack:*` ×8
-  (Frostbite), `isSave` ×5, `isDamaged` ×2 all mean nothing: **the effect applies correctly and then never
-  expires.** A player keeps Guidance's bonus for the rest of the session.
+- **THE ACTUAL LOSS IS DAE `specialDuration`, 196 DECLARATIONS — not fixable by re-importing *while DAE is still on*.**
+  DDB writes that key whenever DAE is present. Confirmed at runtime rather than inferred:
+  **`DAE.daeSpecialDurations` is an empty object** with midi off, because the interesting labels register
+  only when midi is active (`DAEdnd5e.ts:632`). Split after the 2026-08-19 DAE re-read: `isSkill.*` /
+  `1Attack` / `isDamaged` still never expire (Guidance is that family); **`turnStartSource` ×59 can
+  migrate to native `sourceStart` when DAE is on** and then core expires it. Wipe + re-import with DAE
+  **off** is what stops DDB writing the key; disable alone leaves the residue on disk.
   - This is the first measured justification for the Phase 4 `duration` task rather than an argued one.
     Core v14 owns the expiry model natively (`CONST.ACTIVE_EFFECT_EXPIRY_EVENTS` plus `start.combatant`,
     so source-turn versus target-turn is expressible), so the fix is a translation of a vocabulary we can
