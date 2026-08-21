@@ -17,17 +17,57 @@ import { log } from "../constants";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { isAutomating } from "./economy/enforce";
 
+/** The dnd5e area type on this activity, or inherited from its item. */
+export function templateSpecOf(activity: any): { type: string; size: number; width?: number } {
+  const own = activity?.target?.template ?? {};
+  if (activity?.target?.override === true) {
+    return { type: String(own.type ?? "").trim(), size: Number(own.size) || 0, width: num(own.width) };
+  }
+  const item = activity?.item?.system?.target?.template ?? activity?.item?.target?.template ?? {};
+  const type = String(own.type || item.type || "").trim();
+  const size = Number(own.size || item.size) || 0;
+  const width = num(own.width) ?? num(item.width);
+  return { type, size, width };
+}
+
+function num(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+function linkedSpellOf(activity: any): any {
+  if (String(activity?.type ?? "").toLowerCase() !== "cast") return null;
+  if (activity?.cachedSpell?.system?.activities) return activity.cachedSpell;
+  const uuid = String(activity?.spell?.uuid ?? "");
+  if (!uuid) return null;
+  try {
+    const sync = (foundry as any)?.utils?.fromUuidSync ?? (globalThis as any).fromUuidSync;
+    const doc = typeof sync === "function" ? sync(uuid) : null;
+    return doc?.system?.activities ? doc : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The activity that actually describes the area.
+ *
+ * A Cast wrapper (Archmage Spellcasting → Lightning Bolt) has no template of its own.
+ * `CastActivity.use` forwards to the cached spell, and that is what `#placeTemplate` reads.
+ */
+export function templateActivityOf(activity: any): any {
+  if (templateSpecOf(activity).type) return activity;
+  const spell = linkedSpellOf(activity);
+  const raw = spell?.system?.activities;
+  const list: any[] = raw?.contents ?? (Array.isArray(raw) ? raw : []);
+  return list.find((a) => templateSpecOf(a).type) ?? activity;
+}
+
 /** Does this activity place a MeasuredTemplate before it is "released"? */
 export function placesTemplate(activity: any): boolean {
-  const own = String(activity?.target?.template?.type ?? "").trim();
-  if (own) return true;
-  // An override that states no template is a deliberate "this use does not place one".
-  if (activity?.target?.override === true) return false;
-  const item = activity?.item;
-  const inherited = String(
-    item?.system?.target?.template?.type ?? item?.target?.template?.type ?? "",
-  ).trim();
-  return Boolean(inherited);
+  if (templateSpecOf(activity).type) return true;
+  const placer = templateActivityOf(activity);
+  return placer !== activity && Boolean(templateSpecOf(placer).type);
 }
 
 /**

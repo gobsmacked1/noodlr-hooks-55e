@@ -29,6 +29,7 @@ import { turnRandom } from "../core/random";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
 import { readyOptions } from "./ready-plan";
 import type { WatchDescriptor } from "../integration/watch";
+import { isProne, shouldStand, standCost } from "../system/dnd5e-prone";
 
 /** Below this fraction of maximum hit points a creature considers itself in trouble. */
 const BLOODIED = 0.5;
@@ -64,6 +65,8 @@ export interface PlanOption {
    */
   activity?: any;
   range?: number;
+  /** Passed through to `rollAttack` so a thrown spear is thrown, not stabbed from 20 ft. */
+  attackMode?: string;
   /** Separation the creature wants from `target` when withdrawing, in scene units. */
   standOff?: number;
   target?: BoardActor;
@@ -103,6 +106,8 @@ export interface TurnPlan {
   postscript?: string;
   /** Where that end-of-turn move ends up, when one was found. */
   coverSpot?: Spot;
+  /** Stand from Prone before acting. Half Speed; staying down is the keepDistance stay-put case. */
+  stand?: boolean;
 }
 
 // ---- reading the creature's own kit ------------------------------------------------------------
@@ -127,6 +132,11 @@ const onTurn = (u: Usable) => u.economy === "action" || u.economy === "bonus";
 
 const isAttack = (u: Usable) => u.available && u.kind === "attack" && onTurn(u);
 const isRangedAttack = (u: Usable) => isAttack(u) && u.ranged;
+
+/** Already able to shoot the thing it would hide from — hiding instead of shooting is the bug. */
+export function rangedCovers(kit: Usable[], distance: number): boolean {
+  return kit.some((u) => isRangedAttack(u) && u.range >= distance);
+}
 
 /** What an opponent can do back, which is all the creature needs to decide how close to stand. */
 interface ThreatProfile {
@@ -249,6 +259,7 @@ function attackOptions(
         itemName: usable.name,
         activity: usable.activity,
         range: usable.range,
+        attackMode: usable.attackMode,
         target: enemy,
         approach: inReach ? 0 : gap,
         score,
@@ -399,6 +410,7 @@ function kiteOptions(
       itemName: ranged.name,
       activity: ranged.activity,
       range: ranged.range,
+      attackMode: ranged.attackMode,
       // Far enough that the thing about to close cannot reach it, not as far as the bow can shoot.
       standOff:
         threat(target).meleeReach + (Number((canvas as any)?.scene?.grid?.distance ?? 5) || 5),
@@ -492,6 +504,9 @@ function hideOptions(
 
   const nearest = playerFacing(board)[0];
   if (!nearest) return [];
+  // Cover after a shot is `coverIntent`. Hide as the WHOLE turn is for when it cannot already
+  // shoot — otherwise the Archmage walks twelve feet and ducks instead of using Arcane Burst.
+  if (rangedCovers(kit, nearest.distance)) return [];
 
   const spot = findConcealment(board.self.token, nearest.token, board.speed, rand);
   if (!spot) return [];
@@ -683,6 +698,7 @@ function coverIntent(
   chosen: PlanOption,
   threat: (enemy: BoardActor) => ThreatProfile,
   rand: () => number,
+  remainingSpeed: number,
 ): { text: string; spot: Spot } | undefined {
   if (!can(p, "seekCover")) return undefined;
   // Already leaving, already breaking away, or already hiding: the movement is spoken for.
@@ -694,7 +710,7 @@ function coverIntent(
   ) {
     return undefined;
   }
-  if (board.speed === null || board.speed <= 0) return undefined;
+  if (!(remainingSpeed > 0)) return undefined;
 
   const shooters = board.enemies.filter((e) => threat(e).hasRanged);
   if (shooters.length === 0) return undefined;
@@ -703,7 +719,7 @@ function coverIntent(
   const furthest = facing[facing.length - 1];
   if (!furthest) return undefined;
 
-  const spot = findConcealment(board.self.token, furthest.token, board.speed / 2, rand);
+  const spot = findConcealment(board.self.token, furthest.token, remainingSpeed / 2, rand);
   // No reachable cover means no claim of cover. Announcing an intention we could not satisfy would
   // have the GM hunting for a wall that isn't there.
   if (!spot) return undefined;
@@ -765,7 +781,37 @@ export function planTurn(combatant: any): TurnPlan | null {
   const considered = options.sort((a, b) => b.score - a.score).slice(0, profile.breadth);
 
   const chosen = weightedChoice(considered, profile.noise, rand);
-  const cover = coverIntent(board, profile, chosen, threat, rand);
+  const step = Number((globalThis as any).canvas?.scene?.grid?.distance ?? 5) || 5;
+  const travels =
+    chosen.kind === "close" ||
+    chosen.kind === "advance" ||
+    chosen.kind === "search" ||
+    chosen.kind === "help" ||
+    chosen.kind === "flee" ||
+    chosen.kind === "escape" ||
+    chosen.kind === "hide" ||
+    chosen.kind === "kite" ||
+    (chosen.approach ?? 0) > 0;
+  const stand = shouldStand({
+    prone: isProne(actor),
+    speed: board.speed,
+    keepDistance: can(profile, "keepDistance"),
+    meleeWithin5: board.enemies.some((e) => e.distance <= step + 0.01),
+    travels,
+    meleeAttack:
+      chosen.kind === "close" ||
+      (chosen.kind === "attack" &&
+        chosen.attackMode !== "ranged" &&
+        chosen.attackMode !== "thrown"),
+    flies: board.locomotion.primary === "fly",
+  });
+  const remaining =
+    stand && board.speed != null ? Math.max(0, board.speed - standCost(board.speed)) : (board.speed ?? 0);
+  // Staying Prone is a stay-put tactic. Cover after the shot would crawl them into the open.
+  const cover =
+    !isProne(actor) || stand
+      ? coverIntent(board, profile, chosen, threat, rand, remaining)
+      : undefined;
 
   return {
     profile,
@@ -775,5 +821,6 @@ export function planTurn(combatant: any): TurnPlan | null {
     board,
     postscript: cover?.text,
     coverSpot: cover?.spot,
+    stand,
   };
 }

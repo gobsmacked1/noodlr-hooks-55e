@@ -18,15 +18,58 @@ import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
 import { duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
+import { standUp } from "../rules/prone";
 import { declareReadied } from "../rules/ready";
+import { placesTemplate } from "../rules/template-targets";
+import { crawlAction, isProne, standCost } from "../system/dnd5e-prone";
 import { separation } from "../rules/sight";
+import { placeAimedTemplate, stampCatch } from "./place-template";
 import type { PlanOption, TurnPlan } from "./planner";
+
+/** Token id from a BoardActor, a Token, or a TokenDocument. Empty is "nobody". */
+export function tokenIdOf(who: any): string | undefined {
+  const id = String(
+    who?.tokenId ?? who?.document?.id ?? who?.token?.document?.id ?? who?.token?.id ?? who?.id ?? "",
+  );
+  return id || undefined;
+}
+
+function tokenOf(who: any): any {
+  if (!who) return null;
+  if (who.token?.center || who.token?.document) return who.token;
+  if (who.center || who.document) return who;
+  return null;
+}
+
+function actorUuidOf(who: any): string | undefined {
+  const token = tokenOf(who);
+  const uuid = token?.document?.actor?.uuid ?? token?.actor?.uuid ?? who?.token?.document?.uuid ?? who?.uuid;
+  return uuid ? String(uuid) : undefined;
+}
+
+function dnd5eTargets(who: any): object[] {
+  const token = tokenOf(who);
+  const doc = token?.document ?? token;
+  const actor = doc?.actor ?? who?.actor;
+  if (!actor?.uuid) return [];
+  const ac = Number(actor.system?.attributes?.ac?.value);
+  return [
+    {
+      name: String(doc?.name ?? actor.name ?? ""),
+      img: actor.img,
+      uuid: actor.uuid,
+      ac: Number.isFinite(ac) ? ac : null,
+    },
+  ];
+}
 
 export interface Performed {
   /** Distance actually travelled, in scene units. */
   moved: number;
   /** Name of the thing that was used, when one was. */
   used?: string;
+  /** Stood up from Prone before acting. */
+  stood?: boolean;
   /** Human-readable reason the mechanical part did not happen. */
   problem?: string;
 }
@@ -40,17 +83,22 @@ export interface Performed {
  */
 async function withTarget<T>(tokenId: string | undefined, fn: () => Promise<T>): Promise<T> {
   const user: any = game.user;
-  if (!tokenId || typeof user?.updateTokenTargets !== "function") return fn();
+  if (!tokenId) return fn();
 
-  const previous = Array.from((user.targets ?? []) as Set<any>).map(
+  const previous = Array.from((user?.targets ?? []) as Set<any>).map(
     (t: any) => t?.id ?? t?.document?.id,
   );
   try {
-    user.updateTokenTargets([tokenId]);
+    const token = (canvas as any)?.tokens?.get?.(tokenId);
+    if (typeof token?.setTarget === "function") {
+      token.setTarget(true, { releaseOthers: true, groupSelection: false });
+    }
+    const updated = user?.updateTokenTargets?.([tokenId]);
+    if (updated && typeof updated.then === "function") await updated;
     return await fn();
   } finally {
     try {
-      user.updateTokenTargets(previous.filter(Boolean));
+      user?.updateTokenTargets?.(previous.filter(Boolean));
     } catch {
       // a stale target is cosmetic; never let cleanup mask the real result
     }
@@ -65,8 +113,8 @@ async function withTarget<T>(tokenId: string | undefined, fn: () => Promise<T>):
  * prompt, and a prompt on an automated turn is a turn that never finishes.
  */
 async function useAction(
-  action: { item: any; activity?: any; name: string },
-  targetUuid?: string,
+  action: { item: any; activity?: any; name: string; attackMode?: string },
+  target?: any,
   asReaction = false,
 ): Promise<string | undefined> {
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
@@ -74,13 +122,19 @@ async function useAction(
   // with an empty dialog config (and does not await it), which is the Attack Roll window that sat
   // in front of the Assassin's Light Crossbow. We skip that subsequent call and finish the rolls
   // ourselves, awaited, so the turn cannot advance while the dice are still a dialog.
+  //
+  // `#placeTemplate` is a third wait: it calls `drawPreview()` and sits on a mouse click.
+  // `configure: false` does not skip it. Automated area spells pass `create.measuredTemplate: false`
+  // and place the template themselves, aimed at the nominated target.
   const dialog = { configure: false };
   const message = {};
-  const usage = { subsequentActions: false };
+  const usage: Record<string, unknown> = { subsequentActions: false };
+  if (placesTemplate(action.activity)) usage.create = { measuredTemplate: false };
 
   const attempts: Array<() => Promise<unknown>> = [];
   const activity = action.activity;
   const midi: any = (globalThis as any).MidiQOL;
+  const targetUuid = actorUuidOf(target);
 
   // Preferred when midi-qol is present: it resolves the entire workflow (attack, damage, saves, effects)
   // and can be told its targets outright. `ignoreUserTargets` matters because midi otherwise falls back
@@ -101,7 +155,7 @@ async function useAction(
     attempts.push(() => midi.completeActivityUse(activity, midiUsage, dialog, message));
   }
   if (typeof activity?.use === "function") {
-    attempts.push(() => finishActivity(activity, usage, dialog, message));
+    attempts.push(() => finishActivity(activity, usage, dialog, message, action.attackMode, target));
   }
   const item = action.item;
   if (typeof item?.use === "function") {
@@ -145,20 +199,43 @@ async function finishActivity(
   usage: Record<string, unknown>,
   dialog: { configure: boolean },
   message: Record<string, unknown>,
+  attackMode?: string,
+  target?: any,
 ): Promise<unknown> {
   const results = await activity.use(usage, dialog, message);
   if (!results) return results;
 
+  if (placesTemplate(activity)) {
+    const aimedAt = tokenOf(target);
+    const caster = casterTokenOf(activity);
+    if (!aimedAt) throw new Error("the area could not be aimed — no target was nominated");
+    if (!caster) throw new Error("the area could not be aimed — the caster has no token");
+    const aimed = await placeAimedTemplate(activity, caster, aimedAt);
+    if (!aimed) throw new Error("the area could not be placed");
+    await stampCatch(results.message, aimed.caught);
+  }
+
   const origin = results?.message?.id;
-  const follow = origin ? { data: { "flags.dnd5e.originatingMessage": origin } } : {};
+  const stamped = dnd5eTargets(target);
+  const follow = {
+    data: {
+      flags: {
+        dnd5e: {
+          ...(origin ? { originatingMessage: origin } : {}),
+          ...(stamped.length ? { targets: stamped } : {}),
+        },
+      },
+    },
+  };
   const silent = { configure: false };
+  const rollCfg = attackMode ? { attackMode } : {};
 
   const parts = activity.damage?.parts;
   const hasParts = Array.isArray(parts) && parts.length > 0;
   const kind = String(activity.type ?? "");
 
   if (typeof activity.rollAttack === "function") {
-    await activity.rollAttack({}, silent, follow);
+    await activity.rollAttack(rollCfg, silent, follow);
     if (typeof activity.rollDamage === "function" && hasParts) {
       await activity.rollDamage({}, silent, follow);
     }
@@ -173,6 +250,12 @@ async function finishActivity(
     await activity.rollDamage({}, silent, follow);
   }
   return results;
+}
+
+function casterTokenOf(activity: any): any {
+  const actor = activity?.actor ?? activity?.item?.actor;
+  const tokens: any[] = actor?.getActiveTokens?.(true) ?? actor?.getActiveTokens?.() ?? [];
+  return tokens[0] ?? null;
 }
 
 /**
@@ -208,15 +291,11 @@ function unaffordable(action: { item: any; activity?: any; name: string }): stri
  * copy. Returns the name of what was used, or throws what the system threw.
  */
 export async function useActionAt(
-  action: { item: any; activity?: any; name: string },
+  action: { item: any; activity?: any; name: string; attackMode?: string },
   target: any,
   opts: { asReaction?: boolean } = {},
 ): Promise<string | undefined> {
-  const doc = target?.document ?? target;
-  const tokenId = String(doc?.id ?? target?.id ?? "") || undefined;
-  return withTarget(tokenId, () =>
-    useAction(action, doc?.uuid as string | undefined, opts.asReaction),
-  );
+  return withTarget(tokenIdOf(target), () => useAction(action, target, opts.asReaction));
 }
 
 /** Plans whose whole point is that the creature ends up somewhere else. */
@@ -237,8 +316,16 @@ function oneSquare(): number {
 }
 
 /** Movement budget left for the mechanical part of the turn, in scene units. */
-function speedOf(plan: TurnPlan): number {
-  return plan.board.speed ?? 0;
+function speedOf(plan: TurnPlan, stood: boolean): number {
+  const raw = plan.board.speed ?? 0;
+  if (!stood) return raw;
+  return Math.max(0, raw - standCost(raw));
+}
+
+/** Crawl while still Prone; walk/fly once they have stood. */
+function gaitOf(actor: any): { action?: string } {
+  const action = isProne(actor) ? crawlAction() : undefined;
+  return action ? { action } : {};
 }
 
 /** Reach of the chosen option, defaulting to a single square when the option carries no range. */
@@ -270,15 +357,26 @@ export function meleeReached(distance: number, reach: number): boolean {
 export async function performPlan(plan: TurnPlan): Promise<Performed> {
   const option = plan.chosen;
   const selfToken = plan.board.self.token;
+  const actor = plan.board.self.actor;
   const result: Performed = { moved: 0 };
 
-  const uuidOf = (actor: { token?: any } | undefined) =>
-    (actor?.token?.document ?? actor?.token)?.uuid as string | undefined;
   /** Aim at whoever the option names, both ways: the user's targets and midi's explicit list. */
   const at = (who: { token?: any; tokenId?: string } | undefined) =>
-    withTarget(who?.tokenId, () => useAction(option as any, uuidOf(who)));
+    withTarget(tokenIdOf(who), () => useAction(option as any, who));
 
   try {
+    if (plan.stand && isProne(actor)) {
+      const stood = await standUp(actor);
+      if (stood.ok && !isProne(actor)) result.stood = true;
+      else {
+        log(
+          `execution: ${plan.board.self.name} could not stand (${stood.reason ?? "unknown"}) — crawling if it moves`,
+        );
+      }
+    }
+    const budget = speedOf(plan, !!result.stood);
+    const gait = gaitOf(actor);
+
     switch (option.kind) {
       case "attack":
       case "control":
@@ -292,7 +390,7 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
 
       case "close": {
         const reach = reachOf(option);
-        result.moved = await moveToward(selfToken, option.target?.token, speedOf(plan), reach);
+        result.moved = await moveToward(selfToken, option.target?.token, budget, reach, gait);
         const gap = option.target?.token ? separation(selfToken, option.target.token) : Number.POSITIVE_INFINITY;
         if (!meleeReached(gap, reach)) {
           result.problem =
@@ -311,28 +409,29 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         // weapon's range — backing off 120 ft because that is how far a longbow carries is not kiting.
         const threat = option.target?.token;
         const standOff = Number(option.standOff) || reachOf(option);
-        result.moved = await moveAwayFrom(selfToken, threat, speedOf(plan), standOff);
+        result.moved = await moveAwayFrom(selfToken, threat, budget, standOff, gait);
         result.used = await at(option.target);
         break;
       }
 
       case "hide":
-        if (option.spot) result.moved = await moveTo(selfToken, option.spot);
+        if (option.spot) result.moved = await moveTo(selfToken, option.spot, { budget, ...gait });
         break;
 
       // Getting clear of something harmful is the whole turn. It carries no item to use afterwards:
       // the creature has spent its movement leaving, and whether anything is still in reach from
       // where it lands is next turn's question.
       case "escape":
-        if (option.spot) result.moved = await moveTo(selfToken, option.spot);
+        if (option.spot) result.moved = await moveTo(selfToken, option.spot, { budget, ...gait });
         break;
 
       case "advance":
         result.moved = await moveToward(
           selfToken,
           option.target?.token,
-          speedOf(plan),
+          budget,
           reachOf(option),
+          gait,
         );
         break;
 
@@ -342,9 +441,10 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         // cannot see. `desired` is 0 because the spot is the destination — there is no reach to stop
         // short at when there is nothing standing there.
         if (option.lost) {
-          result.moved = await moveTowardPoint(selfToken, option.lost.point, speedOf(plan), 0, {
+          result.moved = await moveTowardPoint(selfToken, option.lost.point, budget, 0, {
             label: `where ${option.lost.name} was last seen`,
             elevation: option.lost.elevation,
+            action: gait.action,
           });
         }
         break;
@@ -353,13 +453,14 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         result.moved = await moveToward(
           selfToken,
           option.target?.token,
-          speedOf(plan),
+          budget,
           reachOf(option),
+          gait,
         );
         break;
 
       case "flee":
-        result.moved = await moveOffField(selfToken, speedOf(plan));
+        result.moved = await moveOffField(selfToken, budget, gait);
         break;
 
       // Readying is the one plan that deliberately resolves nothing NOW. The Action is charged and the
@@ -387,7 +488,8 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
 
     // Cover is a second, smaller move at the end of the turn, and only after the action resolved.
     if (plan.coverSpot) {
-      result.moved += await moveTo(selfToken, plan.coverSpot);
+      const leftover = Math.max(0, budget - result.moved);
+      result.moved += await moveTo(selfToken, plan.coverSpot, { budget: leftover, ...gait });
     }
 
     // Say so when the announcement promised movement and none happened. Silence here is what made the

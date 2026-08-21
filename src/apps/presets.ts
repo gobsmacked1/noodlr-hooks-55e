@@ -45,6 +45,8 @@ const ALL_RULES = {
   [C.autoEnd]: true,
   [G.jump]: true,
   [G.influence]: true,
+  [G.interactReach]: true,
+  [G.auras]: true,
 };
 
 const OFF = Object.fromEntries(Object.keys(ALL_RULES).map((k) => [k, false]));

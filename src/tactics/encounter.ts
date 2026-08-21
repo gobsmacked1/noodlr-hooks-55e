@@ -161,7 +161,11 @@ const VERB: Record<Outcome, BehaviorVerb> = {
  * Record how a creature left the fight, flip its disposition when the addendum calls for it, and tell
  * the GM what the outcome is worth.
  */
-export async function resolveCombatant(combatant: any, outcome: Outcome): Promise<void> {
+export async function resolveCombatant(
+  combatant: any,
+  outcome: Outcome,
+  opts: { announce?: boolean; narrate?: boolean } = {},
+): Promise<void> {
   const combat = game.combat;
   if (!combat) return;
   const id = String(combatant?.id ?? "");
@@ -181,23 +185,27 @@ export async function resolveCombatant(combatant: any, outcome: Outcome): Promis
     }
   }
 
-  // Offer the moment to whoever can give it words, before the GM's bookkeeping card. The rules
-  // consequence above has already happened either way — a narrator is a courtesy, not a dependency.
-  await requestBehavior({
-    verb: VERB[outcome],
-    actor: combatant?.actor,
-    token: combatant?.token,
-    context: { outcome, combatantName: String(combatant?.name ?? "") },
-  });
+  // A flee already asked for words on the turn it started running. Asking again at despawn
+  // would narrate the same escape twice.
+  if (opts.narrate !== false) {
+    await requestBehavior({
+      verb: VERB[outcome],
+      actor: combatant?.actor,
+      token: combatant?.token,
+      context: { outcome, combatantName: String(combatant?.name ?? "") },
+    });
+  }
 
-  const ChatMessage = (globalThis as any).ChatMessage;
-  await ChatMessage.create({
-    content:
-      `<p><strong>${foundry.utils.escapeHTML(String(combatant?.name ?? "?"))}</strong> — ` +
-      `${game.i18n.localize(CONSEQUENCE[outcome])}</p>`,
-    speaker: speakerFor(combatant?.token ?? combatant?.actor, String(combatant?.name ?? "")),
-    whisper: (globalThis as any).ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
-  });
+  if (opts.announce !== false) {
+    const ChatMessage = (globalThis as any).ChatMessage;
+    await ChatMessage.create({
+      content:
+        `<p><strong>${foundry.utils.escapeHTML(String(combatant?.name ?? "?"))}</strong> — ` +
+        `${game.i18n.localize(CONSEQUENCE[outcome])}</p>`,
+      speaker: speakerFor(combatant?.token ?? combatant?.actor, String(combatant?.name ?? "")),
+      whisper: (globalThis as any).ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
+    });
+  }
 
   await announceRuling({
     kind: "encounter",

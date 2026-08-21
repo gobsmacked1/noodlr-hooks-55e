@@ -41,6 +41,7 @@ import { toggleSelectedCombatantAutomation } from "./tactics/control";
 import { registerAutomationCleanup } from "./tactics/registry";
 import { registerAutoRoll } from "./tactics/auto-roll";
 import { registerAutomationTurnHook } from "./tactics/hooks";
+import { registerFleeHooks, surveyFlee } from "./tactics/flee";
 import { registerPerceptionWatch, surveyPerception } from "./rules/perception";
 import { registerStealthWatch } from "./rules/stealth";
 import { hideSelected, surveyHide } from "./rules/hide";
@@ -63,6 +64,9 @@ import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
 import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
 import { announceJump, registerJumpWatch, surveyJump } from "./rules/jump";
+import { registerProneWatch, surveyProne } from "./rules/prone";
+import { registerInteractReach, surveyInteract } from "./rules/interact";
+import { registerAuraWatch, surveyAuras } from "./rules/aura";
 import {
   clearInfluenceLocks,
   influenceTargets,
@@ -77,6 +81,7 @@ import {
   surveyRepeatSaves,
   type RepeatSave,
 } from "./rules/repeat-save";
+import { registerRecharge, surveyRecharge } from "./rules/recharge";
 import type { Stance } from "./rules/influence";
 import { surveyGeneralRules } from "./rules/general";
 import { surveyActionButtons } from "./system/dnd5e-actions";
@@ -148,8 +153,13 @@ export interface NoodlrHooksApi {
   surveyAwareness(): unknown;
   hide(opts?: { force?: boolean }): Promise<void>;
   surveyJump(): unknown;
+  surveyProne(): unknown;
   jump(): Promise<void>;
+  surveyInteract(): unknown;
+  surveyAuras(): unknown;
+  surveyFlee(): unknown;
   surveyRepeatSaves(): unknown;
+  surveyRecharge(): unknown;
   repeatSave(clause: RepeatSave): Promise<void>;
   surveyInfluence(): unknown;
   influence(opts?: { approach?: string; stance?: Stance; force?: boolean }): Promise<unknown>;
@@ -277,10 +287,20 @@ const api: NoodlrHooksApi = {
   hide: (opts) => hideSelected(opts),
   /** What the selected token can leap, with and without the run-up it currently has. */
   surveyJump: () => surveyJump(),
+  /** Whether the selected token is Prone, what standing would cost, and whether it already stood. */
+  surveyProne: () => surveyProne(),
   /** Post that same reading to chat, because "can I get across that?" is the table's question. */
   jump: () => announceJump(),
+  /** Whether the selected token is close enough to open a door, and who this client would measure. */
+  surveyInteract: () => surveyInteract(),
+  /** Which creature auras are on the scene, who they reach, and which copies we wrote. */
+  surveyAuras: () => surveyAuras(),
+  /** Tokens currently running off the scene, and how many of their own turns they have left. */
+  surveyFlee: () => surveyFlee(),
   /** Which save-ends effects the selected creature is still carrying, and who is rolling them. */
   surveyRepeatSaves: () => surveyRepeatSaves(),
+  /** Whether a spent Recharge 5–6 would roll itself, and what on the selected creature is spent. */
+  surveyRecharge: () => surveyRecharge(),
   /**
    * Register a save-ends clause on every selected token, for an effect applied off a stat block.
    * `{status: "paralyzed", ability: "con", dc: 13, source: "Ghoul's Claw"}`.
@@ -415,12 +435,21 @@ Hooks.once("ready", () => {
   // Step of the Wind doubles a jump for one turn, and only once the Focus Point is spent — so the
   // marker has to come off the button rather than off the sheet, on whichever client pressed it.
   registerJumpWatch();
+  // Standing and crawl. Every client: a player standing or walking while Prone is that client's move.
+  registerProneWatch();
+  // Door reach. Every client: the presser's `preUpdateWall` is the one that can veto a click.
+  registerInteractReach();
+  // Creature auras. Every client hears movement; only the primary GM writes copies onto other sheets.
+  registerAuraWatch();
   // Dodge: the same watch, plus the expiry nothing in the stack performs. Half of it is GM-only, and
   // that gate is inside.
   registerDodgeHooks();
   // "Repeat the save at the end of each of its turns." Registered on every client, because the save
   // is rolled by whoever owns the afflicted creature rather than by the GM.
   registerRepeatSaveWatch();
+  // Recharge 5–6 at the start of an NPC's turn. Primary-GM gated inside: the recovery hook can
+  // fire on every client, and two dice on a failure would grant a breath nobody earned.
+  registerRecharge();
   // Influence needs the GM's ruling and writes a flag on an NPC the asking player cannot touch. The
   // handlers are registered everywhere because core resolves a query on the RECEIVING client.
   registerInfluenceQueries();
@@ -486,6 +515,9 @@ Hooks.once("ready", () => {
     registerReadyExpiry();
     // Watches whether the party is still swinging, which is what mercy hangs on.
     registerEncounterTracking();
+    // A fleeing token is taken off the scene when combat is wiped mid-run-off, so it cannot
+    // start a new fight the moment peace expires.
+    registerFleeHooks();
     // A Capabilities button on every creature sheet. GM-only: it is the veto over what a model read,
     // and it spends credit.
     registerCapabilitySheet();

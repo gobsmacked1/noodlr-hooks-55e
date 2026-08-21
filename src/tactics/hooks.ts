@@ -17,6 +17,7 @@ import { isPrimaryGM } from "../util/gm";
 import { runTurnFor } from "./npc-turn";
 import { shouldAutomate } from "./registry";
 import { hasResolved } from "./encounter";
+import { isFleeingCombatant } from "./flee";
 import { isUnableToAct, skipReason } from "./skip";
 
 /**
@@ -143,7 +144,7 @@ function takeTurn(combat: any): void {
   // past, or the fight stalls on it — and it is skipped without the pace, because there is nothing
   // to watch. Hold Person on the Assassin was the specimen: paralyzed landed, then the planner walked.
   const startedAt = Date.now();
-  if (hasResolved(id) || isUnableToAct(combatant)) {
+  if (hasResolved(id) || (isUnableToAct(combatant) && !isFleeingCombatant(combatant))) {
     const why = hasResolved(id) ? "already resolved" : (skipReason(combatant) ?? "unable to act");
     log(`automation skipping ${combatant?.name ?? "?"}'s turn: ${why}`);
     void endAutomatedTurn(combat, id, startedAt, { pace: false });

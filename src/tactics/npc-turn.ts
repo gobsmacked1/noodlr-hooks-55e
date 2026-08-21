@@ -29,6 +29,7 @@ import { prewarmCastSpells } from "./actions";
 import { planTurn, type PlanKind, type PlanOption, type TurnPlan } from "./planner";
 import { performPlan, type Performed } from "./execute";
 import { resolveCombatant, type Outcome } from "./encounter";
+import { beginFlee, isFleeingCombatant, continueFlee } from "./flee";
 import { banterProfile } from "./banter";
 import { announceTurn } from "../integration/contract";
 import { noteDossierEvent } from "./dossier";
@@ -37,7 +38,6 @@ import { isUnableToAct, skipReason } from "./skip";
 
 /** The three ways a creature leaves a fight alive. */
 const OUTCOMES: Partial<Record<PlanKind, Outcome>> = {
-  flee: "fled",
   surrender: "surrendered",
   mercy: "mercy",
 };
@@ -53,6 +53,16 @@ const TRAVEL: Record<string, { close: string; advance: string }> = {
 
 /** One line the table reads: what the creature is doing, and to whom. */
 function describeIntent(plan: TurnPlan): string {
+  const line = describeIntentBody(plan);
+  if (!plan.stand) return line;
+  const me = plan.board.self.name;
+  if (!line.startsWith(me)) return `${me} stands, then ${line}`;
+  const rest = line.slice(me.length).trimStart();
+  if (!rest) return `${me} stands.`;
+  return `${me} stands, then ${rest.charAt(0).toLowerCase()}${rest.slice(1)}`;
+}
+
+function describeIntentBody(plan: TurnPlan): string {
   const me = plan.board.self.name;
   const o: PlanOption = plan.chosen;
   const target = o.target?.name ?? "";
@@ -126,15 +136,19 @@ const TRAVEL_ONLY = new Set<PlanKind>(["advance", "search", "help"]);
  * Dashing rogue. One number tells those two apart, and nothing else does.
  */
 function amend(text: string, plan: TurnPlan, performed: Performed): string {
+  if (plan.stand && !performed.stood) {
+    text = text.replace(`${plan.board.self.name} stands, then `, `${plan.board.self.name} `);
+  }
   // A close that never reached is not an attack. Leaving "closes 33 ft and attacks with Bite"
   // on the card after a failed walk is how two Dire Wolves looked like they had a 40-foot reach.
   if (plan.chosen.kind === "close" && !performed.used) {
     const me = plan.board.self.name;
     const target = plan.chosen.target?.name ?? "its quarry";
     const units = plan.board.units;
+    const prefix = performed.stood ? `${me} stands, then ` : `${me} `;
     return performed.moved > 0
-      ? `${me} closes ${Math.round(performed.moved)} ${units} on ${target}, still too far to strike.`
-      : `${me} tries to close on ${target}, and covers no ground at all.`;
+      ? `${prefix}closes ${Math.round(performed.moved)} ${units} on ${target}, still too far to strike.`
+      : `${prefix}tries to close on ${target}, and covers no ground at all.`;
   }
 
   if (!TRAVEL_ONLY.has(plan.chosen.kind)) return text;
@@ -153,11 +167,12 @@ function describeReasoning(plan: TurnPlan): string {
   const mental = plan.mental === null ? "unknown" : plan.mental.toFixed(1);
   const why =
     plan.chosen.reasons.length > 0 ? plan.chosen.reasons.join("; ") : "nothing else to do";
+  const standing = plan.stand ? " Standing from Prone first." : "";
   const caveat =
     plan.profile.tier > TIER_CAVEAT
       ? " (tiers above genius have no mechanical behaviors yet — see AGENTS.md)"
       : "";
-  return `Tier ${plan.profile.tier}, ${plan.profile.descriptor} — (INT+WIS)/2 = ${mental}. Chose: ${why}.${caveat}`;
+  return `Tier ${plan.profile.tier}, ${plan.profile.descriptor} — (INT+WIS)/2 = ${mental}. Chose: ${why}.${standing}${caveat}`;
 }
 
 /**
@@ -189,6 +204,13 @@ export async function runTurnFor(combatant: any): Promise<void> {
     // Same predicate `takeTurn` uses. The console entry point reaches here without that gate, and
     // a second opinion that walked a paralyzed creature is how Hold Person looked broken after the
     // status had already landed.
+    // A creature already running keeps running even if a status would otherwise skip the turn.
+    // Skipping them here would leave the token on the scene forever and start a new fight later.
+    if (isFleeingCombatant(combatant)) {
+      await continueFlee(combatant);
+      return;
+    }
+
     if (isUnableToAct(combatant)) {
       log(`automation skipping ${combatant?.name ?? "?"}: ${skipReason(combatant)}`);
       return;
@@ -270,8 +292,12 @@ export async function runTurnFor(combatant: any): Promise<void> {
 
     // Three of the outcomes take a creature out of the fight for good, on terms the addendum
     // spells out. Recording them is what lets an encounter end without a body count.
-    const outcome = OUTCOMES[plan.chosen.kind];
-    if (outcome) await resolveCombatant(combatant, outcome);
+    if (plan.chosen.kind === "flee") {
+      await beginFlee(combatant);
+    } else {
+      const outcome = OUTCOMES[plan.chosen.kind];
+      if (outcome) await resolveCombatant(combatant, outcome);
+    }
   } catch (err) {
     log("NPC turn planning failed:", err);
     ui.notifications?.error(game.i18n.format("NOODLRHOOKS.Combat.Failed", { error: String(err) }));

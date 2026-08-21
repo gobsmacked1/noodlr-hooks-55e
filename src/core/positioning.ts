@@ -101,7 +101,8 @@ export function centerOf(token: any): Point | null {
   const x = Number(doc?.x);
   const y = Number(doc?.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  const grid = Number((canvas as any)?.grid?.size) || 100;
+  // globalThis: a bare `canvas` is a ReferenceError in the test bundle (ESM, no Foundry).
+  const grid = Number((globalThis as any).canvas?.grid?.size) || 100;
   return {
     x: x + (grid * (Number(doc?.width) || 1)) / 2,
     y: y + (grid * (Number(doc?.height) || 1)) / 2,

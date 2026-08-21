@@ -121,6 +121,14 @@ export interface CreatureAction {
   ranged: boolean;
   /** Effective reach or range in scene units. */
   range: number;
+  /**
+   * dnd5e's `attackMode` when this offering is not the activity's default.
+   *
+   * A spear is one melee Attack activity with two modes. Leaving this unset lets `rollAttack` reuse
+   * the last mode stored on the item — a prior throw would then throw on a melee close, and a prior
+   * stab would stab from 20 ft. `oneHanded` / `thrown` are the two we emit.
+   */
+  attackMode?: string;
   /** False when charges, ammunition, spell slots, or quantity say it is spent. */
   available: boolean;
   /**
@@ -157,6 +165,8 @@ function rangeFrom(source: any, melee: boolean): number | null {
   // anything. "spec" ("see the description") is equally uninformative; "any" is unlimited.
   if (units === "self" || units === "spec") return null;
   if (units === "any") return Number.POSITIVE_INFINITY;
+  // A melee activity that overrode its range states that override in `value`. Item-level melee uses
+  // `reach` instead — see `meleeReachOf`. Passing melee=true here only special-cases a zero value.
   const raw = source.value;
   if (raw === null || raw === undefined || raw === "") return null;
   const value = Number(raw);
@@ -173,11 +183,53 @@ function rangeFrom(source: any, melee: boolean): number | null {
  *
  * The system's own fallback: a weapon's `system.range.reach` when set, otherwise 5 feet expressed in
  * the scene's units. A published Dire Wolf states neither, and its bite is a 5 ft bite.
+ *
+ * NEVER `range.value`. On a thrown melee weapon that field is the short thrown range (a spear is
+ * reach 5, value 20, long 60). Reading value as reach is how the Assassin stabbed from 20 ft
+ * (2026-08-20): the planner closed to 20, `meleeReached` said yes, and the Attack activity is melee.
  */
-function meleeReachOf(item: any): number {
+export function meleeReachOf(item: any): number {
   const reach = Number(item?.system?.range?.reach);
   if (Number.isFinite(reach) && reach > 0) return reach;
   return gridDistance();
+}
+
+function hasProperty(item: any, key: string): boolean {
+  const props = item?.system?.properties;
+  if (!props) return false;
+  if (typeof props.has === "function") return props.has(key);
+  if (Array.isArray(props)) return props.includes(key);
+  return false;
+}
+
+/**
+ * Thrown range, or null when this item cannot be thrown.
+ *
+ * `thr` is the property; `range.value` is the number. A melee-only sword has neither, and a javelin
+ * that forgot its value is not offered as a 30 ft guess — that guess is how a 5 ft stab became a
+ * 20 ft one in the other direction.
+ */
+export function thrownRangeOf(item: any): number | null {
+  if (!hasProperty(item, "thr")) return null;
+  return rangeFrom(item?.system?.range, false);
+}
+
+/**
+ * The system's other "this melee activity also shoots" shape: empty attack type, `value` farther
+ * than `reach`, no Thrown property.
+ *
+ * Arcane Burst is the specimen — "Melee or Ranged Attack Roll, reach 5 ft. or range 150 ft."
+ * `weapon.mjs` adds `attackMode: "ranged"` for exactly `!attackType && value > reach`. Treating
+ * that as thrown-only (the Assassin fix) left the Archmage with a 5 ft poke and a Hide that
+ * advertised "somewhere to shoot from".
+ */
+export function innateRangedOf(item: any): number | null {
+  if (hasProperty(item, "thr")) return null;
+  const value = rangeFrom(item?.system?.range, false);
+  if (value === null || !(value > 0)) return null;
+  const reach = Number(item?.system?.range?.reach);
+  const melee = Number.isFinite(reach) && reach > 0 ? reach : 0;
+  return value > melee ? value : null;
 }
 
 /** Item-level availability: quantity, an uncharged recharge feature, and item-wide uses. */
@@ -497,23 +549,28 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
     // Precedence: the activity's own range only when it overrides, then the item's, then the system's
     // own melee fallback. `override === false` means "this activity states no range" — reading its
     // placeholder `units: "self"` as a real value is what gave the Dire Wolf a reach of zero.
+    //
+    // Melee reads `range.reach`. The same object also holds `value` / `long` for a thrown property,
+    // and treating those as the melee number is the Assassin's 20 ft stab (below).
     const stated =
       activity?.range?.override === false ? null : rangeFrom(shapeSource?.range, !declaredRanged);
-    const range =
-      stated ??
-      rangeFrom(item?.system?.range, !declaredRanged) ??
-      (declaredRanged ? 30 : meleeReachOf(item));
-
-    // Anything that reaches further than this creature's own arm is used at range, whatever it is
-    // called: that is the distinction the planner cares about when deciding where to stand.
-    const armsLength = Math.max(gridDistance(), meleeReachOf(item));
-    const ranged = declaredRanged || range > armsLength;
+    const thrownRange = declaredRanged ? null : thrownRangeOf(item);
+    const innateRanged = declaredRanged || thrownRange ? null : innateRangedOf(item);
+    const extraRanged = thrownRange
+      ? { range: thrownRange, attackMode: "thrown" as const, label: "Thrown" }
+      : innateRanged
+        ? { range: innateRanged, attackMode: "ranged" as const, label: "Ranged" }
+        : null;
+    const range = declaredRanged
+      ? (stated ?? rangeFrom(item?.system?.range, false) ?? 30)
+      : (stated ?? meleeReachOf(item));
 
     // Both names when they differ. "attacks with Midi Attack" told us nothing about which item it came
     // from — and that name is midi's localized TYPE TITLE, not a real activity name.
     const activityName = String(activity?.name ?? "").trim();
     const itemName = String(item?.name ?? "?").trim();
-    out.push({
+    const name = activityName && activityName !== itemName ? `${itemName} (${activityName})` : itemName;
+    const shared = {
       item,
       activity,
       spellKey: spell
@@ -524,17 +581,33 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
           ? itemName.toLowerCase()
           : undefined,
       viaCast: Boolean(spell),
-      name: activityName && activityName !== itemName ? `${itemName} (${activityName})` : itemName,
       kind,
       economy,
-      melee: !ranged,
-      ranged,
-      range,
       available: baseAvailable && activityAvailable(activity, item),
       // Asked of the item being INVOKED, which for a "1/day each: fireball" feat is the feat: the cloned
       // spell it points at carries no uses of its own, so reading the spell would report free.
       depleting: depletes(item, activity, P),
+    };
+    out.push({
+      ...shared,
+      name,
+      melee: !declaredRanged,
+      ranged: declaredRanged,
+      range,
+      // Pin the mode when the same activity can also throw or shoot, or a leftover
+      // `last.attackMode` on the item would fire the wrong half.
+      attackMode: !declaredRanged && extraRanged ? "oneHanded" : undefined,
     });
+    if (extraRanged) {
+      out.push({
+        ...shared,
+        name: `${itemName} (${extraRanged.label})`,
+        melee: false,
+        ranged: true,
+        range: extraRanged.range,
+        attackMode: extraRanged.attackMode,
+      });
+    }
   }
   return out;
 }
@@ -564,8 +637,9 @@ function fromActionType(item: any, actor: any, P: SystemPaths): CreatureAction |
 
   const stated = pickNumber(item, P.itemRange);
   // Ranged types keep a nominal 30 ft when the sheet is silent, because on this older shape the
-  // action type itself is the assertion that it shoots. Melee falls back to arm's length.
-  const range = stated ?? (ranged ? 30 : gridDistance());
+  // action type itself is the assertion that it shoots. Melee reads reach, never the thrown value
+  // that shares the same `range` object on a spear.
+  const range = ranged ? (stated ?? 30) : meleeReachOf(item);
 
   let available = itemAvailable(item, actor, P);
   const ammoId = pickString(item, P.itemConsumeTarget);

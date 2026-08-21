@@ -116,6 +116,23 @@ export function isCounterspell(item: any): boolean {
   return /^\s*counterspell\s*$/i.test(String(item?.name ?? ""));
 }
 
+/**
+ * Is this action a Counterspell, including a feat that casts it?
+ *
+ * `isCounterspell` is the spell item. 2024 monsters wrap it as Protective Magic (`type: feat`,
+ * `cast` → Counterspell). The hurt-reaction picker reads actions, not items, and spent that
+ * wrapper on a barbarian's melee hit — illegal, and it threw.
+ */
+export function isCounterspellAction(action: {
+  item?: unknown;
+  spellKey?: string;
+  activity?: unknown;
+}): boolean {
+  if (isCounterspell(action.item)) return true;
+  if (String(action.spellKey ?? "").toLowerCase() === "counterspell") return true;
+  return isCounterspell(referencedSpell(action.activity));
+}
+
 /** What a creature needs to counter with, or null when it cannot. */
 export interface CounterspellReady {
   item: any;

@@ -229,14 +229,30 @@ async function onUsage(message: any): Promise<void> {
   };
   // A Fireball's leftover Ray-of-Frost target is not who the sphere will catch. The
   // usage card is stamped before `#placeTemplate`, so auto-rolling here would Dex-save
-  // a creature the caster has not even aimed at. Who the template caught is still
-  // unbuilt; waiting is the honest state. Hold Person and other aimed saves still roll.
+  // a creature the caster has not even aimed at. An automated turn stamps the catch
+  // list AFTER it places the area (`adoptTemplateCatch`); until then, wait.
   if (placesTemplate(activity)) {
     log("save resolution: waiting on the template, not leftover targets");
   } else {
     noteTargets(act, message);
   }
   await settle(act);
+}
+
+/**
+ * The area is on the canvas and the usage card now names who is in it.
+ *
+ * `onUsage` already opened the activation and declined to guess; this is the second
+ * pass, after `placeAimedTemplate`. Calling `settle` rolls the saves that can be
+ * rolled and leaves a player's button alone.
+ */
+export function adoptTemplateCatch(message: any): void {
+  const usageId = String(message?.id ?? "");
+  if (!usageId) return;
+  const act = activation(usageId);
+  if (!act.usage) act.usage = message;
+  noteTargets(act, message);
+  void settle(act);
 }
 
 /** Somebody rolled a save. Record it against its activation and see whether that finishes anything. */

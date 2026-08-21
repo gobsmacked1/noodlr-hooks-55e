@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { searchOptions, survivalOptions } from "../src/tactics/planner.js";
+import { rangedCovers, searchOptions, survivalOptions } from "../src/tactics/planner.js";
 import { type Consideration, tierProfile } from "../src/tactics/tiers.js";
 
 // The floor option, which is the whole of what is testable here without a scene. `planTurn` needs
@@ -102,6 +102,19 @@ test("the blind floor knows the difference between an empty field and a lost qua
   const b = board({ enemies: [], unseen: [{ ...lost, distance: 40 }] });
   const call = survivalOptions(b, HOUND, true).find((o) => o.kind === "call");
   assert.equal(call, undefined, "it can see nothing, but it knows perfectly well where to look");
+});
+
+test("hide is not offered when a ranged attack already reaches", () => {
+  const burst = {
+    available: true,
+    kind: "attack",
+    ranged: true,
+    economy: "action",
+    range: 150,
+  };
+  assert.equal(rangedCovers([burst] as any, 40), true);
+  assert.equal(rangedCovers([burst] as any, 200), false);
+  assert.equal(rangedCovers([{ ...burst, available: false }] as any, 40), false);
 });
 
 test("fleeing competes on merit and is not suppressed by the floor rule", () => {

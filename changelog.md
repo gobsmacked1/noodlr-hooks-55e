@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.7.15
+
+**Leaving melee without Disengage now offers the opportunity attack.** The Archmage
+walked out of the barbarian's Halberd reach to hide and to flee, and nobody was asked.
+Three measurement bugs stacked: the route used the token's `_source` instead of
+Foundry's `destination`, the start point added the footprint twice so a 10 ft reach
+looked empty, and the watcher list required a placeable `.center` that TokenDocuments
+do not have. It also skipped whoever the tracker was pointing at, so a fighter whose
+turn it was could not swing at a goblin walking past. None of those is a Disengage —
+the planner never takes one, and a hide or a flee is supposed to provoke. The console
+now names every silent return, so the next miss is a sentence rather than an absence.
+
+**A fleeing creature leaves the scene instead of starting a new fight.** The first flee
+used to record the outcome immediately. Combat ended, the Hostile token stayed put, and
+sixty seconds later perception spotted it again. It now runs for up to three of its own
+turns (or until it reaches the map edge), then the scene token is removed. Perception
+ignores a fled token even after combat is gone. `noodlrHooks.surveyFlee()` lists who is
+still running.
+
+**A Prone creature stands (half Speed) or crawls.** The Archmage was knocked Prone and
+never lost the condition, then walked his full Speed on later turns. Core only charges
+crawl rates when Crawl is selected, and it never charges standing at all. Automated
+creatures now stand unless staying down is a real tactic — keepDistance, no melee
+within 5 feet, acting from here. Players who walk or fly while Prone are asked to
+crawl or stand first. `noodlrHooks.surveyProne()` reports the cost.
+
+**A Paladin's aura reaches nearby allies again.** Aura of Protection — and Courage, Devotion,
+Warding, Aura of Life — stopped applying the moment Aura Effects and DAE were turned off.
+dnd5e never emanates: the feature's Active Effect stays on the Paladin, and clicking it posts
+the prose. DDB stamps `flags.ActiveAuras` for a module that is no longer there. This module
+now copies a resolved number (the Paladin's Charisma, not the ally's) onto whoever is inside
+the moving radius, and skips the Paladin when the sheet already transfers the bonus onto them
+so it cannot double. Stands aside when Aura Effects or Active Auras is running. DAE alone does
+not emanate and is not a reason to stand aside. `noodlrHooks.surveyAuras()` lists who is in
+range.
+
+**Doors only open from within one square.** Arm's Reach was on, and its default leaves
+every GM door click unrestricted — including a GM playing a character and clicking from
+across the map. This module now refuses that click when a token is selected. A GM with
+no token selected is staging and is not restricted. The settings window says so, because
+a module whose default is the bug is not a module we stand aside for.
+
+**The Archmage shoots, and does not Counterspell a greataxe.** Two bugs in one fight. Arcane Burst
+is a melee *or* ranged attack (reach 5 ft or range 150 ft) with no Thrown property — the same
+empty `attack.type` every natural weapon uses. After the spear fix below, that 150 ft was
+dropped, so a genius caster walked twelve feet and hid instead of firing. Hide also scored
+"somewhere to shoot from" and then never shot; it is no longer offered when a ranged attack
+already reaches. Separately, Protective Magic (Counterspell) was spent as the answer to being
+hit. Counterspell is "when you see a creature casting." A melee swing is not that. The wrapper
+feat is now recognised and refused on the hurt path.
+
+**Lightning Bolt actually lands.** An automated area still stopped for a human to draw the
+template — `configure: false` skips the usage dialog, not `#placeTemplate`. The slot went,
+the line never appeared, and a Dex save you allowed by hand had nothing to apply. The turn
+now aims the area at the creature the planner already named, places the MeasuredTemplate,
+and stamps who is in it so auto-saves have someone to roll. Fireball, Cone of Cold, and
+breaths use the same path. Choosing the angle that misses the caster's own front rank is
+still Phase 5.
+
+**Arcane Burst names who it is shooting.** The planner said Barb Arian; the attack card
+named nobody, so auto-damage left the Apply button. dnd5e reads `game.user.targets` at
+roll time, and `updateTokenTargets` is not a guarantee the Set is populated before
+`rollAttack`. The token is targeted with `setTarget` as well, and `flags.dnd5e.targets`
+is written onto the attack message so the card does not depend on the live Set.
+
+**A spear is stabbed from 5 feet or thrown from 20, not stabbed from 20.** The Assassin closed
+toward Bardo, still could not reach, and then rolled a melee Attack and Damage with Lycan Spear
+anyway. dnd5e keeps a thrown weapon's reach and its thrown range on the same `range` object
+(`reach` 5, `value` 20, `long` 60). We were reading the thrown number as melee reach, so the
+planner treated 20 feet as "close enough" and used the melee activity. Empty target lists on
+those cards were the giveaway. Thrown is now a separate option, and that is the one the
+planner picks when walking into melee is not required.
+
+**Rechargeable abilities roll themselves.** A spent Recharge 5–6 (a breath, a gaze, a swallow)
+rolls its d6 at the start of that monster's turn instead of waiting for you to remember. Default
+is automatic with no chat card — the die is not a fun roll, and a table of several dragons should
+not dump a card each. Switch to Announce if you want the system's recharge card, or Off to roll
+by hand. If you already turned dnd5e's hidden Auto-recharge on (Combat Settings → Monsters), that
+one wins and this stands aside so the die is not rolled twice. The planner already stops offering
+a spent breath; once the die succeeds, it comes back.
+
 ## 0.7.14
 
 **A magic item handed to a creature already on the scene is compiled.** Dropping loot, dragging from

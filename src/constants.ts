@@ -116,6 +116,15 @@ export const COMBAT_SETTINGS = {
   concentration: "combat.concentration",
   /** Whether "repeat the save at the end of each of its turns" actually rolls, and ends the effect. */
   repeatSaves: "combat.repeatSaves",
+  /**
+   * Whether a spent Recharge 5–6 ability rolls itself at the start of an NPC's turn.
+   *
+   * Three-way, matching dnd5e's own `autoRecharge`: `silent` (default) rolls with no card, `yes`
+   * posts the system's recharge card, `no` leaves it for a human. dnd5e ships this off and hides
+   * the switch; this is the operator-facing copy. When theirs is already on we stand aside — we
+   * never write their setting.
+   */
+  autoRecharge: "combat.autoRecharge",
   /** Whether the tracker clears itself once nothing hostile is left standing. */
   autoEnd: "combat.autoEnd",
 } as const;
@@ -159,6 +168,10 @@ export const GENERAL_SETTINGS = {
   jump: "general.jump",
   /** Whether talking a creature round rolls a real check against a real DC, bent by its attitude. */
   influence: "general.influence",
+  /** Whether opening a door requires a token within one square of it. */
+  interactReach: "general.interactReach",
+  /** Whether a creature's aura (Protection, Courage, …) is copied onto allies in range. */
+  auras: "general.auras",
 } as const;
 
 /** Settings that are this module's own rather than inherited. */

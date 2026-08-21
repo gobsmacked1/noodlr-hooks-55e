@@ -40,6 +40,7 @@ import { isPrimaryGM } from "../util/gm";
 import { narrator } from "../util/speaker";
 import { readActions, type CreatureAction } from "../tactics/actions";
 import { readHp } from "../core/tracker";
+import { centerOf, measureBetween, type Point } from "../core/positioning";
 import { pickNumber, systemPaths } from "../system/profiles";
 import { shouldAutomate } from "../tactics/registry";
 import { useActionAt } from "../tactics/execute";
@@ -48,6 +49,7 @@ import { turnRandom } from "../core/random";
 import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
 import { standingExemption } from "../system/dnd5e-reactions";
+import { isCounterspellAction } from "../system/dnd5e-counterspell";
 import { alive, canReact, notifyMidi, offerReaction, offerable, opportunityTaken } from "./offer";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
@@ -162,24 +164,92 @@ function tokenFor(combatant: any): any {
   return combatant?.token?.object ?? combatant?.token ?? null;
 }
 
-function distance(a: any, b: any): number {
-  const from = a?.center ?? a;
-  const to = b?.center ?? b;
-  try {
-    const measured = (canvas as any)?.grid?.measurePath?.([from, to]);
-    if (measured?.distance !== undefined) return Number(measured.distance);
-  } catch {
-    /* gridless and older grid shapes fall through */
-  }
-  const scale = Number((canvas as any)?.dimensions?.distance ?? 5);
-  const size = Number((canvas as any)?.dimensions?.size ?? 100);
-  return (Math.hypot(to.x - from.x, to.y - from.y) / size) * scale;
+/** Centre of a Token or TokenDocument. Placeable `.center` is preferred; documents have none. */
+function tokenCenter(token: any): Point | null {
+  const live = token?.center;
+  if (Number.isFinite(live?.x) && Number.isFinite(live?.y)) return { x: live.x, y: live.y };
+  return centerOf(token);
 }
 
-/** Pixel distance converted the same way, for comparing a remembered position. */
-function distanceFromPoint(point: { x: number; y: number }, token: any, mover: any): number {
-  const half = (Number(mover?.width ?? 1) * Number((canvas as any)?.dimensions?.size ?? 100)) / 2;
-  return distance(token, { x: point.x + half, y: point.y + half });
+function distance(a: any, b: any): number {
+  const from = tokenCenter(a) ?? (a?.x !== undefined ? { x: Number(a.x), y: Number(a.y) } : null);
+  const to = tokenCenter(b) ?? (b?.x !== undefined ? { x: Number(b.x), y: Number(b.y) } : null);
+  if (!from || !to) return Infinity;
+  return measureBetween(from, to);
+}
+
+/**
+ * Scene-unit distance from a watcher's centre to the mover standing at a TokenPosition.
+ *
+ * Foundry's `origin`, `destination` and waypoints are the token's TOP-LEFT, same as the
+ * document. `centerOf` already adds half the footprint; adding it again here is what made a
+ * creature already inside a 10 ft Halberd reach look like it started outside it.
+ */
+export function centerFromTopLeft(
+  point: { x: number; y: number },
+  mover: { width?: number; height?: number },
+  gridSize: number,
+): Point {
+  return {
+    x: Number(point.x) + (gridSize * (Number(mover?.width) || 1)) / 2,
+    y: Number(point.y) + (gridSize * (Number(mover?.height) || 1)) / 2,
+  };
+}
+
+/**
+ * The walk a `moveToken` (or the update fallback) describes, as top-left TokenPositions.
+ *
+ * Destination comes from the movement operation when Foundry supplies it. `_source` is a
+ * fallback for the plain-update path and for older cores; using it as the only dest while
+ * the token is mid-animation is how a leave-reach step vanished.
+ */
+export function movementRoute(
+  movement: {
+    origin?: { x: number; y: number };
+    destination?: { x: number; y: number };
+    passed?: { waypoints?: Array<{ x: number; y: number }> };
+  } | null,
+  fallbackDest?: { x: number; y: number } | null,
+): Array<{ x: number; y: number }> {
+  const route: Array<{ x: number; y: number }> = [];
+  const push = (p: { x: number; y: number } | undefined | null) => {
+    if (!p) return;
+    const x = Number(p.x);
+    const y = Number(p.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const last = route[route.length - 1];
+    if (last && last.x === x && last.y === y) return;
+    route.push({ x, y });
+  };
+  push(movement?.origin);
+  for (const point of movement?.passed?.waypoints ?? []) push(point);
+  push(movement?.destination ?? fallbackDest ?? null);
+  return route;
+}
+
+/**
+ * Did the mover cross out of `reach` anywhere along `route`?
+ *
+ * Walked step by step rather than compared end to end, because leaving reach provokes even when
+ * the creature finishes its move back inside it. Exported so a test can pin a 5-to-15 ft hide
+ * without a canvas.
+ */
+export function leftReachAlong(
+  watcherCenter: Point,
+  route: Array<{ x: number; y: number }>,
+  mover: { width?: number; height?: number },
+  reach: number,
+  gridSize: number,
+  measure: (a: Point, b: Point) => number = measureBetween,
+): boolean {
+  let wasInside = false;
+  for (const point of route) {
+    const at = centerFromTopLeft(point, mover, gridSize);
+    const inside = measure(watcherCenter, at) <= reach;
+    if (wasInside && !inside) return true;
+    wasInside = inside;
+  }
+  return false;
 }
 
 function profileFor(actor: any): ReturnType<typeof tierProfile> {
@@ -211,21 +281,21 @@ function watchersOf(moverDoc: any): Watcher[] {
 
   const mover = moverDoc?.object ?? moverDoc;
   const moverDisposition = Number(moverDoc?.disposition ?? 0);
-  const currentId = String(combat.combatant?.id ?? "");
   const moverCombatantId = String(combatantFor(mover)?.id ?? "");
   const out: Watcher[] = [];
 
   for (const combatant of combat.combatants ?? []) {
     if (String(combatant?.id ?? "") === moverCombatantId) continue;
-    // Its own turn is not when it stands watching: an opportunity attack is an off-turn thing.
-    if (String(combatant?.id ?? "") === currentId) continue;
+    // Do NOT also skip `combat.combatant`. That is "whose turn the tracker is on", and a goblin
+    // walking past during the fighter's turn is exactly when the fighter is entitled to swing.
+    // Skipping the mover is the only identity filter this loop needs.
     const automated = shouldAutomate(combatant);
     if (!automated && !offerable(combatant?.actor)) continue;
     if (combatant?.isDefeated || !alive(combatant?.actor)) continue;
     if (!hasReaction(combatant) || !canReact(combatant.actor)) continue;
 
     const token = tokenFor(combatant);
-    if (!token?.center) continue;
+    if (!tokenCenter(token)) continue;
     if (Number(token?.document?.disposition ?? 0) === moverDisposition) continue;
 
     // The best melee swing it has. Opportunity attacks are not a sheet entry in any system I know of —
@@ -247,8 +317,15 @@ function watchersOf(moverDoc: any): Watcher[] {
 
 async function provoke(moverDoc: any, movement: any, operation?: any): Promise<void> {
   const mover = moverDoc?.object ?? moverDoc;
-  if (!mover?.center) return;
-  if (opportunityTaken()) return;
+  const who = String(moverDoc?.name ?? mover?.name ?? "?");
+  if (!tokenCenter(mover) && !tokenCenter(moverDoc)) {
+    log(`reaction: ${who} moved but has no readable centre — no opportunity attacks`);
+    return;
+  }
+  if (opportunityTaken()) {
+    log(`reaction: ${who} left reach, but Gambit's Premades owns opportunity attacks`);
+    return;
+  }
 
   const id = String(moverDoc?.id ?? "");
   handled.add(id);
@@ -260,17 +337,25 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
   // under the 2024 rules an opportunity attack triggers only on movement a creature SPENDS — being
   // pushed, pulled or dragged is somebody else's expenditure.
   const waypoints: any[] = movement?.passed?.waypoints ?? [];
-  if (isForcedMovement(movement, operation)) return;
+  if (isForcedMovement(movement, operation)) {
+    log(`reaction: ${who} was displaced — forced movement does not provoke`);
+    return;
+  }
 
-  const route: Array<{ x: number; y: number }> = [];
-  const origin = movement?.origin;
-  if (origin) route.push({ x: Number(origin.x), y: Number(origin.y) });
-  for (const point of waypoints) route.push({ x: Number(point.x), y: Number(point.y) });
-  route.push({
-    x: Number(moverDoc?._source?.x ?? mover.x),
-    y: Number(moverDoc?._source?.y ?? mover.y),
+  const route = movementRoute(movement, {
+    x: Number(moverDoc?._source?.x ?? moverDoc?.x ?? mover?.x),
+    y: Number(moverDoc?._source?.y ?? moverDoc?.y ?? mover?.y),
   });
-  if (route.length < 2) return;
+  if (route.length < 2) {
+    log(`reaction: ${who} moved but the route had fewer than two points — no opportunity attacks`);
+    return;
+  }
+
+  const watchers = watchersOf(moverDoc);
+  if (watchers.length === 0) {
+    log(`reaction: ${who} moved and nobody on the tracker could take an opportunity attack`);
+    return;
+  }
 
   // A standing trait — Flyby, Agile — is checked here rather than beside Disengage because Flyby's
   // exemption is conditional on HOW the creature left, and the waypoints are the only record of that.
@@ -278,8 +363,10 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
   const exempt = standing && (!standing.requiresFlight || flew(moverDoc, waypoints));
   const disengaged = hasDisengaged(moverDoc?.actor);
 
-  for (const watcher of watchersOf(moverDoc)) {
+  let left = 0;
+  for (const watcher of watchers) {
     if (!leftReach(watcher, route, moverDoc)) continue;
+    left++;
 
     if (exempt) {
       log(
@@ -299,6 +386,12 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
     if (withholds(watcher.combatant)) continue;
 
     await strike(watcher, mover, "as it slips away");
+  }
+  if (left === 0) {
+    log(
+      `reaction: ${who} moved past ${watchers.length} watcher(s) and left nobody's reach` +
+        ` (${watchers.map((w) => `${w.combatant?.name}@${w.reach}`).join(", ")})`,
+    );
   }
 }
 
@@ -358,13 +451,11 @@ function flew(moverDoc: any, waypoints: any[]): boolean {
  * creature finishes its move back inside it — a rogue circling an ogre to flank still gets snapped at.
  */
 function leftReach(watcher: Watcher, route: Array<{ x: number; y: number }>, mover: any): boolean {
-  let wasInside = false;
-  for (const point of route) {
-    const inside = distanceFromPoint(point, watcher.token, mover) <= watcher.reach;
-    if (wasInside && !inside) return true;
-    wasInside = inside;
-  }
-  return false;
+  const from = tokenCenter(watcher.token);
+  if (!from) return false;
+  const grid = Number((canvas as any)?.grid?.size ?? (canvas as any)?.dimensions?.size ?? 100) || 100;
+  const doc = mover?.document ?? mover;
+  return leftReachAlong(from, route, doc, watcher.reach, grid);
 }
 
 /**
@@ -409,7 +500,7 @@ async function retaliate(actor: any, amount: number): Promise<void> {
 
   const culprit = tokenFor(combat?.combatant);
   const self = tokenFor(combatant);
-  if (!culprit?.center || !self?.center) return;
+  if (!tokenCenter(culprit) || !tokenCenter(self)) return;
   if (Number(culprit?.document?.disposition ?? 0) === Number(self?.document?.disposition ?? 0)) {
     return;
   }
@@ -427,6 +518,7 @@ async function retaliate(actor: any, amount: number): Promise<void> {
   for (const action of readActions(combatant.actor)) {
     if (!action.available || action.economy !== "reaction") continue;
     if (action.kind !== "attack" && action.kind !== "control") continue;
+    if (isCounterspellAction(action)) continue;
     if (action.range < gap) continue;
     if (!best || action.range < best.range) best = action;
   }

@@ -31,6 +31,11 @@ export interface MoveIntent {
   elevation?: number;
   /** Movement remaining, in scene units, so core can stop the path when the cost runs out. */
   budget?: number;
+  /**
+   * Movement action to hand Foundry. Callers that know the creature is Prone pass `crawl`;
+   * omitted means `actionFor` (walk / fly / …). Core only charges crawl rates when this is crawl.
+   */
+  action?: string;
 }
 
 function gridSize(): number {
@@ -202,8 +207,9 @@ export async function moveTo(token: any, point: Point, intent: MoveIntent = {}):
     explicit: true,
     checkpoint: true,
   };
-  const action = movementAction(token, climbing);
-  if (action) waypoint.action = action;
+  const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
+  const wanted = intent.action && actions?.[intent.action] ? intent.action : movementAction(token, climbing);
+  if (wanted) waypoint.action = wanted;
   const ignoreWalls = unconstrained();
   const speed = getMoveSpeed();
   const animation = speed > 0 ? { movementSpeed: speed } : undefined;
@@ -453,6 +459,7 @@ export async function moveToward(
   target: any,
   budget: number,
   desired: number,
+  extra: Pick<MoveIntent, "action"> = {},
 ): Promise<number> {
   const goal = centerOf(target);
   if (!goal) {
@@ -464,6 +471,7 @@ export async function moveToward(
   return moveTowardPoint(token, goal, budget, desired, {
     label: describe(target?.document ?? target),
     elevation: reachableElevation(token, target),
+    action: extra.action,
   });
 }
 
@@ -481,7 +489,7 @@ export async function moveTowardPoint(
   goal: Point,
   budget: number,
   desired: number,
-  intent: { label?: string; elevation?: number } = {},
+  intent: { label?: string; elevation?: number; action?: string } = {},
 ): Promise<number> {
   const who = describe(token?.document ?? token);
   const origin = centerOf(token);
@@ -522,6 +530,7 @@ export async function moveTowardPoint(
   return stepTo(token, origin, approaches(origin, bearing, wantedPixels), `toward ${label}`, {
     budget,
     elevation: intent.elevation,
+    action: intent.action,
   });
 }
 
@@ -665,6 +674,7 @@ export async function moveAwayFrom(
   target: any,
   budget: number,
   desired: number,
+  extra: Pick<MoveIntent, "action"> = {},
 ): Promise<number> {
   const who = describe(token?.document ?? token);
   const origin = centerOf(token);
@@ -699,15 +709,21 @@ export async function moveAwayFrom(
       },
     })),
     `away from ${describe(target?.document ?? target)}`,
-    { budget },
+    { budget, action: extra.action },
   );
 }
 
 /**
- * Leave the field. A creature that flees walks to the nearest scene edge under its own speed; it is
- * removed from play by the encounter layer, not here.
+ * Leave the field. A creature that flees walks to the nearest scene edge under its own speed; the
+ * token is taken off the scene by `tactics/flee.ts` after three of its own turns or once it reaches
+ * the edge. Resolving the encounter on the first flee step is what started a new fight the moment
+ * the same token was spotted again.
  */
-export async function moveOffField(token: any, budget: number): Promise<number> {
+export async function moveOffField(
+  token: any,
+  budget: number,
+  extra: Pick<MoveIntent, "action"> = {},
+): Promise<number> {
   const who = describe(token?.document ?? token);
   const origin = centerOf(token);
   const rect: any = (canvas as any)?.dimensions?.sceneRect;
@@ -747,6 +763,6 @@ export async function moveOffField(token: any, budget: number): Promise<number> 
       };
     }),
     "off the field",
-    { budget },
+    { budget, action: extra.action },
   );
 }

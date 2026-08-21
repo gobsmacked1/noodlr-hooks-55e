@@ -6,6 +6,7 @@ import {
   counterspellReady,
   gambitsOwnsCounterspell,
   isCounterspell,
+  isCounterspellAction,
 } from "../src/system/dnd5e-counterspell";
 import { slotAvailable } from "../src/system/dnd5e-spells";
 
@@ -122,6 +123,15 @@ test("Counterspell is matched by identifier first and by an anchored name second
   );
   assert.equal(isCounterspell(spell("Greater Counterspell Ward", ["vocal"])), false);
   assert.equal(isCounterspell({ type: "feat", name: "Counterspell", system: {} }), false);
+});
+
+test("a feat that casts Counterspell is still that reaction", () => {
+  // Protective Magic is type feat; isCounterspell on the item is correctly false. The hurt picker
+  // reads actions, so the wrapper has to be recognised or a melee hit spends an illegal Counterspell.
+  const feat = { type: "feat", name: "Protective Magic", system: { identifier: "protective-magic" } };
+  assert.equal(isCounterspell(feat), false);
+  assert.equal(isCounterspellAction({ item: feat, spellKey: "counterspell" }), true);
+  assert.equal(isCounterspellAction({ item: feat, spellKey: "shield" }), false);
 });
 
 /* -------------------------------------------- */

@@ -133,6 +133,7 @@ export function readyOptions(
       itemName: picked.action.name,
       activity: picked.action.activity,
       range: picked.action.range,
+      attackMode: picked.action.attackMode,
       ready: {
         prose: game.i18n.localize(picked.trigger.label),
         watch: picked.trigger.descriptor,

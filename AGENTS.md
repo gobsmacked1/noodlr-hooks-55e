@@ -647,7 +647,9 @@ Diagnostics: `api.surveySneak()`.
 From `_research\_audit\overlap-effects-and-summons.md`, which read all ten from source.
 
 - **Aura Effects answers `on_enter_area` in the platform's own terms, and we should copy it rather than
-  stand aside from it.** It converts an aura into a real `RegionDocument` flagged with its own origin,
+  stand aside from it.** Creature emanations (Paladin auras) are a different job and shipped natively
+  in v0.7.15 as a distance copy, not a Region — see the general-rules note above. This paragraph is
+  still the recipe for **placed** areas (Spirit Guardians). It converts an aura into a real `RegionDocument` flagged with its own origin,
   then reads entry and exit as a **set difference on `token.regions`** against a `_priorRegions`
   snapshot stashed in the `updateToken` options — core's containment bookkeeping doing the geometry, so
   shape and elevation come free. Application is routed to a single client through
@@ -837,6 +839,19 @@ migrate, so the inherited prefix would have implied one.
   item for it, so a deliberate stabilise had no button anywhere while three successful death saves
   already reached Stable. DC 10 Wisdom (Medicine), costs the healer's Action, charged whether or not
   it succeeded, and announced either way — a silent failure looks like the button not working.
+- **Creature auras (v0.7.15) are a standing emanation, not `create_area`.** Aura of Protection —
+  and Courage, Devotion, Warding, Aura of Life — stopped applying the moment Aura Effects and DAE
+  were turned off. dnd5e never emanates: the 2024 item transfers `@abilities.cha.mod` onto the
+  Paladin and a Foundry Note says allies add that number by hand, because copying the formula would
+  evaluate Charisma against the ally. DDB stamps `flags.ActiveAuras`; those flags are inert without
+  the module. `src/system/dnd5e-auras.ts` discovers (AA flags, known identifiers, stock
+  `range.units === "self"` + radius template + changes, or a known ident with no effect at all);
+  `src/rules/aura.ts` copies a **resolved number** onto whoever `measureBetween` puts inside the
+  radius. Skip the carrier when `transfer: true` — a second +5 doubles it. Spells wait for a live
+  AE from that item. Inactive while Incapacitated. Stand aside wholesale when `auraeffects` or
+  `ActiveAuras` is **active**; DAE alone does not emanate and is not a reason to stand aside.
+  Regions stay Phase 4 (`on_enter_area` / Spirit Guardians). Leftover Aura Effects Regions after a
+  wipe are not our job. Setting `general.auras`, default on. `noodlrHooks.surveyAuras()`.
 
 ## The design: deterministic NPC combatants
 
@@ -1297,9 +1312,10 @@ were not in August, because the hard half shipped for unrelated reasons:
 4. ~~**Dodge.**~~ **BUILT in v0.2.3** — `rules/dodge.ts` plus the matrix entry. This line survived a release
    past its own completion, which is the failure `pages.ts`'s `state` field exists to prevent: check a row's
    state before trusting a queue entry here.
-5. **Standing up from Prone costs half Speed**, and a prone creature should pay crawl rates to walk — core
-   charges the extra distance only if the Crawl action is selected, and never charges the stand-up. The
-   Speed ledger already exists; this is a charge levied on a status removal.
+5. ~~**Standing up from Prone costs half Speed**~~ **BUILT in v0.7.15** — `rules/prone.ts` plus
+   `system/dnd5e-prone.ts`. Half Speed to stand; crawl while the status stays. The planner stands
+   unless `keepDistance` plus no melee within 5 feet plus a stay-put plan. No new setting: it
+   follows the movement cap.
 6. Lower value, and several are honest refusals: squeezing, flying without a fly speed (core does not
    prevent it), mounted combat, falling damage (core has no concept of falling at all), the
    suffocation/starvation/extreme-environment clocks, and difficult terrain auto-placed from spell
@@ -3011,8 +3027,14 @@ The existing planned row — "who a template caught" — is the *reading* half a
 separate. Leftover `game.user.targets` are already dropped on a template use
 (`rules/template-targets.ts`), so auto-saves wait rather than rolling the last Ray of
 Frost. Placement without a catch-list still leaves auto-saves with nobody to roll for;
-a catch-list without placement still needs a human to draw the cone. Build placement
-first: without it, a fully automated hostile cannot take the turn.
+a catch-list without placement still needs a human to draw the cone.
+
+**The click is gone (Archmage Lightning Bolt, 2026-08-20).** `tactics/aim.ts` +
+`place-template.ts`: suppress `#placeTemplate`, aim at the nominated target (line/cone
+from the caster, sphere/cube on the target), create the MeasuredTemplate, stamp
+`flags.dnd5e.targets`, `adoptTemplateCatch` so auto-saves roll. The scored search is
+still open — a Fireball that cooks two hobgoblins with the party is the next job, not
+a centre-on-nearest default we already have.
 
 **The subject whitelist worked, and what it left behind is a different shape than predicted.** 105 → 23,
 and `"caster"` ×20 — the entire basis of the planned aliasing — **is gone from the histogram**. What
@@ -3405,8 +3427,14 @@ button press.
   the snapshot on the card. Never a veto (a second `preUseActivity` that returns false is how
   Hide and Dash double-charged). Skipped while `isAutomating()` so Phase 5 can set a catch-list
   and not have it wiped. `onUsage` also refuses to `noteTargets` when `placesTemplate`, because
-  without a catch-list there is nobody honest to roll; Hold Person is unchanged. Pinned by
+  without a catch-list there is nobody honest to roll; Hold Person is unchanged. An
+  automated turn skips the wipe (`isAutomating`) and writes the catch list *after* it
+  places the area — `adoptTemplateCatch` is that second pass. Pinned by
   `test/template-targets.test.ts`.
+- **A Cast wrapper has no template of its own (Archmage, 2026-08-20).** Spellcasting →
+  Lightning Bolt is `type: "cast"`; `CastActivity.use` forwards to the cached spell and
+  *that* activity is what `#placeTemplate` reads. `placesTemplate` follows the link.
+  `configure: false` never skipped the preview. Aimed placement lives in `tactics/aim.ts`.
 
 ### The prompt primitive — `util/prompt.ts`
 
@@ -3652,15 +3680,15 @@ and already work; **do not build any of these without checking what it already s
  encounter.
 - **Ours, and built:** actions, bonus actions, reactions, movement, Dash, the light-weapon swing
  (`rules/economy/`), and now legendary resistances.
-- **The system's, and shipped OFF:** recharge. `game.settings.register("dnd5e", "autoRecharge")` defaults
- `"no"` and is `config: false` (`settings.mjs:356-368`), so it is not in Foundry's settings list at all — it
- lives only in dnd5e's own Combat Settings submenu, Monsters tab. When enabled it rolls at `turnStart` for
- NPCs only (`data/item/templates/activities.mjs:334`), and `"silent"` does it without a chat card. **We
- deliberately do not set it**: writing another module's settings is what makes two modules impossible to
- reason about, and the yes/silent choice is a real preference. `systemSettingAdvisories()` reports it, and the
- Combat page carries a `system`-state row saying where it is. Note the interaction with our own code — a spent
- recharge feature is correctly *not offered* as a turn option, so with this off a breath weapon disappears
- from the planner's options for the rest of the fight and looks like the planner having forgotten it.
+- **Ours, default automatic, and we still do not write dnd5e's setting (v0.7.15).** Recharge is
+ `combat.autoRecharge` (`no` | `silent` | `yes`), default **`silent`**, on the Combat page under
+ Rolling and reporting. The die is the system's (`UsesField.rollRecharge`); we call it from
+ `dnd5e.postCombatRecovery` when the periods include `turnStart`, NPCs only, matching
+ `activities.mjs:334`. When `dnd5e.autoRecharge` is already `yes` or `silent` we stand aside —
+ two d6s on a failure would let the second succeed. An unreadable system setting stands aside
+ too, for the same reason. The advisory now fires only when **both** switches are off. A spent
+ recharge feature is still not offered as a turn option; once the die succeeds the planner sees
+ it again. Diagnostics: `api.surveyRecharge()`.
 - **Corrected the same day:** this note originally said `noteRest()` needed no callers "while the system owns
  rests", which confused two different ledgers and left compiled per-day uses permanently spent. It is wired
  to `dnd5e.restCompleted` now — see the rest-scoped-use note under the wired-triggers section.
@@ -3839,6 +3867,24 @@ by a Dashing rogue. One number tells those two apart and nothing else does.
   and `performPlan` used the activity anyway. Attack cards had empty `targets`; auto-damage
   said nobody was targeted; nothing applied. `meleeReached` gates the use; the public card
   becomes "still too far to strike" / "covers no ground at all". Not a reach bug.
+- **A thrown weapon's `range.value` is not its melee reach (Assassin, 2026-08-20).** Lycan Spear
+  is `reach: 5`, `value: 20`, `long: 60`, `thr`. One Attack activity, `attack.type: melee`. Reading
+  `value` as the close distance made `meleeReached(20, 20)` true after a 30 ft walk, then used the
+  melee activity from 20 ft. Attack and damage cards posted with empty `targets` — the same empty
+  list the Dire Wolves had, for the opposite reason: they never arrived, this one arrived at the
+  thrown range and stabbed. Melee now reads `reach` only; `thr` emits a second offering that rolls
+  with `attackMode: "thrown"`. KeepDistance already prefers that throw over a close.
+- **Arcane Burst is melee *or* ranged with no Thrown property (Archmage, 2026-08-20).**
+  `range.reach: 5`, `range.value: 150`, `properties: []`. After the spear fix, melee
+  read `reach` only and no second offering was emitted, so a 150 ft cantrip became a
+  5 ft poke and the planner hid instead. `innateRangedOf` emits `Name (Ranged)` /
+  `attackMode: "ranged"` when `value > reach` and there is no `thr`. Hide is not
+  offered when a ranged attack already reaches the nearest player.
+- **`rollAttack` reads `game.user.targets`, not the name on the card (Archmage, 2026-08-20).**
+  Three Arcane Burst cards named nobody while the announcement named Barb Arian.
+  `withTarget` now `setTarget`s as well as `updateTokenTargets`, and `finishActivity`
+  writes `flags.dnd5e.targets` onto the attack message so the card does not depend on
+  the live Set. `tokenIdOf` is the single read of a BoardActor / Token / document.
 - **Amended rather than followed by a second message**, because announcing first is deliberate (narration
   has to read ahead of the dice) and a separate "it moved 30 ft" line would double the log for every
   advance. A failed edit leaves a card that is merely vague, so it is logged and nothing else.
@@ -4333,8 +4379,8 @@ So the button stays locked and `applyGraze` pays out the flat amount directly.
  setting has a **`none`** position, and at that setting **the status is never created at all** — so a
  compiled ability guarded on `bloodied` silently never fires, which reads as the compiler being
  broken. `systemSettingAdvisories()` reports it and `pages.ts` carries a `system`-state row saying who
- owns it. Same doctrine as the `autoRecharge` advisory: we do not write another module's settings, we
- say where the switch is.
+ owns it. We do not write another module's settings; we say where the switch is. Recharge left
+ this family in v0.7.15 — we roll it ourselves and still never write `dnd5e.autoRecharge`.
 - **Every setting read in `systemSettingAdvisories()` is independently guarded and none of them returns
   early (fixed v0.6.1).** The first two were chained, so on any dnd5e without `autoRecharge` the Bloodied
   warning below it could never be reached. **A missing setting means "a version that does not have this
@@ -4582,6 +4628,25 @@ an argument.
 - **`DAE | Deprecated special duration: turnStartSource` is DAE warning about ITS OWN vocabulary**, on the 196
   inert `specialDuration` entries above. It is not addressed to us and there is nothing here to change; it is
   the same finding arriving as a console line.
+
+## Three combat bugs from the Archmage fight (2026-08-21)
+
+- **Opportunity attacks were silent, not absent.** `moveToken` carries `destination`; we were
+  ending the route on `_source`. Watcher distance added the footprint on top of `centerOf`.
+  `watchersOf` required `token.center` (placeable-only) and skipped `combat.combatant` as well
+  as the mover. Skip only the mover. Do not auto-Disengage to "fix" a missing OA — hide and
+  flee are supposed to provoke. Every early return now logs.
+- **Flee is a run-off, not an instant resolution.** `resolveCombatant("fled")` on the first
+  step ended combat while the Hostile token stayed; perception re-started the fight. Stamp
+  `flags.<ns>.fled` on the token, keep playing them, despawn after three own turns or at the
+  scene edge, then resolve. `isHostile` ignores the flag even after `deleteCombat`.
+- **Arm's Reach's GM door exemption is the default.** `globalInteractionDistanceForGMOnDoors`
+  false means every GM click is unrestricted. Native `preUpdateWall` on every client: one
+  square, selected/assigned token, GM-with-no-token may stage. Do not stand aside.
+- **Prone never cleared, and he walked full Speed.** Planner had no stand. API moves use
+  walk/fly, so crawl rates never applied. Default stand. Stay down only when keepDistance,
+  no melee within 5 feet, and the plan does not travel. `core/` still names no D&D status
+  — crawl is `intent.action` from execute.
 
 ## Open items carried over from noodlr
 

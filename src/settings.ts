@@ -36,6 +36,15 @@ import { menuShimFor } from "./apps/rules-config";
  */
 export type CombatAutomationMode = "full" | "partial" | "off";
 
+/**
+ * How a spent Recharge 5–6 ability is recovered at the start of an NPC's turn.
+ *
+ * Mirrors dnd5e's `autoRecharge` values on purpose: `silent` and `yes` both roll the die, and
+ * differ only by whether a chat card appears. Default is `silent` — automatic, and a horde of
+ * dragons does not dump a card each. `no` is the printed-book answer: the GM rolls it.
+ */
+export type AutoRechargeMode = "no" | "silent" | "yes";
+
 const L = (key: string): string => `NOODLRHOOKS.Combat.${key}`;
 
 /**
@@ -177,10 +186,19 @@ export function registerCombatSettings(): void {
   // where the goblins can shake off a Hold Person the party cannot is not a preference anyone has — it
   // is the same rule read two ways at the same table.
   world(COMBAT_SETTINGS.repeatSaves, "RepeatSaves", Boolean, true);
+  world(COMBAT_SETTINGS.autoRecharge, "AutoRecharge", String, "silent", {
+    choices: {
+      silent: L("AutoRecharge.Silent"),
+      yes: L("AutoRecharge.Yes"),
+      no: L("AutoRecharge.No"),
+    },
+  });
   world(COMBAT_SETTINGS.autoEnd, "AutoEnd", Boolean, true);
 
   general(GENERAL_SETTINGS.jump, "Jump", Boolean, true);
   general(GENERAL_SETTINGS.influence, "Influence", Boolean, true);
+  general(GENERAL_SETTINGS.interactReach, "InteractReach", Boolean, true);
+  general(GENERAL_SETTINGS.auras, "Auras", Boolean, true);
 
   game.settings.register(MODULE_ID, SETTINGS.compileCapabilities, {
     name: "NOODLRHOOKS.Capabilities.Name",
@@ -733,9 +751,48 @@ export function isInfluenceEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.influence));
 }
 
+/**
+ * Must a token be within one square of a door to open or close it?
+ *
+ * On by default. Arm's Reach can look like it already does this, and at stock settings it does
+ * not — every GM click is unrestricted, including a GM who is playing a character. Off for a
+ * table that wants to stage doors from anywhere.
+ */
+export function isInteractReachEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.interactReach));
+}
+
+/**
+ * Do creature auras (Aura of Protection and its cousins) apply to allies in range?
+ *
+ * On by default. dnd5e never emanates — a Paladin's transferred save bonus stays on the Paladin,
+ * and clicking the feature posts the prose. DDB stamps `flags.ActiveAuras` so Active Auras or Aura
+ * Effects can do the copy; with those modules off the stamp is inert. Off for a table that already
+ * runs one of those, or that wants the Paladin's bonus to stay a hand-applied number.
+ */
+export function isAurasEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.auras));
+}
+
 export function getCombatAutomation(): CombatAutomationMode {
   const raw = String(game.settings.get(MODULE_ID, COMBAT_SETTINGS.automation) ?? "full");
   return raw === "partial" || raw === "off" ? raw : "full";
+}
+
+/**
+ * How this module wants rechargeables recovered.
+ *
+ * The system's own `autoRecharge` is a separate question — see `systemOwnsRecharge` in
+ * `rules/recharge.ts`. This getter never reads that setting; standing aside lives at the call site
+ * so a world that turned dnd5e's switch on is not silently rewritten here.
+ */
+export function getAutoRecharge(): AutoRechargeMode {
+  try {
+    const raw = String(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoRecharge) ?? "silent");
+    return raw === "no" || raw === "yes" ? raw : "silent";
+  } catch {
+    return "silent";
+  }
 }
 
 /**

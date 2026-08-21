@@ -40,6 +40,7 @@ import { speakerFor } from "../../util/speaker";
 import { isMovementCapEnabled } from "../../settings";
 import { pickNumber, systemPaths } from "../../system/profiles";
 import { check, dashesTaken, takeDash } from "./ledger";
+import { stoodThisTurn } from "../prone";
 import { isAutomating } from "./enforce";
 import { bonusDashSource } from "../../system/dnd5e-dash";
 import { JUMP_ACTION, jumpVeto } from "../jump";
@@ -109,7 +110,7 @@ function budgetFor(doc: any): Budget | null {
   return {
     speed,
     spent: spentThisTurn(doc),
-    allowance: speed * (1 + dashes),
+    allowance: speed * (1 + dashes) - stoodThisTurn(actor, combat, combatant),
     dash: dashCost(actor, combat, combatant),
     combatant,
     actor,

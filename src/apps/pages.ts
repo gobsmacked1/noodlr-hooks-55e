@@ -325,6 +325,24 @@ const MECHANICS: Page = {
           ownership: "jump",
         },
         {
+          id: "interactReach",
+          label: "NOODLRHOOKS.General.InteractReach.Name",
+          hint: "NOODLRHOOKS.General.InteractReach.Hint",
+          state: "live",
+          setting: G.interactReach,
+          kind: "boolean",
+          ownership: "interactReach",
+        },
+        {
+          id: "auras",
+          label: "NOODLRHOOKS.General.Auras.Name",
+          hint: "NOODLRHOOKS.General.Auras.Hint",
+          state: "live",
+          setting: G.auras,
+          kind: "boolean",
+          ownership: "auras",
+        },
+        {
           id: "blindAbility",
           label: "Ability checks rolled blind",
           hint:
@@ -523,6 +541,16 @@ const SHARED_STATE: Section = {
       ownership: "movement",
     },
     {
+      id: "prone",
+      label: "Standing from Prone and crawling",
+      hint:
+        "Standing costs half Speed. Staying Prone means crawling (double cost), because core only " +
+        "charges that when Crawl is selected. Follows the movement cap above. An automated creature " +
+        "stands unless staying down is a real tactic — keepDistance, no melee within 5 feet, acting from here.",
+      state: "live",
+      ownership: "movement",
+    },
+    {
       id: "opportunity",
       label: "Opportunity attacks",
       hint:
@@ -604,11 +632,17 @@ const SHARED_ROLLS: Section = {
     },
     {
       id: "recharge",
-      label: "Recharge abilities rolled at the start of a monster's turn",
-      hint: "A breath weapon on Recharge 5-6 rolls for itself instead of waiting to be remembered.",
-      state: "system",
-      today:
-        "dnd5e ships this and it ships OFF: Combat Settings, Monsters, Auto-recharge. Turn it on.",
+      label: "NOODLRHOOKS.Combat.AutoRecharge.Name",
+      hint: "NOODLRHOOKS.Combat.AutoRecharge.Hint",
+      state: "live",
+      setting: C.autoRecharge,
+      kind: "select",
+      choices: {
+        silent: "NOODLRHOOKS.Combat.AutoRecharge.Silent",
+        yes: "NOODLRHOOKS.Combat.AutoRecharge.Yes",
+        no: "NOODLRHOOKS.Combat.AutoRecharge.No",
+      },
+      ownership: "recharge",
     },
     {
       id: "damageGate",
@@ -895,13 +929,13 @@ const PER_SIDE_RESOURCES: Section = {
       label: "NOODLRHOOKS.Rules.Audience.Npc",
       rows: [
         {
-          id: "recharge",
+          id: "rechargeNpc",
           label: "Recharge abilities",
           hint:
-            "A spent breath weapon is already excluded when planning a turn. Rolling the recharge at the " +
-            "start of the creature's turn is the system's, and it ships with auto-recharge off.",
+            "The same switch as Rolling and reporting → Recharge. NPCs only, matching the system: a " +
+            "spent breath is already excluded from a planned turn until the die succeeds.",
           state: "system",
-          today: "dnd5e, but its Auto Recharge setting defaults to off.",
+          today: "This module, default automatic and silent. Stands aside if dnd5e's Auto-recharge is on.",
         },
         {
           id: "legendaryActions",

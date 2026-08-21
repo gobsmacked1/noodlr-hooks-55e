@@ -39,7 +39,7 @@ import { useActionAt } from "../tactics/execute";
 import { hasReaction, spend } from "./economy/ledger";
 import { isReactionPromptEnabled } from "../settings";
 import { acBoostOf, midiPromptsReactions } from "../system/dnd5e-reactions";
-import { counterspellReady, isCounterspell } from "../system/dnd5e-counterspell";
+import { counterspellReady, isCounterspell, isCounterspellAction } from "../system/dnd5e-counterspell";
 import { isSilveryBarbs } from "../system/dnd5e-barbs";
 import { readHp } from "../core/tracker";
 
@@ -246,6 +246,7 @@ function optionsFor(actor: any, request: OfferRequest, target: any): CreatureAct
     (action) =>
       action.economy === "reaction" &&
       (action.kind === "attack" || action.kind === "control" || action.kind === "heal") &&
+      !isCounterspellAction(action) &&
       reaches(action, gap),
   );
 

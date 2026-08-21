@@ -37,6 +37,34 @@ test("Hold Person and Ray of Frost do not place a template", () => {
   assert.equal(placesTemplate(ray), false);
 });
 
+const lightningSave = {
+  name: "Lightning Bolt",
+  type: "save",
+  target: { prompt: true, template: { units: "ft" }, override: false },
+  item: { system: { target: { template: { type: "line", size: "100", width: "5" } } } },
+};
+
+const lightningCast = {
+  name: "Spellcasting (Lightning Bolt)",
+  type: "cast",
+  target: { template: {} },
+  item: { system: { target: {} } },
+  cachedSpell: {
+    system: {
+      activities: { contents: [lightningSave] },
+      target: { template: { type: "line", size: "100", width: "5" } },
+    },
+  },
+};
+
+test("Lightning Bolt's own save activity places a line", () => {
+  assert.equal(placesTemplate(lightningSave), true);
+});
+
+test("a Cast wrapper still places — the spell it points at is the area", () => {
+  assert.equal(placesTemplate(lightningCast), true);
+});
+
 test("an override with no template type is not a placement", () => {
   assert.equal(
     placesTemplate({

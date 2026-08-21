@@ -17,6 +17,7 @@
 // see the party would otherwise restart the encounter the instant the GM ended it.
 
 import { log, MODULE_ID } from "../constants";
+import { isFleeing } from "../tactics/flee";
 import { isPrimaryGM } from "../util/gm";
 import { narrator, speakerFor } from "../util/speaker";
 import { announceRuling } from "../integration/contract";
@@ -233,6 +234,9 @@ function isHostile(token: any): boolean {
   const hostile = (globalThis as any).CONST?.TOKEN_DISPOSITIONS?.HOSTILE ?? -1;
   if (Number(token?.document?.disposition) !== hostile) return false;
   if (token?.actor?.hasPlayerOwner) return false;
+  // A creature that is still running, or whose token is waiting to be taken off the scene,
+  // must not start a new fight the moment the last one ended.
+  if (isFleeing(token?.document ?? token)) return false;
   return alive(token);
 }
 

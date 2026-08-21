@@ -46,6 +46,9 @@ import { gambitsOwnsBarbs } from "../system/dnd5e-barbs";
 import { cprMaySneak } from "../system/dnd5e-sneak";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
+import { getAutoRecharge } from "../settings";
+import { systemOwnsRecharge } from "../rules/recharge";
+import { auraModuleOwns } from "../system/dnd5e-auras";
 
 /** Who acts on a rule when its trigger fires. */
 export type Owner =
@@ -359,6 +362,37 @@ const AREAS: Area[] = [
   { id: "invisBreak", setting: COMBAT_SETTINGS.invisBreak },
   { id: "jump", setting: GENERAL_SETTINGS.jump },
   { id: "influence", setting: GENERAL_SETTINGS.influence },
+  { id: "interactReach", setting: GENERAL_SETTINGS.interactReach },
+  {
+    id: "auras",
+    setting: GENERAL_SETTINGS.auras,
+    contender: () => {
+      const other = auraModuleOwns();
+      return other ? { by: other.by, note: other.note } : null;
+    },
+  },
+  {
+    id: "recharge",
+    setting: COMBAT_SETTINGS.autoRecharge,
+    enabled: () => getAutoRecharge() !== "no",
+    contender: () =>
+      systemOwnsRecharge()
+        ? {
+            by: "dnd5e",
+            note:
+              "Combat Settings → Monsters → Auto-recharge is already on. This module stands aside " +
+              "so the die is not rolled twice.",
+          }
+        : null,
+    fallback: () =>
+      systemOwnsRecharge()
+        ? {
+            owner: "system",
+            by: "dnd5e",
+            note: "dnd5e's Auto-recharge is on. Ours is off and is not needed.",
+          }
+        : null,
+  },
 ];
 
 function economyOn(key: string): boolean {
@@ -529,6 +563,21 @@ export function advisories(): Advisory[] {
 
   // Same shape of trap as midi's range check: nothing here is wrong, but a whole class of roll stops
   // reaching us and the symptom is a rule of ours quietly not firing.
+  if (moduleActive("arms-reach")) {
+    const gmDoorsExempt = moduleSetting("arms-reach", "globalInteractionDistanceForGMOnDoors") !== true;
+    if (gmDoorsExempt) {
+      out.push({
+        level: "info",
+        title: "Arm's Reach does not limit GM door clicks",
+        detail:
+          "Its door integration is on, but \"Limit GM door interactions\" is off — the default. " +
+          "Every GM click is then unrestricted, including a GM who is playing a character and " +
+          "clicks a door from across the map. This module still refuses that click when a token " +
+          "is selected. A GM with no token selected is staging and is left alone.",
+      });
+    }
+  }
+
   if (moduleActive("monks-tokenbar")) {
     out.push({
       level: "warn",
@@ -655,13 +704,10 @@ function sneakAdvisories(): Advisory[] {
 /**
  * Automation dnd5e already ships, switched off in its own settings.
  *
- * Worth reporting for the same reason the ownership badges exist: a GM comparing this module against what
- * they had before will find recharge abilities no longer rolling and reasonably blame whatever changed. The
- * cause is a system setting they have never seen — `autoRecharge` is registered `config: false`, so it is
- * not in Foundry's settings list at all and lives only inside dnd5e's Combat Settings submenu.
- *
- * We deliberately do NOT set it. Writing another module's settings is what makes two modules impossible to
- * reason about, and this one is a genuine preference: "silent" and "yes" differ by a chat card per recharge.
+ * Recharge used to live only on that hidden switch. This module now rolls it (default silent) and
+ * stands aside when dnd5e's is on, so the advisory below fires only when both are off. We still do
+ * not write `dnd5e.autoRecharge` — writing another module's settings is how two modules become
+ * impossible to reason about.
  */
 function systemSettingAdvisories(): Advisory[] {
   const out: Advisory[] = [];
@@ -677,17 +723,22 @@ function systemSettingAdvisories(): Advisory[] {
     }
   };
 
-  const recharge = setting("autoRecharge");
-  if (recharge === "no") {
-    out.push({
-      level: "info",
-      title: "Recharge abilities are not rolling themselves",
-      detail:
-        "dnd5e can roll a monster's Recharge 5-6 at the start of its turn, and ships with it off " +
-        '("Auto-recharge" = No). Nothing here does it instead: a spent breath weapon is correctly not ' +
-        "offered as an option, and it stays spent until somebody rolls the recharge by hand. Turn it on " +
-        'in Configure Settings, dnd5e, Combat, Monsters — "Silent" applies it with no chat card.',
-    });
+  // Only when NEITHER switch will roll. Ours defaults on, so this is a GM who turned both off.
+  // The old copy of this advisory assumed we never rolled and sent people into dnd5e's hidden
+  // Combat Settings submenu — that is stale the moment this module owns a switch.
+  try {
+    if (getAutoRecharge() === "no" && setting("autoRecharge") === "no") {
+      out.push({
+        level: "info",
+        title: "Recharge abilities are not rolling themselves",
+        detail:
+          "Both this module's Recharge switch and dnd5e's Auto-recharge are off. A spent breath " +
+          "stays spent until somebody rolls it by hand, and the planner correctly stops offering " +
+          "it — which looks like the monster forgot it can breathe. Turn either switch on.",
+      });
+    }
+  } catch {
+    // Reading a setting is not worth taking the advisory list down for.
   }
 
   // Bloodied is the system's, and it is correct — but it has an off position, and switching it off does
