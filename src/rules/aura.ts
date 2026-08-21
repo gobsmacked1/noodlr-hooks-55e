@@ -30,6 +30,7 @@ import {
   auraSourcesOn,
   auraStrength,
   collapseOverlappingAuras,
+  paladinClassLevel,
   resolveAuraRadius,
   resolveAuraValue,
   audienceMatches,
@@ -145,7 +146,10 @@ function desiredForScene(): Map<string, Desired[]> {
     const data = rollDataOf(actor);
     for (const source of auraSourcesOn(actor)) {
       if (!spellAuraIsActive(actor, source)) continue;
-      const radius = resolveAuraRadius(source.radiusFormula, data, source.fallbackRadius);
+      const radius = resolveAuraRadius(source.radiusFormula, data, source.fallbackRadius, {
+        actor,
+        identifier: source.identifier,
+      });
       const changes = resolveChanges(source, data);
       if (!changes.length) continue;
       const sourceTokenId = String(token.id);
@@ -307,7 +311,16 @@ async function runRefresh(): Promise<void> {
 
 function tokenMoved(changed: Record<string, unknown> | undefined): boolean {
   if (!changed) return true;
-  return "x" in changed || "y" in changed || "elevation" in changed || "disposition" in changed;
+  // v13+ TokenDocument#move often diffs `movement` and not a top-level x/y. Opportunity
+  // attacks already listen on `moveToken` for that reason; a walk that we never hear
+  // leaves yesterday's copies on allies at any distance.
+  return (
+    "x" in changed ||
+    "y" in changed ||
+    "elevation" in changed ||
+    "disposition" in changed ||
+    "movement" in changed
+  );
 }
 
 export function registerAuraWatch(): void {
@@ -315,6 +328,7 @@ export function registerAuraWatch(): void {
   Hooks.on("updateToken", (_doc, changed) => {
     if (tokenMoved(changed as Record<string, unknown>)) schedule();
   });
+  Hooks.on("moveToken", schedule);
   Hooks.on("createToken", schedule);
   Hooks.on("deleteToken", schedule);
   Hooks.on("updateActor", (_actor, changed) => {
@@ -359,16 +373,25 @@ export function surveyAuras(): unknown {
     const data = rollDataOf(actor);
     const suppressed = sourceIsSuppressed(actor) ? " SUPPRESSED" : "";
     for (const source of sources) {
-      const radius = resolveAuraRadius(source.radiusFormula, data, source.fallbackRadius);
-      const inside = tokens.filter((other) => {
-        if (!shouldReceive(token, other, source)) return false;
-        return auraDistance(token, other) <= radius + 1e-6;
+      const radius = resolveAuraRadius(source.radiusFormula, data, source.fallbackRadius, {
+        actor,
+        identifier: source.identifier,
       });
-      const names = inside.map((t) => String(t.document?.name ?? "?")).join(", ") || "nobody";
+      const level = paladinClassLevel(data, actor);
+      const reach = tokens
+        .filter((other) => shouldReceive(token, other, source))
+        .map((other) => {
+          const feet = auraDistance(token, other);
+          const inRange = feet <= radius + 1e-6;
+          return `${String(other.document?.name ?? "?")} ${Math.round(feet)}ft ${inRange ? "IN" : "out"}`;
+        });
       const active = spellAuraIsActive(actor, source) ? "on" : "waiting (spell not up)";
+      const scale = level != null ? ` paladin ${level}` : "";
       lines.push(
-        `  ${String(token.document?.name)} ${source.name} ${radius} ft ${source.audience}` +
-          `${source.transferSelf ? " (self via transfer)" : ""} [${active}]${suppressed} → ${names}`,
+        `  ${String(token.document?.name)} ${source.name} ${radius} ft` +
+          ` (${source.radiusFormula}${scale}) ${source.audience}` +
+          `${source.transferSelf ? " (self via transfer)" : ""} [${active}]${suppressed}` +
+          (reach.length ? `\n    ${reach.join(" | ")}` : " → nobody"),
       );
     }
     for (const effect of applied) {

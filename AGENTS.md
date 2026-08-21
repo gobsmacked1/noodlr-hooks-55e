@@ -852,6 +852,16 @@ migrate, so the inherited prefix would have implied one.
   `ActiveAuras` is **active**; DAE alone does not emanate and is not a reason to stand aside.
   Regions stay Phase 4 (`on_enter_area` / Spirit Guardians). Leftover Aura Effects Regions after a
   wipe are not our job. Setting `general.auras`, default on. `noodlrHooks.surveyAuras()`.
+  - **Radius is a flat jump, and a walk has to retrigger (2026-08-21).** 2024 Paladin auras
+    are 10 ft at 6–17 and 30 ft at 18–20 — `@scale.paladin.aura` on the class item, type
+    `distance`. DDB's feature description stays "10-foot Emanation" and its AE prose is
+    `[[scalevalue]]-ft`, which is an unexpanded enricher, not a number. Believe the scale
+    (or the Paladin class level when the scale is missing), never that sentence. `Number("30-ft")`
+    is NaN, so a unit-bearing string used to fall through to fallback 10 on an 18th-level
+    Paladin. `moveToken` is the walk we have to hear: v13+ `TokenDocument#move` often diffs
+    `movement` and not top-level `x`/`y`, and a refresh that only ran at scene load left
+    the copies on allies at any distance. Same hook the opportunity-attack layer already
+    uses. Survey prints formula, Paladin level, and each recipient as `N ft IN|out`.
   - **Same identifier, highest number; different identifiers independently (user, 2026-08-21).**
     Two Paladins both hosting Aura of Protection is one bonus — the +5, not +5 and +3. Protection
     beside Courage (or any other distinct aura) both apply. The Paladin's own transferred AE

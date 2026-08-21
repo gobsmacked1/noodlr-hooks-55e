@@ -12,6 +12,9 @@ import {
   interpolateAtRefs,
   isOccupyingField,
   knownAuraOf,
+  normalizeRadiusFormula,
+  paladinAuraRadiusAtLevel,
+  parseAuraLength,
   receivesOwnAura,
   resolveAuraRadius,
   resolveAuraValue,
@@ -33,6 +36,42 @@ test("paladin aura radius follows the scale, then 10", () => {
   assert.equal(resolveAuraRadius("@scale.paladin.aura", paladin, 10), 10);
   assert.equal(resolveAuraRadius("@scale.paladin.aura", { scale: { paladin: { aura: 30 } } }, 10), 30);
   assert.equal(resolveAuraRadius("@scale.paladin.aura", {}, 10), 10);
+});
+
+test("2024 Paladin aura radius is a flat 10 → 30 jump at 18, not a curve", () => {
+  assert.equal(paladinAuraRadiusAtLevel(6), 10);
+  assert.equal(paladinAuraRadiusAtLevel(17), 10);
+  assert.equal(paladinAuraRadiusAtLevel(18), 30);
+  assert.equal(paladinAuraRadiusAtLevel(20), 30);
+  const twenty = {
+    classes: { paladin: { levels: 20 } },
+    items: [{ type: "class", system: { identifier: "paladin", levels: 20 } }],
+  };
+  assert.equal(resolveAuraRadius("@scale.paladin.aura", twenty, 10, { actor: twenty }), 30);
+  assert.equal(
+    resolveAuraRadius("[[scalevalue]]-ft", twenty, 10, {
+      actor: twenty,
+      identifier: "aura-of-protection",
+    }),
+    30,
+  );
+});
+
+test("DDB radius strings with units or an unexpanded scalevalue enricher still resolve", () => {
+  assert.equal(parseAuraLength("30-ft"), 30);
+  assert.equal(parseAuraLength("10 foot"), 10);
+  assert.equal(parseAuraLength("30 ft."), 30);
+  assert.equal(normalizeRadiusFormula("[[scalevalue]]-ft"), "@scale.paladin.aura");
+  assert.equal(
+    resolveAuraRadius("[[scalevalue]]-ft", { scale: { paladin: { aura: { value: 30 } } } }, 10),
+    30,
+  );
+  assert.equal(
+    resolveAuraRadius("@scale.paladin.aura", { scale: { paladin: { "aura-of-protection": { value: 30 } } } }, 10, {
+      identifier: "aura-of-protection",
+    }),
+    30,
+  );
 });
 
 test("scale objects with a .value are readable", () => {

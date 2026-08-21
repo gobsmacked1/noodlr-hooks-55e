@@ -170,6 +170,70 @@ export function interpolateAtRefs(value: string, data: unknown): string {
   });
 }
 
+/** "30", "30-ft", "30 ft.", "10-foot" — DDB writes units onto a number we then Number() to NaN. */
+export function parseAuraLength(raw: string): number | null {
+  const s = String(raw ?? "").trim().replace(/\s+/g, " ");
+  if (!s) return null;
+  const m = /^(-?\d+(?:\.\d+)?)\s*-?\s*(?:ft|feet|foot)?\.?$/i.exec(s);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * 2024 Paladin auras are a flat jump, not a curve: 10 ft at 6–17, 30 ft at 18–20.
+ * dnd5e's ScaleValue on the class item is that table (`identifier: aura`, type distance).
+ */
+export function paladinAuraRadiusAtLevel(level: number): number {
+  const n = Number(level);
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return n >= 18 ? 30 : 10;
+}
+
+/** Paladin class levels from roll data or the class item. Multiclass uses the Paladin item, not total level. */
+export function paladinClassLevel(data: unknown, actor?: any): number | null {
+  const fromData = Number(
+    getPath(data, "classes.paladin.levels") ?? getPath(data, "class.paladin.levels"),
+  );
+  if (Number.isFinite(fromData) && fromData > 0) return fromData;
+  for (const item of actor?.items ?? []) {
+    if (String(item?.type ?? "") !== "class") continue;
+    if (String(item?.system?.identifier ?? "").toLowerCase() !== "paladin") continue;
+    const n = Number(item?.system?.levels);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+function ddbStatedRadius(item: any): number | null {
+  const n = Number(item?.flags?.ddbimporter?.dndbeyond?.levelScale?.fixedValue);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function auraFallbackRadius(item: any, known: KnownAura | null, actor: any): number {
+  const stated = ddbStatedRadius(item);
+  if (stated != null) return stated;
+  if (known?.radiusFormula.includes("@scale.paladin.aura")) {
+    const level = paladinClassLevel(null, actor);
+    if (level != null) return paladinAuraRadiusAtLevel(level);
+  }
+  return known?.fallbackRadius ?? 10;
+}
+
+function usesPaladinAuraScale(formula: string, identifier: string): boolean {
+  if (/@scale\.paladin\.aura/i.test(formula)) return true;
+  if (/\[\[\s*scalevalue\s*\]\]/i.test(formula)) return true;
+  return Boolean(knownAuraOf(identifier)?.radiusFormula.includes("@scale.paladin.aura"));
+}
+
+/** DDB leaves `[[scalevalue]]-ft` in prose and sometimes in the AA radius field. */
+export function normalizeRadiusFormula(formula: string): string {
+  return String(formula ?? "")
+    .trim()
+    .replace(/\[\[\s*scalevalue\s*\]\]/gi, "@scale.paladin.aura")
+    .replace(/\s*-?\s*(?:ft|feet|foot)\.?$/i, "");
+}
+
 /**
  * Turn a sheet formula into a number string against the source's roll data.
  *
@@ -185,10 +249,35 @@ export function resolveAuraValue(value: string, data: unknown): string {
   return n == null ? filled : String(n);
 }
 
-export function resolveAuraRadius(formula: string, data: unknown, fallback: number): number {
-  const resolved = resolveAuraValue(formula, data);
-  const n = Number(resolved);
-  if (Number.isFinite(n) && n > 0) return n;
+export interface AuraRadiusHint {
+  actor?: any;
+  identifier?: string;
+}
+
+export function resolveAuraRadius(
+  formula: string,
+  data: unknown,
+  fallback: number,
+  hint: AuraRadiusHint = {},
+): number {
+  const ident = String(hint.identifier ?? "");
+  const normalized = normalizeRadiusFormula(formula);
+  const candidates = [normalized];
+  if (usesPaladinAuraScale(formula, ident) || usesPaladinAuraScale(normalized, ident)) {
+    if (!candidates.includes("@scale.paladin.aura")) candidates.push("@scale.paladin.aura");
+    if (!candidates.includes("@scale.paladin.aura-of-protection")) {
+      candidates.push("@scale.paladin.aura-of-protection");
+    }
+  }
+  for (const candidate of candidates) {
+    const resolved = resolveAuraValue(candidate, data);
+    const n = parseAuraLength(resolved) ?? (Number.isFinite(Number(resolved)) ? Number(resolved) : null);
+    if (n != null && n > 0) return n;
+  }
+  if (usesPaladinAuraScale(formula, ident) || usesPaladinAuraScale(normalized, ident)) {
+    const level = paladinClassLevel(data, hint.actor);
+    if (level != null) return paladinAuraRadiusAtLevel(level);
+  }
   return fallback > 0 ? fallback : 10;
 }
 
@@ -428,7 +517,7 @@ export function auraSourcesOn(actor: any): AuraSource[] {
         img: String(effect.img || item.img || "icons/svg/aura.svg"),
         origin: String(item.uuid ?? effect.uuid ?? ""),
         radiusFormula,
-        fallbackRadius: known?.fallbackRadius ?? 10,
+        fallbackRadius: auraFallbackRadius(item, known, actor),
         audience: audienceOfFlag(aa?.aura ?? known?.audience ?? "allies"),
         includeSelf: aa ? aa.ignoreSelf !== true : (known?.includeSelf ?? true),
         transferSelf: Boolean(effect.transfer),
@@ -447,7 +536,7 @@ export function auraSourcesOn(actor: any): AuraSource[] {
         img: String(item.img || "icons/svg/aura.svg"),
         origin: String(item.uuid ?? ""),
         radiusFormula: activityRadius || known.radiusFormula,
-        fallbackRadius: known.fallbackRadius,
+        fallbackRadius: auraFallbackRadius(item, known, actor),
         audience: known.audience,
         includeSelf: known.includeSelf,
         transferSelf: false,

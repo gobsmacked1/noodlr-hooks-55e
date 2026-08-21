@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.17
+
+**A Paladin's aura drops when you walk out of it.** Walking the party away from the Paladin
+left every ally's save bonus in place at any distance. Refresh only watched `x`/`y` on
+`updateToken`; Foundry v13+ walks often diff `movement` instead, so the copies applied at
+scene load never cleared. Walks now retrigger the same way opportunity attacks already do.
+
+**The radius is 10 ft or 30 ft, not whatever the description says.** 2024 Paladin auras jump
+from 10 ft (levels 6–17) to 30 ft (18–20) — one table on the class item, not a curve.
+DDB's feature text stays "10-foot Emanation" and its Active Effect writes
+`[[scalevalue]]-ft`, an unexpanded enricher. `Number("30-ft")` is NaN, so a unit-bearing
+string used to fall through to 10 on an 18th-level Paladin. The reader now believes the
+scale (or Paladin class levels when the scale is missing), never that sentence.
+`noodlrHooks.surveyAuras()` prints the formula, the Paladin level, and each recipient as
+`N ft IN|out`.
+
 ## 0.7.16
 
 **Two Paladins do not stack the same aura.** Two Aura of Protection write the higher bonus,
