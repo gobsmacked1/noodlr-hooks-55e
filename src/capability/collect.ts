@@ -1,10 +1,14 @@
 // Reading a scene's sheets, and asking for what is not already understood.
 //
-// This is the seam between the two halves of the compiler. It runs when a scene loads, walks every
-// creature on it, reduces each written ability to a cache key, and hands every miss to `noodlr`
-// in chunks of `MAX_BATCH`. Everything it produces is then bound to the actor so `executor.ts`
-// can run it without touching the network again. A failed chunk leaves earlier ones stored;
-// the scene itself is not capped.
+// This is the seam between the two halves of the compiler. It runs when a scene loads, when a
+// token is dropped, when a sheet on the viewed scene gains an item (or its prose changes), and
+// when a token's actor is swapped (linked Wild Shape / Polymorph). It walks every creature,
+// reduces each written ability to a cache key, and hands every miss to `noodlr` in chunks of
+// `MAX_BATCH`. Everything it produces is then bound to the actor so `executor.ts` can run it
+// without touching the network again. A failed chunk leaves earlier ones stored; the scene itself
+// is not capped. A handed magic item is not a new token — without the item hooks it would sit
+// inert until a reload, which is how Coat of Many Eyes was left unread after loot landed on an
+// already-compiled Aboleth (noodlr-test, 2026-08-20).
 //
 // THE ECONOMICS ARE THE DESIGN. The corpus measured it: 4,661 features across 436 SRD creatures
 // reduced to 1,387 distinct wordings, and one trait's text was shared by 270 creatures. Traits are
@@ -26,6 +30,7 @@
 
 import { MODULE_ID, debug, log, warn } from "../constants";
 import { isPrimaryGM } from "../util/gm";
+import { hasFlag } from "../util/flags";
 import { isCapabilityCompileEnabled } from "../settings";
 import { pickNumber, pickString, systemPaths } from "../system/profiles";
 import { generalRuleOf } from "../system/dnd5e-glossary";
@@ -432,7 +437,10 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
     declined: {},
   };
 
-  await cache.warm();
+  // Re-read shards, not just the first warm of the session: a wording the GM compiled after we
+  // loaded (a handed item, a token dropped while we were already in the world) is on disk and not
+  // in this client's memory. `warm` alone would leave it unbound until a page reload.
+  await cache.refresh();
 
   const actors = actorsOn(scene);
   report.actors = actors.length;
@@ -537,6 +545,17 @@ async function collectSceneOnce(scene?: any): Promise<CollectReport> {
       game.i18n?.format?.("NOODLRHOOKS.Capabilities.Compiled", { count: report.compiled }) ??
         `Read ${report.compiled} new abilities off this scene.`,
     );
+  }
+
+  // A player (or assistant GM) who collected while the primary GM was still compiling has the
+  // new item on the sheet and nothing in memory. Retry a few times so a handed magic item binds
+  // here without waiting for a scene change — and a scene change would not have been enough
+  // anyway while `warm` was once-per-session.
+  const unread = misses.size - report.compiled - report.rejected;
+  if (unread > 0 && isCapabilityCompileEnabled() && !isPrimaryGM() && !report.noCompiler) {
+    retryUnread(scene);
+  } else {
+    unreadRetries = 0;
   }
   return report;
 }
@@ -902,14 +921,139 @@ function actorsOn(scene?: any): any[] {
 
 let registered = false;
 let pending: ReturnType<typeof setTimeout> | null = null;
+let unreadRetries = 0;
+let sceneDelayMs = 750;
+let itemDelayMs = 1500;
+
+/** How long a non-GM client waits to re-read a wording the primary GM is compiling. */
+const UNREAD_RETRY_MS = 12_000;
+const UNREAD_RETRY_MAX = 4;
+
+/** Test-only. `null` restores the shipped settle times. */
+export function __setCollectDelays(scene: number | null, item?: number | null): void {
+  sceneDelayMs = scene == null ? 750 : Math.max(0, Math.floor(scene));
+  if (item !== undefined) itemDelayMs = item == null ? 1500 : Math.max(0, Math.floor(item));
+}
 
 /** A scene load is a burst of hooks, not one. Settle before reading anything. */
-function schedule(scene?: any, delay = 750): void {
+function schedule(scene?: any, delay = sceneDelayMs): void {
   if (pending) clearTimeout(pending);
   pending = setTimeout(() => {
     pending = null;
     void collectScene(scene).catch((err) => warn("capability collection failed:", err));
   }, delay);
+}
+
+function retryUnread(scene?: any): void {
+  if (unreadRetries >= UNREAD_RETRY_MAX) {
+    unreadRetries = 0;
+    return;
+  }
+  unreadRetries++;
+  schedule(scene, UNREAD_RETRY_MS);
+}
+
+/**
+ * True when this update can change a cache key, or whether the item is compiled at all.
+ *
+ * Equipping, attuning, spending a use, or changing quantity must not schedule a collect — those
+ * fire constantly and the prose did not move. Name, type, description, activities, identifier
+ * (the glossary skip) and flags (`compileAnyway`, `cachedFor`) do.
+ */
+export function itemDeltaNeedsCollect(changes: unknown): boolean {
+  const c = changes as Record<string, unknown> | null;
+  if (!c || typeof c !== "object") return false;
+  if ("name" in c || "type" in c) return true;
+  const system = c.system as Record<string, unknown> | undefined;
+  if (system && typeof system === "object") {
+    if ("description" in system || "activities" in system || "identifier" in system) return true;
+  }
+  if (c.flags && typeof c.flags === "object") return true;
+  return Object.keys(c).some(
+    (k) =>
+      k === "system.description" ||
+      k.startsWith("system.description.") ||
+      k === "system.activities" ||
+      k.startsWith("system.activities.") ||
+      k === "system.identifier" ||
+      k.startsWith("system.identifier.") ||
+      k.startsWith("flags."),
+  );
+}
+
+/**
+ * A token now points at a different actor. Linked Wild Shape / Polymorph / Shapechange does this
+ * and never fires `createToken` — same placeable, new sheet. Movement and HP must not match.
+ */
+export function tokenDeltaNeedsCollect(changes: unknown): boolean {
+  const c = changes as Record<string, unknown> | null;
+  return Boolean(c && typeof c === "object" && "actorId" in c);
+}
+
+/**
+ * The actor's item list was replaced, or a polymorph flag landed. Unlinked-token transform in
+ * dnd5e updates the synthetic actor in place and does not fire `dnd5e.transformActor` at all.
+ * Hit-point updates must not match.
+ */
+export function actorDeltaNeedsCollect(changes: unknown): boolean {
+  const c = changes as Record<string, unknown> | null;
+  if (!c || typeof c !== "object") return false;
+  if ("items" in c) return true;
+  const flags = c.flags as Record<string, unknown> | undefined;
+  const dnd5e = flags?.dnd5e as Record<string, unknown> | undefined;
+  if (dnd5e && typeof dnd5e === "object" && ("isPolymorphed" in dnd5e || "originalActor" in dnd5e)) {
+    return true;
+  }
+  return Object.keys(c).some(
+    (k) =>
+      k === "items" ||
+      k.startsWith("items.") ||
+      k === "flags.dnd5e.isPolymorphed" ||
+      k === "flags.dnd5e.originalActor",
+  );
+}
+
+function actorOfItem(item: any): any {
+  return item?.parent ?? item?.actor ?? null;
+}
+
+function actorIsOnViewedScene(actor: any): boolean {
+  const uuid = String(actor?.uuid ?? "");
+  if (!uuid) return false;
+  return actorsOn().some((a) => String(a.uuid ?? "") === uuid);
+}
+
+/** The item sits on a creature that has a token on the viewed scene. Sidebar-only sheets wait. */
+export function itemIsOnViewedScene(item: any): boolean {
+  return actorIsOnViewedScene(actorOfItem(item));
+}
+
+/**
+ * Whether creating this item could ever produce a wording to compile.
+ *
+ * Loot, gold and the system's cached spell clones cannot. A Copper Piece must not schedule a
+ * collect every time a pile is looted.
+ */
+export function itemMightCompile(item: any): boolean {
+  if (item?.flags?.dnd5e?.cachedFor) return false;
+  if (RULE_BEARING.has(String(item?.type ?? ""))) return true;
+  return Boolean(hasFlag(item, "compileAnyway"));
+}
+
+function scheduleSceneItem(item: any): void {
+  if (!itemMightCompile(item)) return;
+  if (!itemIsOnViewedScene(item)) return;
+  schedule((canvas as any)?.scene, itemDelayMs);
+}
+
+/** Test-only. Drops the one-shot registration guard so a later test can wire hooks again. */
+export function __resetCollector(): void {
+  registered = false;
+  if (pending) clearTimeout(pending);
+  pending = null;
+  unreadRetries = 0;
+  sceneDelayMs = 750;
+  itemDelayMs = 1500;
 }
 
 export function registerCapabilityCollector(): void {
@@ -927,8 +1071,37 @@ export function registerCapabilityCollector(): void {
   // pack of six wolves is six hooks in a second and they should cost one batch.
   Hooks.on("createToken", (doc: any) => {
     if (doc?.parent?.id !== (canvas as any)?.scene?.id) return;
-    schedule(doc.parent, 1500);
+    schedule(doc.parent, itemDelayMs);
   });
+
+  // A magic item handed to a creature ALREADY on the scene is not a new token, so the hook above
+  // never fires. Cache-first collect then keeps the old bindings forever — the item looks inert
+  // until somebody reloads. Foundry has no "received inventory" event; `createItem` on an embedded
+  // Item IS that. Losing an item is ignored: the wording may still be bound for someone else.
+  // `updateItem` only when the prose (or the glossary skip) moved — equip/uses/quantity must not.
+  Hooks.on("createItem", (item: any) => scheduleSceneItem(item));
+  Hooks.on("updateItem", (item: any, changes: unknown) => {
+    if (itemDeltaNeedsCollect(changes)) scheduleSceneItem(item);
+  });
+
+  // Summons already land as tokens (dnd5e's Summon activity, our `summonCreature`, Automated
+  // Evocations) and the createToken hook above reads them. Shapechange does not: a linked
+  // polymorph creates a new world actor and retargets the existing token (`actorId` changes);
+  // an unlinked one rewrites the synthetic actor in place (`items` / `isPolymorphed`) and
+  // never fires `dnd5e.transformActor` at all. Both have to be heard here or the new form's
+  // unread traits sit inert for the rest of the scene.
+  Hooks.on("updateToken", (doc: any, changes: unknown) => {
+    if (doc?.parent?.id !== (canvas as any)?.scene?.id) return;
+    if (!tokenDeltaNeedsCollect(changes)) return;
+    schedule(doc.parent, itemDelayMs);
+  });
+  Hooks.on("updateActor", (actor: any, changes: unknown) => {
+    if (!actorDeltaNeedsCollect(changes)) return;
+    if (!actorIsOnViewedScene(actor)) return;
+    schedule((canvas as any)?.scene, itemDelayMs);
+  });
+  Hooks.on("dnd5e.transformActor", () => schedule((canvas as any)?.scene, itemDelayMs));
+  Hooks.on("dnd5e.transformActorV2", () => schedule((canvas as any)?.scene, itemDelayMs));
 
   // THE CANVAS IS ALREADY DRAWN BY THE TIME WE GET HERE, so the hook above has missed the only
   // `canvasReady` of this page load and would not fire again until the GM changed scene or dropped a
@@ -948,13 +1121,14 @@ export function registerCapabilityCollector(): void {
 /**
  * Diagnostics: what this scene would ask about, without asking.
  *
- * WARMS THE CACHE FIRST, because reading `cache.has` against a cache nobody has loaded reports every
- * wording as uncached — which is an instrument answering the opposite of the truth, and the answer it
- * gives is the alarming one. It cost a day: a full cache of 1,099 descriptors read as empty and was
- * diagnosed as a data loss. Warming is idempotent and costs nothing once the collector has run.
+ * REFRESHES THE CACHE FIRST, because reading `cache.has` against a cache nobody has loaded reports
+ * every wording as uncached — which is an instrument answering the opposite of the truth, and the
+ * answer it gives is the alarming one. It cost a day: a full cache of 1,099 descriptors read as empty
+ * and was diagnosed as a data loss. A later compile on the GM is the other direction of the same
+ * fault: a warm-once memory then reports a wording as missing after it has been written.
  */
 export async function surveyScene(): Promise<Record<string, unknown>> {
-  await cache.warm();
+  await cache.refresh();
   const actors = actorsOn();
   const distinct = new Map<
     string,

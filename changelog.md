@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.14
+
+**A magic item handed to a creature already on the scene is compiled.** Dropping loot, dragging from
+a pack, or a loot generator creating an item used to leave that wording unread until somebody
+reloaded — Coat of Many Eyes on the Aboleth sat inert for exactly that reason. Foundry has no
+"received inventory" event; `createItem` on the sheet is that event. Only items that can carry a
+rule are watched. Equipping, spending a use, or changing quantity does not spend a compile.
+Losing an item is ignored.
+
+**Wild Shape, Polymorph and Shapechange compile the new form.** Those spells do not drop a new
+token. A linked transform points the existing token at a new actor; an unlinked one rewrites the
+sheet in place. Both now schedule the same cache-first collect a dropped token does. Summons
+already did — they place a token, and that hook was already wired.
+
+**A compile the GM just paid for reaches the other clients without a reload.** The cache is
+re-read on every collect, not only the first warm of the session, so a player who was already in
+the world binds the new wording instead of staring at an inert item until they refresh.
+
 ## 0.7.13
 
 **A scene of high-level characters is no longer cut off after 120 abilities.** Dropping thirteen

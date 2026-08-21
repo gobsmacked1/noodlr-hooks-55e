@@ -252,6 +252,36 @@ off a binding did nothing and the action ledger could not see a compiled Multiat
   its own test fail. A test that passes with the bug in place certifies nothing, and both of these would
   have: the fakes warm the cache incidentally, exactly as dropping a token does.
 
+### A handed item is not a new token, and a shapechange is not a new token either (v0.7.14)
+
+Coat of Many Eyes on the Aboleth (noodlr-test, 2026-08-20): Random Loot Generator created the item
+**after** `createToken` had already collected that token, so the collector reported a hit and never
+asked. The same hole is a player handing a magic item to a creature already on the scene — it looks
+inert until a reload. Scene change was not enough for player clients either: `cache.warm()` is
+once-per-session, so a wording the GM compiled after load stayed invisible in memory.
+
+Foundry has no "received inventory" event. The receive signal is `createItem` on an embedded Item
+(`item.actor` is who got it). Losing an item is ignored. `updateItem` only when the prose (or the
+glossary skip) moved — equip / attune / uses / quantity must not schedule a collect. Sidebar-only
+sheets wait until they have a token here. Gold and `flags.dnd5e.cachedFor` clones never schedule.
+
+Other things that spawn onto a scene:
+
+- **Summons already fire `createToken`.** dnd5e's Summon activity, our `summonCreature`, Automated
+  Evocations — all `scene.createEmbeddedDocuments("Token", …)`. The existing token hook reads them.
+  A summoned creature whose sheet was never compiled is a miss and gets bought; a Troll Limb that
+  shares a cached wording costs nothing.
+- **Wild Shape / Polymorph / Shapechange do not.** A linked transform (`Actor#transformInto` on a
+  world actor) creates a **new** actor and retargets the existing token (`updateToken` + `actorId`).
+  An unlinked token rewrites the synthetic actor in place (`updateActor` with `items` /
+  `isPolymorphed`) and **never fires `dnd5e.transformActor`** — that hook is only on the linked
+  branch. Both are listened for. Movement and HP updates are not.
+- **`createActor` alone is not enough.** The new form exists before the token points at it, so
+  `createItem` during actor creation fails `itemIsOnViewedScene`. The token retarget is the moment
+  the sheet is on the scene.
+- Player clients `cache.refresh()` on every collect (merge, do not drop) and retry unread wordings
+  a few times, so a handed item binds without a scene change.
+
 ### Nine of the seventeen triggers are wired, and the sheet has to say so (2026-08-11)
 
 `registerCapabilityExecutor()` attaches a hook to `on_damage_taken`, `on_zero_hp`, `on_turn_start`,

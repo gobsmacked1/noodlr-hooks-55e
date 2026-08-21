@@ -12,6 +12,7 @@ import {
   proseHash,
   put,
   putOverride,
+  refresh,
   remove,
   size,
   warm,
@@ -226,6 +227,20 @@ test("a world writes and reads its shards under its own folder", async () => {
   __reset();
   await warm();
   assert.equal(size(), 1, "and reads them back from there");
+});
+
+test("refresh picks up a wording written after the first warm", async () => {
+  writeDisk(MINE, [cap("7777000000000001")]);
+  await warm();
+  assert.equal(size(), 1);
+
+  writeDisk(MINE, [cap("7777000000000001"), cap("7777000000000002")]);
+  await warm();
+  assert.equal(size(), 1, "warm is once per session and would hide a later compile");
+
+  await refresh();
+  assert.equal(size(), 2);
+  assert.ok(get("7777000000000002"));
 });
 
 test("the pre-0.7.4 shared tree is never read, whatever is sitting in it", async () => {

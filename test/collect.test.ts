@@ -3,12 +3,19 @@ import { beforeEach, test } from "node:test";
 
 import {
   ASK_CAP,
+  __resetCollector,
   __setAskCap,
+  __setCollectDelays,
+  actorDeltaNeedsCollect,
   applyAskCap,
   collectScene,
   featuresOf,
+  itemDeltaNeedsCollect,
+  itemIsOnViewedScene,
+  itemMightCompile,
   registerCapabilityCollector,
   surveyScene,
+  tokenDeltaNeedsCollect,
 } from "../src/capability/collect";
 import { plainText } from "../src/capability/prose";
 import { bindingsFor, clearBindings } from "../src/capability/bindings";
@@ -23,6 +30,15 @@ let answer: (items: any[]) => Record<string, unknown>;
 let compileEnabled: boolean;
 let listening: boolean;
 let uploads: any[];
+let hookListeners: Map<string, ((...args: any[]) => void)[]>;
+
+function fireHook(name: string, ...args: any[]): void {
+  for (const fn of hookListeners.get(name) ?? []) fn(...args);
+}
+
+function flushCollect(ms = 30): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function item(name: string, description: string, over: any = {}) {
   return {
@@ -72,12 +88,15 @@ function scene(actors: any[]) {
 beforeEach(() => {
   cache.__reset();
   clearBindings();
+  __resetCollector();
   __setAskCap(null);
+  __setCollectDelays(5, 5);
   compileCalls = [];
   errors = [];
   compileEnabled = true;
   listening = true;
   uploads = [];
+  hookListeners = new Map();
   answer = (items) =>
     Object.fromEntries(
       items.map((i) => [i.id, { label: i.label, rules: regeneration(i.id).rules }]),
@@ -119,7 +138,11 @@ beforeEach(() => {
   // Nothing has ever been written, so every shard read is a miss.
   (globalThis as any).fetch = async () => ({ ok: false, text: async () => "" });
   (globalThis as any).Hooks = {
-    on: () => {},
+    on: (name: string, fn: (...args: any[]) => void) => {
+      const list = hookListeners.get(name) ?? [];
+      list.push(fn);
+      hookListeners.set(name, list);
+    },
     callAll: (_name: string, payload: any) => {
       if (!listening) return;
       compileCalls.push(payload);
@@ -491,8 +514,142 @@ test("registering onto a canvas that is already drawn still collects", async () 
   };
 
   registerCapabilityCollector();
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  await flushCollect();
 
   assert.equal(compileCalls.length, 1);
   assert.equal(bindingsFor(actor).length, 1);
+});
+
+// ---- Item grant and shapechange ----------------------------------------------------------------
+
+test("equip, spent uses and quantity are not a reason to collect", () => {
+  assert.equal(itemDeltaNeedsCollect({ system: { equipped: true } }), false);
+  assert.equal(itemDeltaNeedsCollect({ system: { uses: { spent: 1 } } }), false);
+  assert.equal(itemDeltaNeedsCollect({ system: { quantity: 2 } }), false);
+  assert.equal(itemDeltaNeedsCollect({ system: { description: { value: "new prose" } } }), true);
+  assert.equal(itemDeltaNeedsCollect({ "system.description.value": "new prose" }), true);
+  assert.equal(itemDeltaNeedsCollect({ name: "Coat of Many Eyes" }), true);
+});
+
+test("a token moving or taking damage is not a reason to collect", () => {
+  assert.equal(tokenDeltaNeedsCollect({ x: 100, y: 200 }), false);
+  assert.equal(tokenDeltaNeedsCollect({ actorId: "Actor.newform" }), true);
+  assert.equal(actorDeltaNeedsCollect({ system: { attributes: { hp: { value: 12 } } } }), false);
+  assert.equal(actorDeltaNeedsCollect({ items: [] }), true);
+  assert.equal(actorDeltaNeedsCollect({ flags: { dnd5e: { isPolymorphed: true } } }), true);
+});
+
+test("gold and cached spell clones never schedule a compile", () => {
+  assert.equal(itemMightCompile({ type: "loot", name: "GP" }), false);
+  assert.equal(
+    itemMightCompile({
+      type: "spell",
+      name: "Fireball",
+      flags: { dnd5e: { cachedFor: "Item.feat" } },
+    }),
+    false,
+  );
+  assert.equal(itemMightCompile({ type: "equipment", name: "Coat of Many Eyes" }), true);
+});
+
+test("handing an unread magic item to a scene creature compiles only that wording", async () => {
+  const regen = "The troll regains 15 Hit Points at the start of each of its turns.";
+  const coat =
+    "While wearing this coat you can see in every direction and you have Advantage on Wisdom (Perception) checks that rely on sight.";
+  const actor = creature("Actor.aboleth", "Aboleth", [item("Regeneration", regen)]);
+  (globalThis as any).canvas = {
+    ready: false,
+    scene: { id: "scene-1", tokens: { contents: [{ actor }] } },
+  };
+  await collectScene(scene([actor]));
+  compileCalls.length = 0;
+
+  registerCapabilityCollector();
+  const granted = item("Coat of Many Eyes", coat, { type: "equipment" });
+  granted.parent = actor;
+  actor.items.push(granted);
+  fireHook("createItem", granted);
+  await flushCollect();
+
+  assert.equal(compileCalls.length, 1, "one collect, not a re-read of the whole sheet");
+  assert.equal(compileCalls[0].items.length, 1);
+  assert.equal(compileCalls[0].items[0].label, "Coat of Many Eyes");
+  assert.equal(bindingsFor(actor).length, 2);
+});
+
+test("a sidebar sheet receiving an item does not compile until it has a token here", async () => {
+  const offScene = creature("Actor.chest", "Chest", []);
+  (globalThis as any).canvas = {
+    ready: false,
+    scene: { id: "scene-1", tokens: { contents: [] } },
+  };
+  registerCapabilityCollector();
+  const granted = item(
+    "Coat of Many Eyes",
+    "While wearing this coat you can see in every direction and you have Advantage on sight checks.",
+    { type: "equipment" },
+  );
+  granted.parent = offScene;
+  fireHook("createItem", granted);
+  await flushCollect();
+
+  assert.equal(compileCalls.length, 0);
+  assert.equal(itemIsOnViewedScene(granted), false);
+});
+
+test("equipping an already-owned item does not schedule a collect", async () => {
+  const text = "The troll regains 15 Hit Points at the start of each of its turns.";
+  const held = item("Regeneration", text);
+  const actor = creature("Actor.a", "Troll", [held]);
+  held.parent = actor;
+  (globalThis as any).canvas = {
+    ready: false,
+    scene: { id: "scene-1", tokens: { contents: [{ actor }] } },
+  };
+  await collectScene(scene([actor]));
+  compileCalls.length = 0;
+
+  registerCapabilityCollector();
+  fireHook("updateItem", held, { system: { equipped: true } });
+  await flushCollect();
+  assert.equal(compileCalls.length, 0);
+});
+
+test("a linked shapechange retargeting the token compiles the new form", async () => {
+  const wolf =
+    "The wolf has Advantage on an attack roll against a creature if at least one of the wolf's allies is within 5 feet of the creature.";
+  const form = creature("Actor.wolf", "Wolf", [item("Pack Tactics", wolf)]);
+  (globalThis as any).canvas = {
+    ready: false,
+    scene: {
+      id: "scene-1",
+      tokens: { contents: [{ actor: form, parent: { id: "scene-1" } }] },
+    },
+  };
+  registerCapabilityCollector();
+  fireHook(
+    "updateToken",
+    { parent: { id: "scene-1" }, actor: form },
+    { actorId: "Actor.wolf" },
+  );
+  await flushCollect();
+
+  assert.equal(compileCalls.length, 1);
+  assert.equal(compileCalls[0].items[0].label, "Pack Tactics");
+});
+
+test("an unlinked transform rewriting the sheet compiles the new items", async () => {
+  const wolf =
+    "The wolf has Advantage on an attack roll against a creature if at least one of the wolf's allies is within 5 feet of the creature.";
+  const form = creature("Actor.unlinked", "Wolf", [item("Pack Tactics", wolf)]);
+  (globalThis as any).canvas = {
+    ready: false,
+    scene: { id: "scene-1", tokens: { contents: [{ actor: form }] } },
+  };
+  registerCapabilityCollector();
+  fireHook("updateActor", form, { items: form.items, flags: { dnd5e: { isPolymorphed: true } } });
+  await flushCollect();
+
+  assert.equal(compileCalls.length, 1);
+  assert.equal(compileCalls[0].items[0].label, "Pack Tactics");
 });

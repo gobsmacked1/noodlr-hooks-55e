@@ -248,6 +248,21 @@ export async function warm(): Promise<void> {
   }
 }
 
+/**
+ * Re-read the shards into memory.
+ *
+ * `warm` is once-per-session on purpose: the capability sheet and every survey share one load.
+ * A wording compiled after that load — a magic item handed to a creature already on the scene —
+ * lands on disk from the primary GM and is invisible here until somebody reads again. Scene change
+ * is not enough: that path also calls `warm`, which no-ops. Merges; does not drop what this client
+ * compiled itself.
+ */
+export async function refresh(): Promise<void> {
+  if (warming) await warming;
+  warmed = false;
+  await warm();
+}
+
 export function get(id: string): Capability | undefined {
   return memory.get(id);
 }
