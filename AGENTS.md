@@ -852,6 +852,23 @@ migrate, so the inherited prefix would have implied one.
   `ActiveAuras` is **active**; DAE alone does not emanate and is not a reason to stand aside.
   Regions stay Phase 4 (`on_enter_area` / Spirit Guardians). Leftover Aura Effects Regions after a
   wipe are not our job. Setting `general.auras`, default on. `noodlrHooks.surveyAuras()`.
+  - **Same identifier, highest number; different identifiers independently (user, 2026-08-21).**
+    Two Paladins both hosting Aura of Protection is one bonus — the +5, not +5 and +3. Protection
+    beside Courage (or any other distinct aura) both apply. The Paladin's own transferred AE
+    *is* their instance: a stronger neighbour writes only the delta, or the +3 and +5 become +8.
+    Hostile auras of the same kind keep the harsher number (`auraDominates`). Not Paladin-only:
+    audience is already `allies | enemies | all`, and discovery is flags / self+radius / identifier
+    rather than a class list.
+  - **Spirit Guardians is the other family, and this layer must not eat it.** PHB 318: 15 ft
+    emanation, Concentration, designate creatures unaffected, Speed halved for everyone else,
+    Wisdom save when the emanation enters a space / a creature enters / they end their turn
+    there, 3d8 Radiant or Necrotic (alignment), half on a success, once per turn, +1d8 per slot
+    above 3rd. That is an occupying **field** (`create_area` / `on_enter_area`), not a copied
+    save bonus. Stock dnd5e ships it as a Save activity plus a Half Speed AE (`mode: 1` × 0.5
+    on every movement key, `transfer: false`). `isOccupyingField` refuses the identifier and
+    any self-radius item with a save-and-damage activity; a hollow DDB stamp that is only
+    movement multipliers is occupying residue and is also refused. Do not tack it onto
+    `rules/aura.ts`. Do not add every MM aura as a name.
 
 ## The design: deterministic NPC combatants
 

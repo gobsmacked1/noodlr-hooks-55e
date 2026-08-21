@@ -10,6 +10,18 @@
 // numbers to write. Formulae are resolved against the SOURCE so an ally gets the Paladin's +5,
 // never their own Charisma. A transferred effect already covers the carrier — applying a second
 // copy there would double it.
+//
+// Two families of emanation, and they do not share an executor:
+//   grant  — copy a resolved AE while a creature is in range (Protection, Courage, a
+//            creature's frightful presence if it is only a standing penalty). Same identifier
+//            from two hosts is ONE instance: the stronger number wins, weaker is dropped.
+//            Different identifiers apply independently. A Paladin's own transferred AE counts
+//            as their instance, so a stronger neighbour writes only the delta.
+//   field  — enter / the emanation moves over you / end of turn, a save, damage, Speed while
+//            inside, creatures the caster designated as unaffected. Spirit Guardians is the
+//            specimen. That is `create_area` / `on_enter_area` (Phase 4), not a save-bonus
+//            copy. Discovery refuses those items so a Half Speed AE with a radius template
+//            cannot be mistaken for Aura of Protection.
 
 import { effectModes } from "../capability/timed";
 import { MODULE_ID } from "../constants";
@@ -110,6 +122,9 @@ export const KNOWN_AURAS: readonly KnownAura[] = [
 
 const KNOWN_BY_ID = new Map(KNOWN_AURAS.map((row) => [row.identifier, row]));
 
+/** Occupying fields. Not grants. Do not add every MM aura here — the save+damage heuristic does. */
+export const OCCUPYING_IDENTIFIERS = new Set(["spirit-guardians"]);
+
 export function knownAuraOf(identifier: string): KnownAura | null {
   return KNOWN_BY_ID.get(String(identifier ?? "").toLowerCase()) ?? null;
 }
@@ -208,6 +223,131 @@ export function audienceMatches(
   return sourceDisp * targetDisp < 0;
 }
 
+export function auraStrength(changes: Array<{ value: string }>): number {
+  let sum = 0;
+  let numeric = false;
+  for (const ch of changes) {
+    const n = Number(ch.value);
+    if (Number.isFinite(n)) {
+      sum += n;
+      numeric = true;
+    }
+  }
+  return numeric ? sum : 0;
+}
+
+export function changesAreNumeric(changes: Array<{ value: string }>): boolean {
+  return changes.some((ch) => Number.isFinite(Number(ch.value)));
+}
+
+/** Same-signed: larger magnitude wins. Mixed: the bonus wins. Two −4 and −2 keep −4. */
+export function auraDominates(a: number, b: number): boolean {
+  if (a >= 0 && b >= 0) return a > b;
+  if (a <= 0 && b <= 0) return a < b;
+  return a > b;
+}
+
+export function netAuraChanges<T extends { key: string; mode: number; value: string }>(
+  changes: T[],
+  ownStrength: number,
+  bestStrength: number,
+): T[] {
+  const delta = bestStrength - ownStrength;
+  let used = false;
+  return changes.map((ch) => {
+    if (used || !Number.isFinite(Number(ch.value))) return ch;
+    used = true;
+    return { ...ch, value: String(delta) };
+  });
+}
+
+/**
+ * Same identifier → one instance. Different identifiers stay.
+ * `ownByIdent` is the recipient's transferred grant of that identifier (the Paladin's own +3).
+ */
+export function collapseOverlappingAuras<
+  T extends { identifier: string; changes: Array<{ key: string; mode: number; value: string }> },
+>(rows: T[], ownByIdent: Record<string, number> = {}): T[] {
+  const groups = new Map<string, T[]>();
+  const unkeyed: T[] = [];
+  for (const row of rows) {
+    const key = String(row.identifier ?? "").toLowerCase();
+    if (!key) {
+      unkeyed.push(row);
+      continue;
+    }
+    const list = groups.get(key) ?? [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  const out: T[] = [...unkeyed];
+  for (const [ident, list] of groups) {
+    let best = list[0];
+    let bestStr = auraStrength(best.changes);
+    for (const row of list.slice(1)) {
+      const s = auraStrength(row.changes);
+      if (auraDominates(s, bestStr)) {
+        best = row;
+        bestStr = s;
+      }
+    }
+    const own = Number(ownByIdent[ident] ?? 0);
+    if (changesAreNumeric(best.changes)) {
+      if (!auraDominates(bestStr, own)) continue;
+      if (own !== 0) {
+        out.push({ ...best, changes: netAuraChanges(best.changes, own, bestStr) });
+        continue;
+      }
+    }
+    out.push(best);
+  }
+  return out;
+}
+
+function itemHasEmanationSave(item: any): boolean {
+  const sys = item?.system ?? {};
+  const itemIsSelfRadius =
+    String(sys.range?.units ?? "") === "self" && String(sys.target?.template?.type ?? "") === "radius";
+  for (const act of activitiesOf(item)) {
+    const save = String(act?.type ?? "") === "save" || Boolean(act?.save?.ability);
+    const parts = act?.damage?.parts;
+    const dmg = Array.isArray(parts) && parts.length > 0;
+    if (!save || !dmg) continue;
+    if (itemIsSelfRadius) return true;
+    if (
+      String(act?.range?.units ?? "") === "self" &&
+      String(act?.target?.template?.type ?? "") === "radius"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Spirit Guardians and anything else that saves-and-hurts inside a self emanation. */
+export function isOccupyingField(item: any): boolean {
+  if (OCCUPYING_IDENTIFIERS.has(identifierOf(item))) return true;
+  return itemHasEmanationSave(item);
+}
+
+/**
+ * Half Speed on Spirit Guardians is all movement multipliers. A grant that ADDs walk speed
+ * is not this — mode and a value in (0, 1) are what make it a field residue.
+ */
+export function changesAreOccupyingResidue(
+  changes: Array<{ key: string; value: string; mode?: number }>,
+): boolean {
+  if (!changes.length) return false;
+  const mul = effectModes().multiply;
+  return changes.every((ch) => {
+    if (!/^system\.attributes\.movement\./.test(String(ch.key ?? ""))) return false;
+    const mode = Number(ch.mode);
+    const n = Number(ch.value);
+    if (Number.isFinite(mode) && mode === mul) return true;
+    return Number.isFinite(n) && n > 0 && n < 1;
+  });
+}
+
 function aaFlags(effect: any): Record<string, unknown> | null {
   const flags = effect?.flags?.ActiveAuras ?? effect?.flags?.activeauras;
   return flags && typeof flags === "object" ? flags : null;
@@ -263,6 +403,7 @@ export function auraSourcesOn(actor: any): AuraSource[] {
   const out: AuraSource[] = [];
   if (!actor) return out;
   for (const item of actor.items ?? []) {
+    if (isOccupyingField(item)) continue;
     const ident = identifierOf(item);
     const known = knownAuraOf(ident);
     const activityRadius = radiusFromActivities(item);
@@ -271,6 +412,7 @@ export function auraSourcesOn(actor: any): AuraSource[] {
     for (const effect of effects) {
       const aa = aaFlags(effect);
       const listed = changesOf(effect);
+      if (changesAreOccupyingResidue(listed) && !known) continue;
       const isAura = Boolean(aa?.isAura) || Boolean(known) || (Boolean(activityRadius) && listed.length > 0);
       if (!isAura) continue;
       const changes = listed.length > 0 ? listed : known ? fallbackChanges(known) : [];

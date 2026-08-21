@@ -9,6 +9,11 @@
 // distance, and we already have one answer to that. Regions are the right primitive for
 // `create_area` / Spirit Guardians (Phase 4); they are more machinery than a Paladin aura needs.
 //
+// Same identifier, two hosts → the stronger number, not both. Different identifiers
+// (Protection + Courage, or a hostile field next to a Paladin aura) apply independently.
+// A Paladin's transferred AE is their own instance: a stronger neighbour writes the delta
+// so +3 and +5 become +5, never +8.
+//
 // Writes are primary-GM only. A player's aura is applied to other sheets, and only the GM can
 // write those. Formulae are resolved against the source before the copy is written, so an ally
 // gets the Paladin's Charisma, never their own.
@@ -20,8 +25,11 @@ import { isIncapacitated } from "../system/dnd5e-conditions";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   type AuraSource,
+  auraDominates,
   auraModuleOwns,
   auraSourcesOn,
+  auraStrength,
+  collapseOverlappingAuras,
   resolveAuraRadius,
   resolveAuraValue,
   audienceMatches,
@@ -39,6 +47,7 @@ interface AuraFlag {
 }
 
 interface Desired {
+  identifier: string;
   source: AuraSource;
   sourceTokenId: string;
   sourceName: string;
@@ -114,6 +123,19 @@ function resolveChanges(source: AuraSource, data: unknown): Desired["changes"] {
   }));
 }
 
+/** The recipient's own transferred grant of each identifier — their instance of that aura. */
+function ownTransferredStrengths(actor: any): Record<string, number> {
+  const data = rollDataOf(actor);
+  const out: Record<string, number> = {};
+  for (const source of auraSourcesOn(actor)) {
+    if (!source.transferSelf || !source.identifier) continue;
+    const s = auraStrength(resolveChanges(source, data));
+    const prev = out[source.identifier];
+    if (prev == null || auraDominates(s, prev)) out[source.identifier] = s;
+  }
+  return out;
+}
+
 function desiredForScene(): Map<string, Desired[]> {
   const wanted = new Map<string, Desired[]>();
   if (!isAurasEnabled() || auraModuleOwns() || !isDnd5e()) return wanted;
@@ -134,6 +156,7 @@ function desiredForScene(): Map<string, Desired[]> {
         if (!key) continue;
         const list = wanted.get(key) ?? [];
         list.push({
+          identifier: source.identifier,
           source,
           sourceTokenId,
           sourceName: String(token.document?.name ?? actor?.name ?? "?"),
@@ -237,7 +260,7 @@ async function refreshAuras(): Promise<void> {
     const id = String(actor?.uuid ?? actor?.id ?? "");
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const desired = wanted.get(id) ?? [];
+    const desired = collapseOverlappingAuras(wanted.get(id) ?? [], ownTransferredStrengths(actor));
     if (!desired.length) {
       removed += await stripActor(actor);
       continue;

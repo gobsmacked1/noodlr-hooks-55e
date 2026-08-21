@@ -5,8 +5,12 @@ import {
   KNOWN_AURAS,
   audienceMatches,
   audienceOfFlag,
+  auraDominates,
   auraSourcesOn,
+  auraStrength,
+  collapseOverlappingAuras,
   interpolateAtRefs,
+  isOccupyingField,
   knownAuraOf,
   receivesOwnAura,
   resolveAuraRadius,
@@ -190,4 +194,113 @@ test("Aura of Life waits for the spell to be up", () => {
     effects: [{ name: "Aura of Life", origin: "Actor.x.Item.life", disabled: false, flags: {} }],
   };
   assert.equal(spellAuraIsActive(up, sources[0]), true);
+});
+
+test("two Protection auras keep the higher bonus; Protection and Courage both stay", () => {
+  const prot5 = {
+    identifier: "aura-of-protection",
+    changes: [{ key: "system.bonuses.abilities.save", mode: 2, value: "5" }],
+  };
+  const prot3 = {
+    identifier: "aura-of-protection",
+    changes: [{ key: "system.bonuses.abilities.save", mode: 2, value: "3" }],
+  };
+  const courage = {
+    identifier: "aura-of-courage",
+    changes: [{ key: "system.traits.ci.value", mode: 2, value: "frightened" }],
+  };
+  const same = collapseOverlappingAuras([prot5, prot3]);
+  assert.equal(same.length, 1);
+  assert.equal(same[0].changes[0].value, "5");
+  const mixed = collapseOverlappingAuras([prot5, courage]);
+  assert.equal(mixed.length, 2);
+  assert.ok(mixed.some((r) => r.identifier === "aura-of-protection"));
+  assert.ok(mixed.some((r) => r.identifier === "aura-of-courage"));
+});
+
+test("two Courage auras collapse to one; a Paladin's own +3 only takes the neighbour's extra +2", () => {
+  const a = {
+    identifier: "aura-of-courage",
+    changes: [{ key: "system.traits.ci.value", mode: 2, value: "frightened" }],
+  };
+  const b = {
+    identifier: "aura-of-courage",
+    changes: [{ key: "system.traits.ci.value", mode: 2, value: "frightened" }],
+  };
+  assert.equal(collapseOverlappingAuras([a, b]).length, 1);
+  const incoming = {
+    identifier: "aura-of-protection",
+    changes: [{ key: "system.bonuses.abilities.save", mode: 2, value: "5" }],
+  };
+  const net = collapseOverlappingAuras([incoming], { "aura-of-protection": 3 });
+  assert.equal(net.length, 1);
+  assert.equal(net[0].changes[0].value, "2");
+  assert.equal(collapseOverlappingAuras([incoming], { "aura-of-protection": 5 }).length, 0);
+  assert.equal(collapseOverlappingAuras([incoming], { "aura-of-protection": 6 }).length, 0);
+});
+
+test("two hostile auras of the same kind keep the harsher number", () => {
+  assert.equal(auraDominates(-4, -2), true);
+  assert.equal(auraStrength([{ value: "-4" }]), -4);
+  const kept = collapseOverlappingAuras([
+    { identifier: "frightful-presence", changes: [{ key: "x", mode: 2, value: "-2" }] },
+    { identifier: "frightful-presence", changes: [{ key: "x", mode: 2, value: "-4" }] },
+  ]);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].changes[0].value, "-4");
+});
+
+test("Spirit Guardians is an occupying field, never a grant aura", () => {
+  const item = {
+    id: "sg",
+    name: "Spirit Guardians",
+    type: "spell",
+    system: {
+      identifier: "spirit-guardians",
+      range: { units: "self" },
+      target: { template: { type: "radius", size: "15" } },
+      activities: {
+        save: {
+          type: "save",
+          save: { ability: "wis" },
+          damage: { parts: [{ number: 3, denomination: 8, types: ["radiant"] }] },
+          range: { units: "ft", value: "15" },
+        },
+      },
+    },
+    effects: [
+      {
+        id: "half",
+        name: "Half Speed",
+        transfer: false,
+        changes: [
+          { key: "system.attributes.movement.walk", mode: 1, value: "0.5" },
+          { key: "system.attributes.movement.fly", mode: 1, value: "0.5" },
+        ],
+        flags: { ActiveAuras: { isAura: true, aura: "Enemy", radius: "15" } },
+      },
+    ],
+  };
+  assert.equal(isOccupyingField(item), true);
+  assert.equal(auraSourcesOn({ items: [item] }).length, 0);
+});
+
+test("a DDB Half Speed stamp without the identifier is still not a grant", () => {
+  const item = {
+    id: "hollow",
+    name: "Spirit Guardians",
+    type: "spell",
+    system: { identifier: "" },
+    effects: [
+      {
+        id: "half",
+        name: "Half Speed",
+        transfer: false,
+        changes: [{ key: "system.attributes.movement.walk", mode: 1, value: "0.5" }],
+        flags: { ActiveAuras: { isAura: true, aura: "Enemy", radius: "15" } },
+      },
+    ],
+  };
+  assert.equal(isOccupyingField(item), false);
+  assert.equal(auraSourcesOn({ items: [item] }).length, 0);
 });

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.16
+
+**Two Paladins do not stack the same aura.** Two Aura of Protection write the higher bonus,
+not both. Protection beside Courage (or any other distinct aura) still both apply. The
+Paladin's own transferred bonus counts as their instance, so a +3 Paladin standing in a
++5 neighbour's aura gets +5, not +8. Hostile auras of the same kind keep the harsher
+number. Not Paladin-only — any grant that shares an identifier collapses this way.
+
+**Spirit Guardians is not a copied save bonus.** It is an occupying field (Speed halved
+inside, Wisdom save when the emanation enters or a creature enters or ends its turn there,
+damage once per turn). The grant layer now refuses it — including a hollow DDB stamp that
+is only movement multipliers — so a Half Speed effect cannot be mistaken for Aura of
+Protection. The field itself is still Phase 4.
+
 ## 0.7.15
 
 **Leaving melee without Disengage now offers the opportunity attack.** The Archmage
