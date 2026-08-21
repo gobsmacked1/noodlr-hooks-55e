@@ -867,18 +867,25 @@ migrate, so the inherited prefix would have implied one.
     draws `temporaryEffects` (a duration or a status) on the upper-right of the token.
     A canned id would overlay Paralyzed / Frightened. Token HUD skips `hud: false`
     (`token-hud.mjs` `_getStatusEffectChoices`), so there is no click-toggle.
-    `auraStatusId` is `noodlr-aura-of-protection`. Also `flags.dnd5e.isTemporary`.
-    Stamp those onto the Paladin's **existing transferred AE** — never a second
-    document. v0.7.19 wrote a hollow badge with the same name and origin; a
-    same-origin create (or DAE merging by name) landed empty `changes` and our
+    `auraStatusId` is `noodlr-aura-of-protection`. Token icons come from
+    `statuses` plus v14 `showIcon: ALWAYS` — **never** `flags.dnd5e.isTemporary`.
+    That flag is dnd5e's timed-effect marker; with v14 `showIcon: CONDITIONAL`
+    the token icon follows duration, and an item-parented stamp is
+    `isSuppressed` when the feat is unequipped — **Unavailable Effects**.
+    Icons vanished until someone walked (recreate). Protection's +Cha lives on `item.effects`
+    (`transfer: true`); Courage is `transfer: false` and already gets an actor
+    copy from `desired`. v0.7.19–v0.7.20 stamped the sheet AE and never found
+    it on `actor.effects`. **Fixed in v0.7.21.** Host icon is now a separate actor badge: empty
+    `changes`, `flags.<ns>.auraHost` (not `aura`), origin is the actor, no
+    item origin. Repair unstamps / re-enables a previously disabled transferred
+    AE. v0.7.19 wrote a hollow badge with the same name and origin; a
+    same-origin create landed empty `changes` and our
     delete flag on the sheet AE. Allies still got copies (those are read off the
     item). The Paladin lost their own bonus when the poll deleted "ours" or when
     the merge gutted the grant. **Fixed in v0.7.20:** `looksLikeGuttedHostAura`
-    restores the item numbers and drops our flag before `stripActor`. Presentation
-    updates use dotted `flags.dnd5e.isTemporary` so they cannot replace that
-    namespace.
+    restores the item numbers and drops our flag before `stripActor`.
     Automated Animations matches "Aura of Protection" as a persistent aefx —
-    copies and the stamped host AE write `flags.autoanimations.killAnim`.
+    copies and the host badge write `flags.autoanimations.killAnim`.
     Sequencer persistents already playing need the Effect Manager once.
   - **Same identifier, highest number; different identifiers independently (user, 2026-08-21).**
     Two Paladins both hosting Aura of Protection is one bonus — the +5, not +5 and +3. Protection

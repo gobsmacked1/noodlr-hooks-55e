@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.21
+
+**The Paladin shows Aura of Protection as well as Courage, and the icons stay.** Allies
+already received both copies. The Paladin only showed Courage, because Protection's +Cha
+lives on the feat (`item.effects`, `transfer: true`) and the last two releases stamped
+the token icon onto that document — which they then looked for on `actor.effects`, where
+it never is. Courage is `transfer: false` and already had an actor copy. Those stamps
+also set `flags.dnd5e.isTemporary`, so dnd5e filed them as timed effects. They landed in
+Unavailable Effects and dropped off the token until someone walked and recreated them.
+
+Protection's icon is now a separate actor badge: empty changes (no second +Cha), its own
+flag, no item origin. The feat's transferred bonus is left alone, and a previously
+disabled one is re-enabled. Copies no longer carry the temporary flag. A leftover twin
+from v0.7.20 is deleted.
+
 ## 0.7.20
 
 **The Paladin no longer loses his own Aura of Protection.** v0.7.19 created a hollow

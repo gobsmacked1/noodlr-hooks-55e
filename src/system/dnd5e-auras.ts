@@ -347,12 +347,35 @@ export function registerKnownAuraStatuses(): void {
   }
 }
 
+/**
+ * v14 `CONST.ACTIVE_EFFECT_SHOW_ICON.ALWAYS`. Default is CONDITIONAL (icon only while
+ * the effect has a temporary duration). A Paladin aura is permanent. The flag
+ * `flags.dnd5e.isTemporary` is dnd5e's "this is a timed effect" marker — it files
+ * the row under Temporary and, with CONDITIONAL, ties the token icon to duration.
+ * Do not set it. v13 has no showIcon and drops the key.
+ */
+export const AURA_SHOW_ICON_ALWAYS = 2;
+
+/** Presentation-only badge on the carrier. Not `aura` — apply/strip must not delete it. */
+export const AURA_HOST_FLAG = "auraHost";
+
 export function auraWriteFlags(sourceToken: string, sourceId: string): Record<string, unknown> {
   return {
     [MODULE_ID]: { aura: { sourceToken, sourceId } },
-    dnd5e: { isTemporary: true },
     autoanimations: { ...AURA_AA_FLAGS },
   };
+}
+
+export function auraHostWriteFlags(sourceId: string): Record<string, unknown> {
+  return {
+    [MODULE_ID]: { [AURA_HOST_FLAG]: { sourceId } },
+    autoanimations: { ...AURA_AA_FLAGS },
+  };
+}
+
+export function isOurAuraHost(effect: any): boolean {
+  const flag = effect?.flags?.[MODULE_ID]?.[AURA_HOST_FLAG];
+  return Boolean(flag && typeof flag === "object" && flag.sourceId);
 }
 
 /** Dotted paths so an update cannot replace `flags.dnd5e` and wipe dependents. */
@@ -360,7 +383,8 @@ export function auraPresentationPatch(statusId: string, img: string): Record<str
   return {
     statuses: [statusId],
     img,
-    "flags.dnd5e.isTemporary": true,
+    showIcon: AURA_SHOW_ICON_ALWAYS,
+    "flags.dnd5e.-=isTemporary": null,
     "flags.autoanimations.killAnim": true,
     "flags.autoanimations.isEnabled": false,
     "flags.autoanimations.version": 99,
@@ -378,29 +402,129 @@ export function hostNeedsPresentation(effect: any, statusId: string, img: string
   if (!effectHasStatus(effect, statusId)) return true;
   const aa = effect?.flags?.autoanimations;
   if (!aa?.killAnim && aa?.isEnabled !== false) return true;
-  if (effect?.flags?.dnd5e?.isTemporary !== true) return true;
+  if (effect?.flags?.dnd5e?.isTemporary === true) return true;
+  if (effect?.disabled || effect?.duration?.expired) return true;
   return Boolean(img) && String(effect?.img ?? "") !== img;
 }
 
+export function withoutAuraStatuses(effect: any): string[] {
+  const raw = effect?.statuses;
+  const list = raw instanceof Set ? [...raw] : Array.isArray(raw) ? [...raw] : [];
+  return list.filter((id) => !String(id).startsWith(AURA_STATUS_PREFIX) && !String(id).startsWith("noodlr-aura-"));
+}
+
+export function transferredNeedsRepair(effect: any): boolean {
+  if (!effect) return false;
+  if (effect.disabled || effect.duration?.expired) return true;
+  if (effect.flags?.dnd5e?.isTemporary === true) return true;
+  if (effect.flags?.[MODULE_ID]?.aura) return true;
+  return withoutAuraStatuses(effect).length !== (
+    effect.statuses instanceof Set ? effect.statuses.size : Array.isArray(effect.statuses) ? effect.statuses.length : 0
+  );
+}
+
+/** Undo a v0.7.19–v0.7.20 stamp on the item-transferred AE (statuses / isTemporary). */
+export function transferredRepairPatch(effect: any): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    disabled: false,
+    "flags.dnd5e.-=isTemporary": null,
+    [`flags.${MODULE_ID}.-=aura`]: null,
+  };
+  const kept = withoutAuraStatuses(effect);
+  const before = effect?.statuses instanceof Set
+    ? effect.statuses.size
+    : Array.isArray(effect?.statuses)
+      ? effect.statuses.length
+      : 0;
+  if (kept.length !== before) patch.statuses = kept;
+  return patch;
+}
+
 /**
- * The sheet-transferred AE on the Paladin. Never ours — no `flags.<ns>.aura`.
+ * Transferred item AEs live on `item.effects`, not `actor.effects`. Walking only the
+ * actor collection is why Aura of Protection never got a host icon (Courage is
+ * `transfer: false` and already has an actor copy).
+ */
+export function applicableAuraEffects(actor: any): any[] {
+  if (!actor) return [];
+  if (typeof actor.allApplicableEffects === "function") {
+    try {
+      return [...actor.allApplicableEffects()];
+    } catch {
+      // fall through
+    }
+  }
+  const out: any[] = [...(actor.effects ?? [])];
+  const seen = new Set(out);
+  for (const item of actor.items ?? []) {
+    for (const effect of item.effects ?? []) {
+      if (!effect?.transfer || seen.has(effect)) continue;
+      seen.add(effect);
+      out.push(effect);
+    }
+  }
+  return out;
+}
+
+/**
+ * The sheet-transferred AE, including a disabled one we have to revive.
  * Origin is the item; name is a fallback when an importer dropped origin.
  */
-export function looksLikeTransferredAura(effect: any, source: AuraSource): boolean {
-  if (!effect || effect.disabled) return false;
+export function looksLikeHostItemAura(effect: any, source: AuraSource): boolean {
+  if (!effect) return false;
   if (effect.flags?.[MODULE_ID]?.aura) return false;
+  if (isOurAuraHost(effect)) return false;
   const origin = String(effect.origin ?? "");
   if (source.itemId && origin.includes(source.itemId)) return true;
   const named = String(effect.name ?? "").toLowerCase() === source.name.toLowerCase();
   return named && Array.isArray(effect.changes) && effect.changes.length > 0;
 }
 
+/** Live (not disabled) transferred AE — the Paladin's own mechanical grant. */
+export function looksLikeTransferredAura(effect: any, source: AuraSource): boolean {
+  if (effect?.disabled) return false;
+  return looksLikeHostItemAura(effect, source);
+}
+
 /**
- * v0.7.19 wrote a hollow badge with the transferred AE's name and origin. DAE / same-origin
- * create can merge that into the sheet AE: empty changes, our delete flag. Allies still
+ * v0.7.20 recreate wrote a full-changes AE onto the actor when it could not see
+ * the item-transferred one. That doubles +Cha. Only delete if it still carries
+ * our stamp — a legacy-transferred actor copy has neither.
+ */
+export function looksLikeStrayHostCopy(effect: any, source: AuraSource): boolean {
+  if (!effect || effect.transfer) return false;
+  if (effect.flags?.[MODULE_ID]?.aura) return false;
+  if (isOurAuraHost(effect)) return false;
+  if (!looksLikeHostItemAura(effect, source)) return false;
+  if (effect.flags?.dnd5e?.isTemporary === true) return true;
+  const raw = effect.statuses;
+  const n = raw instanceof Set ? raw.size : Array.isArray(raw) ? raw.length : 0;
+  return n > 0 && withoutAuraStatuses(effect).length !== n;
+}
+
+export function hostTransferredEffect(actor: any, source: AuraSource): any | null {
+  if (!actor || !source) return null;
+  for (const item of actor.items ?? []) {
+    if (source.itemId && String(item.id) !== source.itemId) continue;
+    for (const effect of item.effects ?? []) {
+      if (!effect?.transfer) continue;
+      if (source.effectId && String(effect.id) === source.effectId) return effect;
+      if (looksLikeHostItemAura(effect, source)) return effect;
+    }
+  }
+  for (const effect of applicableAuraEffects(actor)) {
+    if (looksLikeHostItemAura(effect, source)) return effect;
+  }
+  return null;
+}
+
+/**
+ * v0.7.19 wrote a hollow badge with the transferred AE's name and origin. Same-origin
+ * create can land that on the sheet AE: empty changes, our delete flag. Allies still
  * receive copies (those are read off the item). The Paladin has lost their own bonus.
  */
 export function looksLikeGuttedHostAura(effect: any, source: AuraSource): boolean {
+  if (isOurAuraHost(effect)) return false;
   const flag = effect?.flags?.[MODULE_ID]?.aura;
   if (!flag || typeof flag !== "object") return false;
   if (Array.isArray(effect?.changes) && effect.changes.length > 0) return false;

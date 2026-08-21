@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   AURA_AA_FLAGS,
+  AURA_HOST_FLAG,
+  AURA_SHOW_ICON_ALWAYS,
   KNOWN_AURAS,
   audienceMatches,
   audienceOfFlag,
@@ -12,13 +14,18 @@ import {
   auraStatusId,
   auraStrength,
   auraPresentationPatch,
+  auraHostWriteFlags,
   auraWriteFlags,
   collapseOverlappingAuras,
   hostNeedsPresentation,
+  hostTransferredEffect,
   interpolateAtRefs,
   isOccupyingField,
   knownAuraOf,
+  isOurAuraHost,
   looksLikeGuttedHostAura,
+  looksLikeHostItemAura,
+  looksLikeStrayHostCopy,
   looksLikeTransferredAura,
   normalizeRadiusFormula,
   paladinAuraRadiusAtLevel,
@@ -27,6 +34,8 @@ import {
   resolveAuraRadius,
   resolveAuraValue,
   spellAuraIsActive,
+  transferredNeedsRepair,
+  transferredRepairPatch,
 } from "../src/system/dnd5e-auras";
 
 const paladin = {
@@ -74,16 +83,16 @@ test("aura token icons use a status id that is never a canned condition", () => 
   assert.equal(entry.id, "noodlr-aura-of-protection");
 });
 
-test("aura copies kill Automated Animations and mark themselves temporary", () => {
+test("aura copies kill Automated Animations and are not marked temporary", () => {
   assert.equal(AURA_AA_FLAGS.killAnim, true);
   assert.equal(AURA_AA_FLAGS.isEnabled, false);
   const flags = auraWriteFlags("tok", "src") as {
     autoanimations: { killAnim: boolean; version: number };
-    dnd5e: { isTemporary: boolean };
+    dnd5e?: { isTemporary?: boolean };
   };
   assert.equal(flags.autoanimations.killAnim, true);
   assert.equal(flags.autoanimations.version, 99);
-  assert.equal(flags.dnd5e.isTemporary, true);
+  assert.equal(flags.dnd5e, undefined);
 });
 
 test("2024 Paladin aura radius is a flat 10 → 30 jump at 18, not a curve", () => {
@@ -279,9 +288,13 @@ test("an ally copy with real changes is not a gutted host aura", () => {
 
 test("host presentation is a dotted patch and does not replace flags.dnd5e", () => {
   const patch = auraPresentationPatch("noodlr-aura-of-protection", "icons/svg/aura.svg");
-  assert.equal(patch["flags.dnd5e.isTemporary"], true);
+  assert.equal(patch.showIcon, AURA_SHOW_ICON_ALWAYS);
+  assert.equal(patch["flags.dnd5e.-=isTemporary"], null);
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, "flags.dnd5e.isTemporary"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(patch, "flags"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(patch, "dnd5e"), false);
+  const flags = auraWriteFlags("tok", "prot:fx");
+  assert.equal((flags.dnd5e as { isTemporary?: boolean } | undefined)?.isTemporary, undefined);
   const bare = {
     img: "icons/svg/mystery-man.svg",
     statuses: [],
@@ -291,9 +304,94 @@ test("host presentation is a dotted patch and does not replace flags.dnd5e", () 
   const stamped = {
     img: "icons/svg/aura.svg",
     statuses: ["noodlr-aura-of-protection"],
-    flags: { dnd5e: { isTemporary: true }, autoanimations: { killAnim: true, isEnabled: false } },
+    flags: { autoanimations: { killAnim: true, isEnabled: false } },
   };
   assert.equal(hostNeedsPresentation(stamped, "noodlr-aura-of-protection", "icons/svg/aura.svg"), false);
+  const leftoverTemp = {
+    ...stamped,
+    flags: { dnd5e: { isTemporary: true }, autoanimations: { killAnim: true, isEnabled: false } },
+  };
+  assert.equal(hostNeedsPresentation(leftoverTemp, "noodlr-aura-of-protection", "icons/svg/aura.svg"), true);
+});
+
+test("Aura of Protection's transferred AE lives on the item, not actor.effects", () => {
+  const source = {
+    id: "prot:fx",
+    itemId: "prot",
+    effectId: "fx",
+    identifier: "aura-of-protection",
+    name: "Protected",
+  } as any;
+  const itemEffect = {
+    id: "fx",
+    name: "Protected",
+    transfer: true,
+    origin: "Actor.p.Item.prot",
+    changes: [{ key: "system.bonuses.abilities.save", value: "@abilities.cha.mod" }],
+    disabled: true,
+    flags: { dnd5e: { isTemporary: true } },
+    statuses: ["noodlr-aura-of-protection"],
+  };
+  const actor = {
+    effects: [],
+    items: [{ id: "prot", effects: [itemEffect] }],
+  };
+  assert.equal(looksLikeTransferredAura(itemEffect, source), false);
+  assert.equal(looksLikeHostItemAura(itemEffect, source), true);
+  assert.equal(hostTransferredEffect(actor, source), itemEffect);
+  assert.equal(transferredNeedsRepair(itemEffect), true);
+  const repair = transferredRepairPatch(itemEffect);
+  assert.equal(repair.disabled, false);
+  assert.equal(repair["flags.dnd5e.-=isTemporary"], null);
+  assert.deepEqual(repair.statuses, []);
+});
+
+test("the Paladin host badge is not an aura copy and is not the sheet AE", () => {
+  const source = {
+    id: "prot:fx",
+    itemId: "prot",
+    identifier: "aura-of-protection",
+    name: "Aura of Protection",
+  } as any;
+  const badge = {
+    name: "Aura of Protection",
+    origin: "Actor.p",
+    changes: [],
+    flags: { "noodlr-hooks-55e": { [AURA_HOST_FLAG]: { sourceId: "prot:fx" } } },
+  };
+  assert.equal(isOurAuraHost(badge), true);
+  assert.equal(looksLikeGuttedHostAura(badge, source), false);
+  assert.equal(looksLikeTransferredAura(badge, source), false);
+  const flags = auraHostWriteFlags("prot:fx");
+  assert.deepEqual((flags["noodlr-hooks-55e"] as { auraHost: { sourceId: string } }).auraHost, {
+    sourceId: "prot:fx",
+  });
+  assert.equal((flags["noodlr-hooks-55e"] as { aura?: unknown }).aura, undefined);
+});
+
+test("a v0.7.20 actor twin of the transferred AE is a stray copy", () => {
+  const source = {
+    id: "prot:fx",
+    itemId: "prot",
+    identifier: "aura-of-protection",
+    name: "Aura of Protection",
+  } as any;
+  const stray = {
+    name: "Aura of Protection",
+    origin: "Actor.p.Item.prot",
+    transfer: false,
+    changes: [{ key: "system.bonuses.abilities.save", value: "5" }],
+    flags: { dnd5e: { isTemporary: true } },
+  };
+  assert.equal(looksLikeStrayHostCopy(stray, source), true);
+  const legacy = {
+    name: "Aura of Protection",
+    origin: "Actor.p.Item.prot",
+    transfer: true,
+    changes: [{ key: "system.bonuses.abilities.save", value: "5" }],
+    flags: { dnd5e: {} },
+  };
+  assert.equal(looksLikeStrayHostCopy(legacy, source), false);
 });
 
 test("Aura of Courage with an empty tracker AE still grants frightened immunity", () => {

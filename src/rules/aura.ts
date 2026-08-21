@@ -33,18 +33,24 @@ import {
   type AuraSource,
   auraDominates,
   auraModuleOwns,
-  AURA_AA_FLAGS,
+  AURA_HOST_FLAG,
+  AURA_SHOW_ICON_ALWAYS,
   AURA_STATUS_IMG,
   auraSourcesOn,
   auraStatusId,
   auraStrength,
   auraPresentationPatch,
+  auraHostWriteFlags,
   auraWriteFlags,
   collapseOverlappingAuras,
   hostNeedsPresentation,
+  hostTransferredEffect,
+  isOurAuraHost,
   looksLikeGuttedHostAura,
-  looksLikeTransferredAura,
+  looksLikeStrayHostCopy,
   paladinClassLevel,
+  transferredNeedsRepair,
+  transferredRepairPatch,
   registerAuraStatus,
   registerKnownAuraStatuses,
   resolveAuraRadius,
@@ -253,13 +259,14 @@ function aaKilled(effect: any): boolean {
   return Boolean(aa?.killAnim) || aa?.isEnabled === false;
 }
 
-function markedTemporary(effect: any): boolean {
-  return effect?.flags?.dnd5e?.isTemporary === true;
+function effectIsStale(effect: any): boolean {
+  return Boolean(effect?.disabled || effect?.duration?.expired);
 }
 
 function samePresentation(effect: any, row: Desired): boolean {
   if (!hasAuraStatus(effect, statusOf(row))) return false;
-  if (!aaKilled(effect) || !markedTemporary(effect)) return false;
+  if (!aaKilled(effect)) return false;
+  if (effect?.flags?.dnd5e?.isTemporary === true) return false;
   const want = String(row.source.img || AURA_STATUS_IMG);
   return String(effect?.img ?? "") === want;
 }
@@ -273,6 +280,7 @@ function effectPayload(row: Desired): Record<string, unknown> {
     origin: row.source.origin,
     transfer: false,
     disabled: false,
+    showIcon: AURA_SHOW_ICON_ALWAYS,
     statuses: [statusOf(row)],
     changes: row.changes,
     flags: auraWriteFlags(row.sourceTokenId, row.source.id),
@@ -320,7 +328,7 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
       return flag && `${flag.sourceToken}:${flag.sourceId}` === key;
     });
     if (have) {
-      if (sameChanges(have, row.changes) && samePresentation(have, row) && !have.disabled) continue;
+      if (sameChanges(have, row.changes) && samePresentation(have, row) && !effectIsStale(have)) continue;
       try {
         await have.update(effectRefresh(row));
         wrote += 1;
@@ -359,10 +367,7 @@ function hostSources(actor: any): AuraSource[] {
 }
 
 function transferredOn(actor: any, source: AuraSource): any | null {
-  for (const effect of actor?.effects ?? []) {
-    if (looksLikeTransferredAura(effect, source)) return effect;
-  }
-  return null;
+  return hostTransferredEffect(actor, source);
 }
 
 function guttedOn(actor: any, source: AuraSource): any | null {
@@ -380,89 +385,129 @@ async function dropOurFlag(effect: any): Promise<void> {
   await effect.update({ [`flags.${MODULE_ID}.-=${FLAG}`]: null });
 }
 
+function ourHostBadge(effect: any): { sourceId: string } | null {
+  const flag = effect?.flags?.[MODULE_ID]?.[AURA_HOST_FLAG];
+  if (!flag || typeof flag !== "object" || !flag.sourceId) return null;
+  return { sourceId: String(flag.sourceId) };
+}
+
+async function stripHostBadges(actor: any, keep = new Set<string>()): Promise<number> {
+  let n = 0;
+  for (const effect of [...(actor?.effects ?? [])]) {
+    const badge = ourHostBadge(effect);
+    if (!badge) continue;
+    if (keep.has(badge.sourceId)) continue;
+    try {
+      await effect.delete();
+      n += 1;
+    } catch (err) {
+      warn(`aura: could not drop host badge "${String(effect.name)}" from ${String(actor?.name)}:`, err);
+    }
+  }
+  return n;
+}
+
+function hostBadgePayload(source: AuraSource, actor: any, status: string, img: string): Record<string, unknown> {
+  return {
+    name: source.name,
+    img,
+    origin: String(actor?.uuid ?? ""),
+    transfer: false,
+    disabled: false,
+    showIcon: AURA_SHOW_ICON_ALWAYS,
+    statuses: [status],
+    changes: [],
+    flags: auraHostWriteFlags(source.id),
+  };
+}
+
+function hostBadgeRefresh(source: AuraSource, actor: any, status: string, img: string): Record<string, unknown> {
+  return {
+    name: source.name,
+    img,
+    origin: String(actor?.uuid ?? ""),
+    transfer: false,
+    disabled: false,
+    changes: [],
+    ...auraPresentationPatch(status, img),
+    [`flags.${MODULE_ID}.${AURA_HOST_FLAG}`]: { sourceId: source.id },
+  };
+}
+
 /**
- * The Paladin's +Cha is the sheet-transferred AE. v0.7.19 created a second document
- * with the same name and origin and empty changes so the token would show an icon.
- * Same-origin create (and DAE's name merge) can land that payload on the transferred
- * AE itself: the Paladin loses the bonus, allies still get copies read off the item.
- * Stamp the existing document. Never create a hollow twin. Restore a gutted one
- * before `stripActor` — that path deletes anything carrying our flag.
+ * The Paladin's +Cha is the item-transferred AE (`item.effects`, not `actor.effects`).
+ * Never stamp that document. dnd5e's Unavailable list is `isSuppressed`: an
+ * item-parented AE is suppressed when the feat is unequipped (`equipped === false`)
+ * or its origin is inactive. A token icon is `temporaryEffects` (active +
+ * isTemporary). `flags.dnd5e.isTemporary` plus v14 `showIcon: CONDITIONAL` makes a
+ * permanent grant look timed and then disappear. The icon is a separate actor badge
+ * with empty changes, `auraHost` (not `aura`), and no item origin.
  */
 async function presentHostAuras(actor: any): Promise<number> {
-  if (!actor || sourceIsSuppressed(actor)) return 0;
+  if (!actor) return 0;
+  if (sourceIsSuppressed(actor)) return stripHostBadges(actor);
   const data = rollDataOf(actor);
   let wrote = 0;
+  const keep = new Set<string>();
   for (const source of hostSources(actor)) {
     if (!spellAuraIsActive(actor, source)) continue;
+    keep.add(source.id);
     const img = String(source.img || AURA_STATUS_IMG);
     const status = auraStatusId(source.identifier, source.id);
     registerAuraStatus(source.identifier || source.id, source.name, img);
-    const patch = auraPresentationPatch(status, img);
-    const have = transferredOn(actor, source);
+    const sheet = hostTransferredEffect(actor, source);
     const gutted = guttedOn(actor, source);
-    if (have && gutted && have !== gutted) {
-      if (hostNeedsPresentation(have, status, img)) {
-        try {
-          await have.update(patch);
-          wrote += 1;
-        } catch (err) {
-          warn(`aura: could not present "${source.name}" on ${String(actor.name)}:`, err);
-        }
-      }
-      continue;
-    }
     if (gutted) {
       try {
         await gutted.update({
           changes: resolveChanges(source, data),
-          disabled: false,
-          ...patch,
+          ...transferredRepairPatch(gutted),
         });
         await dropOurFlag(gutted);
         wrote += 1;
       } catch (err) {
         warn(`aura: could not restore "${source.name}" on ${String(actor.name)}:`, err);
       }
-      continue;
     }
-    if (have) {
-      if (!hostNeedsPresentation(have, status, img)) continue;
+    if (sheet && transferredNeedsRepair(sheet)) {
       try {
-        await have.update(patch);
+        await sheet.update(transferredRepairPatch(sheet));
         wrote += 1;
       } catch (err) {
-        warn(`aura: could not present "${source.name}" on ${String(actor.name)}:`, err);
+        warn(`aura: could not repair "${source.name}" on ${String(actor.name)}:`, err);
+      }
+    }
+    for (const effect of [...(actor.effects ?? [])]) {
+      if (effect === sheet || !looksLikeStrayHostCopy(effect, source)) continue;
+      try {
+        await effect.delete();
+        wrote += 1;
+      } catch (err) {
+        warn(`aura: could not drop stray "${source.name}" on ${String(actor.name)}:`, err);
+      }
+    }
+    const badge = [...(actor.effects ?? [])].find((e) => ourHostBadge(e)?.sourceId === source.id);
+    if (badge) {
+      if (!hostNeedsPresentation(badge, status, img) && !(Array.isArray(badge.changes) && badge.changes.length)) {
+        continue;
+      }
+      try {
+        await badge.update(hostBadgeRefresh(source, actor, status, img));
+        wrote += 1;
+      } catch (err) {
+        warn(`aura: could not refresh host badge "${source.name}" on ${String(actor.name)}:`, err);
       }
       continue;
     }
-    if (actorHasItemAura(actor, source)) continue;
     try {
-      await actor.createEmbeddedDocuments("ActiveEffect", [
-        {
-          name: source.name,
-          img,
-          origin: source.origin,
-          transfer: false,
-          disabled: false,
-          statuses: [status],
-          changes: resolveChanges(source, data),
-          flags: { dnd5e: { isTemporary: true }, autoanimations: { ...AURA_AA_FLAGS } },
-        },
-      ]);
+      await actor.createEmbeddedDocuments("ActiveEffect", [hostBadgePayload(source, actor, status, img)]);
       wrote += 1;
     } catch (err) {
-      warn(`aura: could not replace "${source.name}" on ${String(actor.name)}:`, err);
+      warn(`aura: could not present "${source.name}" on ${String(actor.name)}:`, err);
     }
   }
+  wrote += await stripHostBadges(actor, keep);
   return wrote;
-}
-
-function actorHasItemAura(actor: any, source: AuraSource): boolean {
-  if (!source.itemId) return false;
-  for (const effect of actor?.effects ?? []) {
-    if (String(effect?.origin ?? "").includes(source.itemId)) return true;
-  }
-  return false;
 }
 
 function isProtectedHostAura(actor: any, effect: any): boolean {
@@ -608,7 +653,7 @@ export function surveyAuras(): unknown {
   for (const token of tokens) {
     const actor = token.actor;
     const sources = auraSourcesOn(actor);
-    const applied = [...(actor?.effects ?? [])].filter((e) => ourAura(e));
+    const applied = [...(actor?.effects ?? [])].filter((e) => ourAura(e) || isOurAuraHost(e));
     if (!sources.length && !applied.length) continue;
     const data = rollDataOf(actor);
     const suppressed = sourceIsSuppressed(actor) ? " SUPPRESSED" : "";
@@ -636,7 +681,12 @@ export function surveyAuras(): unknown {
     }
     for (const effect of applied) {
       const flag = ourAura(effect);
+      const host = ourHostBadge(effect);
       const bonus = (effect.changes ?? []).map((c: any) => `${c.key}=${c.value}`).join("; ");
+      if (host) {
+        lines.push(`    on ${String(actor.name)}: host badge ${effect.name} (${host.sourceId})`);
+        continue;
+      }
       lines.push(`    on ${String(actor.name)}: ${effect.name} from ${flag?.sourceToken} (${bonus})`);
     }
   }
