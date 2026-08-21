@@ -292,16 +292,67 @@ function evalSimple(expr: string): number | null {
 
 /**
  * Token-icon status for a copied aura. Foundry only draws `temporaryEffects` on the token
- * (duration or a status). A canned condition id would overlay Paralyzed / Frightened; a
- * registered HUD status would be click-togglable. This id is ours, never a dnd5e condition,
- * and is not added to `CONFIG.statusEffects`.
+ * (duration or a status). A canned condition id would overlay Paralyzed / Frightened.
+ *
+ * The id is registered on `CONFIG.statusEffects` with `hud: false`: Token HUD skips those
+ * (`token-hud.mjs` `_getStatusEffectChoices`), so there is no click-toggle, but
+ * `isTemporary` and Visual Active Effects still see a real status. An unregistered id was
+ * not enough — the Paladin's transferred AE has no status at all, and an unknown id is
+ * easy for another module's icon pass to skip.
  */
 export const AURA_STATUS_PREFIX = "noodlr-aura-";
+export const AURA_STATUS_IMG = "icons/svg/aura.svg";
+
+/**
+ * Automated Animations' aefx menu matches an AE by rinsed name. "Aura of Protection" is in
+ * that menu and is persistent, so creating our copy played a Sequencer effect and posted
+ * "Use the Sequencer Effect Manager to remove the Animation." `killAnim` is AA's own off
+ * switch (`handleItem`); `version` 99 so its migrator treats the flags as current and does
+ * not rewrite the document.
+ */
+export const AURA_AA_FLAGS = { killAnim: true, isEnabled: false, version: 99 } as const;
 
 export function auraStatusId(identifier: string, fallback = "aura"): string {
   const raw = String(identifier || fallback || "aura").toLowerCase();
   const slug = raw.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "aura";
   return slug.startsWith("aura-") ? `noodlr-${slug}` : `${AURA_STATUS_PREFIX}${slug}`;
+}
+
+export function auraStatusEntry(
+  identifier: string,
+  name: string,
+  img = AURA_STATUS_IMG,
+): { id: string; name: string; img: string; hud: false } {
+  return {
+    id: auraStatusId(identifier),
+    name: name || identifier,
+    img: img || AURA_STATUS_IMG,
+    hud: false,
+  };
+}
+
+/** Idempotent. Safe to call per apply — unknown homebrew auras register on first copy. */
+export function registerAuraStatus(identifier: string, name: string, img?: string): string {
+  const id = auraStatusId(identifier);
+  const list = (globalThis as any).CONFIG?.statusEffects;
+  if (!Array.isArray(list)) return id;
+  if (list.some((s: any) => s?.id === id)) return id;
+  list.push(auraStatusEntry(identifier, name, img));
+  return id;
+}
+
+export function registerKnownAuraStatuses(): void {
+  for (const row of KNOWN_AURAS) {
+    registerAuraStatus(row.identifier, row.identifier.replace(/-/g, " "));
+  }
+}
+
+export function auraWriteFlags(sourceToken: string, sourceId: string): Record<string, unknown> {
+  return {
+    [MODULE_ID]: { aura: { sourceToken, sourceId } },
+    dnd5e: { isTemporary: true },
+    autoanimations: { ...AURA_AA_FLAGS },
+  };
 }
 
 export function audienceOfFlag(raw: unknown): AuraAudience {

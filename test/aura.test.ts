@@ -2,13 +2,16 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  AURA_AA_FLAGS,
   KNOWN_AURAS,
   audienceMatches,
   audienceOfFlag,
   auraDominates,
   auraSourcesOn,
+  auraStatusEntry,
   auraStatusId,
   auraStrength,
+  auraWriteFlags,
   collapseOverlappingAuras,
   interpolateAtRefs,
   isOccupyingField,
@@ -62,6 +65,21 @@ test("aura token icons use a status id that is never a canned condition", () => 
     assert.notEqual(auraStatusId(id), id);
     assert.ok(auraStatusId(id).startsWith("noodlr-aura-"));
   }
+  const entry = auraStatusEntry("aura-of-protection", "Aura of Protection");
+  assert.equal(entry.hud, false);
+  assert.equal(entry.id, "noodlr-aura-of-protection");
+});
+
+test("aura copies kill Automated Animations and mark themselves temporary", () => {
+  assert.equal(AURA_AA_FLAGS.killAnim, true);
+  assert.equal(AURA_AA_FLAGS.isEnabled, false);
+  const flags = auraWriteFlags("tok", "src") as {
+    autoanimations: { killAnim: boolean; version: number };
+    dnd5e: { isTemporary: boolean };
+  };
+  assert.equal(flags.autoanimations.killAnim, true);
+  assert.equal(flags.autoanimations.version, 99);
+  assert.equal(flags.dnd5e.isTemporary, true);
 });
 
 test("2024 Paladin aura radius is a flat 10 → 30 jump at 18, not a curve", () => {

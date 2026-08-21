@@ -33,11 +33,15 @@ import {
   type AuraSource,
   auraDominates,
   auraModuleOwns,
+  AURA_STATUS_IMG,
   auraSourcesOn,
   auraStatusId,
   auraStrength,
+  auraWriteFlags,
   collapseOverlappingAuras,
   paladinClassLevel,
+  registerAuraStatus,
+  registerKnownAuraStatuses,
   resolveAuraRadius,
   resolveAuraValue,
   audienceMatches,
@@ -239,9 +243,35 @@ function hasAuraStatus(effect: any, status: string): boolean {
   return false;
 }
 
+function aaKilled(effect: any): boolean {
+  const aa = effect?.flags?.autoanimations;
+  return Boolean(aa?.killAnim) || aa?.isEnabled === false;
+}
+
+function markedTemporary(effect: any): boolean {
+  return effect?.flags?.dnd5e?.isTemporary === true;
+}
+
 function samePresentation(effect: any, row: Desired): boolean {
   if (!hasAuraStatus(effect, statusOf(row))) return false;
-  return String(effect?.img ?? "") === String(row.source.img ?? "");
+  if (!aaKilled(effect) || !markedTemporary(effect)) return false;
+  const want = String(row.source.img || AURA_STATUS_IMG);
+  return String(effect?.img ?? "") === want;
+}
+
+function effectPayload(row: Desired): Record<string, unknown> {
+  const img = String(row.source.img || AURA_STATUS_IMG);
+  registerAuraStatus(row.identifier || row.source.id, row.source.name, img);
+  return {
+    name: row.source.name,
+    img,
+    origin: row.source.origin,
+    transfer: false,
+    disabled: false,
+    statuses: [statusOf(row)],
+    changes: row.changes,
+    flags: auraWriteFlags(row.sourceTokenId, row.source.id),
+  };
 }
 
 async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: number; removed: number }> {
@@ -270,12 +300,7 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
     if (have) {
       if (sameChanges(have, row.changes) && samePresentation(have, row) && !have.disabled) continue;
       try {
-        await have.update({
-          disabled: false,
-          changes: row.changes,
-          img: row.source.img,
-          statuses: [statusOf(row)],
-        });
+        await have.update(effectPayload(row));
         wrote += 1;
       } catch (err) {
         warn(`aura: could not refresh "${row.source.name}" on ${String(actor.name)}:`, err);
@@ -283,22 +308,7 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
       continue;
     }
     try {
-      await actor.createEmbeddedDocuments("ActiveEffect", [
-        {
-          name: row.source.name,
-          img: row.source.img,
-          origin: row.source.origin,
-          transfer: false,
-          disabled: false,
-          statuses: [statusOf(row)],
-          changes: row.changes,
-          flags: {
-            [MODULE_ID]: {
-              [FLAG]: { sourceToken: row.sourceTokenId, sourceId: row.source.id },
-            },
-          },
-        },
-      ]);
+      await actor.createEmbeddedDocuments("ActiveEffect", [effectPayload(row)]);
       wrote += 1;
     } catch (err) {
       warn(`aura: could not apply "${row.source.name}" to ${String(actor.name)}:`, err);
@@ -321,6 +331,32 @@ async function stripActor(actor: any): Promise<number> {
   return n;
 }
 
+/**
+ * A transferred aura never writes a second bonus on the Paladin (`receivesOwnAura` is
+ * false). That also left them with no token icon — their sheet AE has no status. A
+ * badge is the same document with empty changes: visible, no double +Cha.
+ */
+function addCarrierBadges(token: any, desired: Desired[]): Desired[] {
+  const actor = token.actor;
+  if (sourceIsSuppressed(actor)) return desired;
+  const have = new Set(desired.map((d) => d.identifier));
+  const out = [...desired];
+  for (const source of auraSourcesOn(actor)) {
+    if (!source.includeSelf || !source.transferSelf) continue;
+    if (!spellAuraIsActive(actor, source)) continue;
+    if (have.has(source.identifier)) continue;
+    out.push({
+      identifier: source.identifier,
+      source,
+      sourceTokenId: tokenIdOf(token),
+      sourceName: String(tokenNameOf(token) || actor?.name || "?"),
+      changes: [],
+    });
+    have.add(source.identifier);
+  }
+  return out;
+}
+
 async function refreshAuras(): Promise<void> {
   if (!isPrimaryGM()) return;
   const wanted = desiredForScene();
@@ -332,7 +368,10 @@ async function refreshAuras(): Promise<void> {
     const id = String(actor?.uuid ?? actor?.id ?? "");
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const desired = collapseOverlappingAuras(wanted.get(id) ?? [], ownTransferredStrengths(actor));
+    const desired = addCarrierBadges(
+      token,
+      collapseOverlappingAuras(wanted.get(id) ?? [], ownTransferredStrengths(actor)),
+    );
     if (!desired.length) {
       removed += await stripActor(actor);
       continue;
@@ -392,7 +431,12 @@ function tokenMoved(changed: Record<string, unknown> | undefined): boolean {
   );
 }
 
+function ourAuraDocument(doc: any): boolean {
+  return Boolean(ourAura(doc));
+}
+
 export function registerAuraWatch(): void {
+  registerKnownAuraStatuses();
   const schedule = () => scheduleAuraRefresh();
   Hooks.on("updateToken", (_doc, changed) => {
     if (tokenMoved(changed as Record<string, unknown>)) schedule();
@@ -414,9 +458,15 @@ export function registerAuraWatch(): void {
   Hooks.on("createItem", schedule);
   Hooks.on("deleteItem", schedule);
   Hooks.on("updateItem", schedule);
-  Hooks.on("createActiveEffect", schedule);
-  Hooks.on("deleteActiveEffect", schedule);
-  Hooks.on("updateActiveEffect", schedule);
+  Hooks.on("createActiveEffect", (effect) => {
+    if (!ourAuraDocument(effect)) schedule();
+  });
+  Hooks.on("deleteActiveEffect", (effect) => {
+    if (!ourAuraDocument(effect)) schedule();
+  });
+  Hooks.on("updateActiveEffect", (effect) => {
+    if (!ourAuraDocument(effect)) schedule();
+  });
   Hooks.on("canvasReady", schedule);
   Hooks.on("updateSetting", (setting: any) => {
     const key = String(setting?.key ?? "");

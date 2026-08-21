@@ -863,12 +863,17 @@ migrate, so the inherited prefix would have implied one.
     puts `x`/`y` on the update the GM hears. The poll is the same cadence as perception
     (one combat round). It reads committed TokenDocument `_source` positions from
     `canvas.scene.tokens`, not animated placeable centres. Survey prints `poll 6s`.
-  - **The copy carries a unique status so the token shows the icon.** Foundry only
+  - **The copy carries a unique status, registered with `hud: false`.** Foundry only
     draws `temporaryEffects` (a duration or a status) on the upper-right of the token.
-    A canned id would overlay Paralyzed / Frightened; registering in
-    `CONFIG.statusEffects` would put a click-toggle on the HUD. `auraStatusId` is
-    `noodlr-aura-of-protection` and is not registered. The effect's own `img` is the
-    icon. Existing copies pick the status up on the next poll.
+    A canned id would overlay Paralyzed / Frightened. Token HUD skips `hud: false`
+    (`token-hud.mjs` `_getStatusEffectChoices`), so there is no click-toggle.
+    `auraStatusId` is `noodlr-aura-of-protection`. Also `flags.dnd5e.isTemporary`.
+    The Paladin's transferred AE has neither, so a **badge** copy with empty
+    `changes` carries the icon without doubling +Cha. Automated Animations matches
+    "Aura of Protection" as a persistent aefx — every copy writes
+    `flags.autoanimations.killAnim`. Existing copies pick flags and status up on
+    the next poll. Sequencer persistents already playing need the Effect Manager
+    once; new applies do not start them.
   - **Same identifier, highest number; different identifiers independently (user, 2026-08-21).**
     Two Paladins both hosting Aura of Protection is one bonus — the +5, not +5 and +3. Protection
     beside Courage (or any other distinct aura) both apply. The Paladin's own transferred AE

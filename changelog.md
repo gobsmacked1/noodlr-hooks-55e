@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.19
+
+**The Paladin sees the aura icon too, without a second save bonus.** The sheet already
+transfers Aura of Protection onto the Paladin, so a copy with changes would double
+Charisma. A badge copy — same icon, empty changes — is what Foundry draws on the token.
+Allies still get the real bonus copy. The status is now registered with `hud: false`, so
+it appears beside Concentration and conditions and is not a click-toggle on the Token HUD.
+
+**Walking back in no longer posts the Automated Animations Sequencer tip.** AA matches
+"Aura of Protection" by name and plays a persistent animation on every copy we write.
+Each copy now carries AA's own off switch (`killAnim`). Automated Animations is not
+required and is not called; without it the flag does nothing. Persistents already
+playing from an earlier version need one pass through the Sequencer Effect Manager.
+
 ## 0.7.18
 
 **Auras recheck every six seconds, not only when the Paladin moves.** Allies could walk
