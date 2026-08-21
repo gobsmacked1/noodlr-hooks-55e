@@ -9,6 +9,12 @@
 // distance, and we already have one answer to that. Regions are the right primitive for
 // `create_area` / Spirit Guardians (Phase 4); they are more machinery than a Paladin aura needs.
 //
+// Distance is polled every six seconds (one combat round), the same cadence as perception.
+// A move hook is a courtesy, not the mechanism: v13+ walks often never put `x`/`y` on the
+// update the GM hears, so "refresh when someone moves" left copies on allies who had walked
+// out, and only re-applied when the Paladin themselves moved. The poll reads committed
+// TokenDocument positions (`_source`), not animated placeable centres.
+//
 // Same identifier, two hosts → the stronger number, not both. Different identifiers
 // (Protection + Courage, or a hostile field next to a Paladin aura) apply independently.
 // A Paladin's transferred AE is their own instance: a stronger neighbour writes the delta
@@ -28,6 +34,7 @@ import {
   auraDominates,
   auraModuleOwns,
   auraSourcesOn,
+  auraStatusId,
   auraStrength,
   collapseOverlappingAuras,
   paladinClassLevel,
@@ -41,6 +48,8 @@ import { isPrimaryGM } from "../util/gm";
 
 const FLAG = "aura";
 const SETTLE_MS = 150;
+/** One combat round of real time — same number perception already uses, for the same reason. */
+export const AURA_POLL_MS = 6000;
 
 interface AuraFlag {
   sourceToken: string;
@@ -63,23 +72,56 @@ function ourAura(effect: any): AuraFlag | null {
 }
 
 function tokensOnScene(): any[] {
+  // Scene documents, not placeables: a token the GM has not redrawn still has a committed x/y.
+  try {
+    const col = (globalThis as any).canvas?.scene?.tokens;
+    if (col && typeof col[Symbol.iterator] === "function") {
+      return [...col].filter((d: any) => d?.actor);
+    }
+  } catch {
+    // fall through
+  }
   const layer: any = (globalThis as any).canvas?.tokens;
   const list = layer?.placeables ?? [];
   return list.filter((t: any) => t?.document && t.actor);
 }
 
+function tokenDoc(token: any): any {
+  return token?.document ?? token;
+}
+
 function dispositionOf(token: any): number {
-  const d = Number(token?.document?.disposition ?? token?.disposition);
+  const doc = tokenDoc(token);
+  const d = Number(doc?.disposition ?? token?.disposition);
   return Number.isFinite(d) ? d : 0;
 }
 
 function elevationOf(token: any): number {
-  return Number(token?.document?.elevation ?? token?.elevation) || 0;
+  const doc = tokenDoc(token);
+  return Number(doc?._source?.elevation ?? doc?.elevation ?? token?.elevation) || 0;
+}
+
+function tokenNameOf(token: any): string {
+  const doc = tokenDoc(token);
+  return String(doc?.name ?? token?.name ?? "?");
+}
+
+/** Committed top-left, not the animated prepared x/y a mid-move placeable still holds. */
+function committedCenter(token: any): { x: number; y: number } | null {
+  const doc = tokenDoc(token);
+  const src = doc?._source ?? doc;
+  const x = Number(src?.x ?? doc?.x);
+  const y = Number(src?.y ?? doc?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return centerOf(token);
+  const w = Number(src?.width ?? doc?.width) || 1;
+  const h = Number(src?.height ?? doc?.height) || 1;
+  const grid = Number((globalThis as any).canvas?.grid?.size) || 100;
+  return { x: x + (grid * w) / 2, y: y + (grid * h) / 2 };
 }
 
 function auraDistance(a: any, b: any): number {
-  const pa = centerOf(a);
-  const pb = centerOf(b);
+  const pa = committedCenter(a);
+  const pb = committedCenter(b);
   if (!pa || !pb) return Number.POSITIVE_INFINITY;
   const flat = measureBetween(pa, pb);
   const rise = Math.abs(elevationOf(a) - elevationOf(b));
@@ -110,8 +152,12 @@ function sourceIsSuppressed(actor: any): boolean {
   return false;
 }
 
+function tokenIdOf(token: any): string {
+  return String(tokenDoc(token)?.id ?? token?.id ?? "");
+}
+
 function shouldReceive(sourceToken: any, targetToken: any, source: AuraSource): boolean {
-  const same = String(sourceToken?.id ?? sourceToken?.document?.id) === String(targetToken?.id ?? targetToken?.document?.id);
+  const same = tokenIdOf(sourceToken) === tokenIdOf(targetToken);
   if (same) return receivesOwnAura(source);
   return audienceMatches(dispositionOf(sourceToken), dispositionOf(targetToken), source.audience);
 }
@@ -152,7 +198,7 @@ function desiredForScene(): Map<string, Desired[]> {
       });
       const changes = resolveChanges(source, data);
       if (!changes.length) continue;
-      const sourceTokenId = String(token.id);
+      const sourceTokenId = tokenIdOf(token);
       for (const other of tokensOnScene()) {
         if (!shouldReceive(token, other, source)) continue;
         if (auraDistance(token, other) > radius + 1e-6) continue;
@@ -163,7 +209,7 @@ function desiredForScene(): Map<string, Desired[]> {
           identifier: source.identifier,
           source,
           sourceTokenId,
-          sourceName: String(token.document?.name ?? actor?.name ?? "?"),
+          sourceName: String(tokenNameOf(token) || actor?.name || "?"),
           changes,
         });
         wanted.set(key, list);
@@ -180,6 +226,22 @@ function sameChanges(effect: any, changes: Desired["changes"]): boolean {
     const row = have[i];
     return String(row?.key) === ch.key && String(row?.value) === ch.value && Number(row?.mode || 2) === ch.mode;
   });
+}
+
+function statusOf(row: Desired): string {
+  return auraStatusId(row.identifier, row.source.id);
+}
+
+function hasAuraStatus(effect: any, status: string): boolean {
+  const statuses = effect?.statuses;
+  if (statuses instanceof Set) return statuses.has(status);
+  if (Array.isArray(statuses)) return statuses.includes(status);
+  return false;
+}
+
+function samePresentation(effect: any, row: Desired): boolean {
+  if (!hasAuraStatus(effect, statusOf(row))) return false;
+  return String(effect?.img ?? "") === String(row.source.img ?? "");
 }
 
 async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: number; removed: number }> {
@@ -206,9 +268,14 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
       return flag && `${flag.sourceToken}:${flag.sourceId}` === key;
     });
     if (have) {
-      if (sameChanges(have, row.changes) && !have.disabled) continue;
+      if (sameChanges(have, row.changes) && samePresentation(have, row) && !have.disabled) continue;
       try {
-        await have.update({ disabled: false, changes: row.changes });
+        await have.update({
+          disabled: false,
+          changes: row.changes,
+          img: row.source.img,
+          statuses: [statusOf(row)],
+        });
         wrote += 1;
       } catch (err) {
         warn(`aura: could not refresh "${row.source.name}" on ${String(actor.name)}:`, err);
@@ -223,6 +290,7 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
           origin: row.source.origin,
           transfer: false,
           disabled: false,
+          statuses: [statusOf(row)],
           changes: row.changes,
           flags: {
             [MODULE_ID]: {
@@ -279,6 +347,7 @@ async function refreshAuras(): Promise<void> {
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null;
+let poll: ReturnType<typeof setInterval> | null = null;
 let running = false;
 let again = false;
 
@@ -331,6 +400,13 @@ export function registerAuraWatch(): void {
   Hooks.on("moveToken", schedule);
   Hooks.on("createToken", schedule);
   Hooks.on("deleteToken", schedule);
+  // Load-bearing: a walk the GM never hears still settles within one round.
+  if (poll === null) {
+    poll = setInterval(() => {
+      if ((globalThis as any).game?.paused) return;
+      schedule();
+    }, AURA_POLL_MS);
+  }
   Hooks.on("updateActor", (_actor, changed) => {
     const diff = (changed ?? {}) as Record<string, any>;
     if (diff.system?.attributes?.hp || diff.items) schedule();
@@ -363,7 +439,7 @@ export function surveyAuras(): unknown {
   lines.push(
     `auras: ${isAurasEnabled() ? "on" : "off"}` +
       (owned ? ` — standing aside for ${owned.by}` : "") +
-      ` — ${tokens.length} token(s)`,
+      ` — poll ${AURA_POLL_MS / 1000}s — ${tokens.length} token(s)`,
   );
   for (const token of tokens) {
     const actor = token.actor;
@@ -383,12 +459,12 @@ export function surveyAuras(): unknown {
         .map((other) => {
           const feet = auraDistance(token, other);
           const inRange = feet <= radius + 1e-6;
-          return `${String(other.document?.name ?? "?")} ${Math.round(feet)}ft ${inRange ? "IN" : "out"}`;
+          return `${tokenNameOf(other)} ${Math.round(feet)}ft ${inRange ? "IN" : "out"}`;
         });
       const active = spellAuraIsActive(actor, source) ? "on" : "waiting (spell not up)";
       const scale = level != null ? ` paladin ${level}` : "";
       lines.push(
-        `  ${String(token.document?.name)} ${source.name} ${radius} ft` +
+        `  ${tokenNameOf(token)} ${source.name} ${radius} ft` +
           ` (${source.radiusFormula}${scale}) ${source.audience}` +
           `${source.transferSelf ? " (self via transfer)" : ""} [${active}]${suppressed}` +
           (reach.length ? `\n    ${reach.join(" | ")}` : " → nobody"),

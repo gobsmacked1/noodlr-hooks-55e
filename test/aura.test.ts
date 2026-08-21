@@ -7,6 +7,7 @@ import {
   audienceOfFlag,
   auraDominates,
   auraSourcesOn,
+  auraStatusId,
   auraStrength,
   collapseOverlappingAuras,
   interpolateAtRefs,
@@ -36,6 +37,31 @@ test("paladin aura radius follows the scale, then 10", () => {
   assert.equal(resolveAuraRadius("@scale.paladin.aura", paladin, 10), 10);
   assert.equal(resolveAuraRadius("@scale.paladin.aura", { scale: { paladin: { aura: 30 } } }, 10), 30);
   assert.equal(resolveAuraRadius("@scale.paladin.aura", {}, 10), 10);
+});
+
+test("aura token icons use a status id that is never a canned condition", () => {
+  assert.equal(auraStatusId("aura-of-protection"), "noodlr-aura-of-protection");
+  assert.equal(auraStatusId("aura-of-courage"), "noodlr-aura-of-courage");
+  assert.equal(auraStatusId("frightful-presence"), "noodlr-aura-frightful-presence");
+  const canned = [
+    "dead",
+    "unconscious",
+    "paralyzed",
+    "frightened",
+    "charmed",
+    "concentrating",
+    "prone",
+    "incapacitated",
+    "stunned",
+    "blinded",
+    "invisible",
+    "hiding",
+    "blessed",
+  ];
+  for (const id of canned) {
+    assert.notEqual(auraStatusId(id), id);
+    assert.ok(auraStatusId(id).startsWith("noodlr-aura-"));
+  }
 });
 
 test("2024 Paladin aura radius is a flat 10 → 30 jump at 18, not a curve", () => {

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.18
+
+**Auras recheck every six seconds, not only when the Paladin moves.** Allies could walk
+infinitely far and keep Aura of Protection so long as the Paladin stood still; walking
+the Paladin back in did not apply until the others moved. A v13+ walk often never puts
+`x`/`y` on the update the GM hears, so an on-move refresh ran at the wrong times.
+Distance is now polled once per combat round against committed token positions.
+`noodlrHooks.surveyAuras()` prints `poll 6s`.
+
+**Recipients see the aura icon on their token.** Foundry only draws temporary effects
+(a duration or a status) on the upper-right strip. Each copy now carries a unique
+status such as `noodlr-aura-of-protection` — not Frightened, Paralyzed, or
+Concentration, and not registered as a HUD toggle — so the feature's own icon sits
+beside those without replacing them.
+
 ## 0.7.17
 
 **A Paladin's aura drops when you walk out of it.** Walking the party away from the Paladin

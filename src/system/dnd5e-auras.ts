@@ -290,6 +290,20 @@ function evalSimple(expr: string): number | null {
   return null;
 }
 
+/**
+ * Token-icon status for a copied aura. Foundry only draws `temporaryEffects` on the token
+ * (duration or a status). A canned condition id would overlay Paralyzed / Frightened; a
+ * registered HUD status would be click-togglable. This id is ours, never a dnd5e condition,
+ * and is not added to `CONFIG.statusEffects`.
+ */
+export const AURA_STATUS_PREFIX = "noodlr-aura-";
+
+export function auraStatusId(identifier: string, fallback = "aura"): string {
+  const raw = String(identifier || fallback || "aura").toLowerCase();
+  const slug = raw.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "aura";
+  return slug.startsWith("aura-") ? `noodlr-${slug}` : `${AURA_STATUS_PREFIX}${slug}`;
+}
+
 export function audienceOfFlag(raw: unknown): AuraAudience {
   const s = String(raw ?? "").toLowerCase();
   if (s === "enemy" || s === "enemies" || s === "hostile") return "enemies";
