@@ -153,6 +153,7 @@ function forceAction(): string {
  */
 export function isForcedMovement(movement: any, operation?: any): boolean {
   if (operation?.noodlrForced) return true;
+  if (operation?.noodlrRiding === "follow") return true;
   const waypoints: any[] = movement?.passed?.waypoints ?? [];
   if (waypoints.length === 0) return false;
   return waypoints.some((w: any) => {

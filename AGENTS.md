@@ -568,8 +568,12 @@ to A is three events.
  `isForcedMovement` is still not consulted.
 - **Do not intercept the Argon Wild Shape button as revert.** Beast-to-beast must stay legal,
  and a revert must not spend a Wild Shape use. dnd5e already restores from the sheet header
- (`restoreTransformation`, visible when `isPolymorphed`) and the sidebar right-click. A
- token-corner revert icon — clear of stock statuses and Paladin aura badges — is parked.
+ (`restoreTransformation`, visible when `isPolymorphed`) and the sidebar right-click.
+ **The token-corner icon is the same restore**, shipped with riding in v0.7.23:
+ `src/rules/transform.ts`. Status `noodlr-transformed`, `hud: false`, Wild Shape item art,
+ click → `revertOriginalForm({ renderSheet: false })`. Owner writes the badge, not only the
+ primary GM. Token HUD has a backup control. Setting `general.transformUndo`.
+ `noodlrHooks.surveyTransform()` / `noodlrHooks.restoreTransformation()`.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
 
@@ -4718,20 +4722,25 @@ an argument.
   no melee within 5 feet, and the plan does not travel. `core/` still names no D&D status
   — crawl is `intent.action` from execute.
 
-## Next: mount riding (after the v0.7.22 Wild Shape re-test)
+## Mount riding (v0.7.23, initial slice)
 
-Parked 2026-08-21. Do not start until the Wild Shape `on_move` guards have been seen at the table.
+`src/system/dnd5e-riding.ts` + `src/rules/riding.ts`. No Rideable dependency. Stands aside when
+`Rideable` is active. Do **not** delete `x`/`y` in `preUpdateToken` — that is Rideable's trick and
+why `move() === true` is not evidence of movement. A rider who tries to walk is refused
+(`preMoveToken` returns false). Follow uses `options.noodlrRiding === "follow"`, which
+`isForcedMovement` treats as displacement so it does not provoke a second OA.
 
-- **No Rideable dependency.** Learn from https://github.com/Saibot393/Rideable (it deletes `x`/`y` in
-  `preUpdateToken` for grappled/mounted — `move() === true` is not evidence of movement), then
-  implement against core + dnd5e.
-- **Who can mount (user):** any disposition may mount the same disposition plus Neutral. Players
-  mount Friendly and Neutral. Strength and size must allow it.
-- **Verify Gemini's 2024 summary against the PHB / dnd5e before coding.** Willing; anatomy is the
-  DM; at least one size larger; carrying capacity (not a separate rider-weight penalty); use the
-  mount's speed and locomotion; mount/dismount costs half the rider's speed (speed 0 cannot);
-  Controlled (initiative matches, Dash / Disengage / Dodge only) vs Independent (own turn, full
-  actions). The "controlled mount gets a free Dash" claim especially needs a page cite.
+- **Who can mount:** same disposition or Neutral; player characters also mount Friendly. Mount at
+  least one size larger (`sizeRank`). Unreadable size refuses. Carrying: if both
+  `encumbrance.max` and the rider's burden are readable, burden must fit; unreadable allows.
+  One rider per mount. No riding loop.
+- **2024 cost:** half Speed, round down, stamped on the rider and subtracted from `budgetFor`.
+  Speed 0 cannot mount. Gemini's "controlled mount gets a free Dash" is **false** — Dash is one
+  of three actions, not an extra. Do not implement a free Dash.
+- **Controlled:** Neutral/Friendly default trained (initiative matches rider). Hostile is
+  independent. Action limits (Dash / Disengage / Dodge only) and falling-off saves are **parked**.
+- Setting `general.riding`. `noodlrHooks.surveyRiding()` / `.mount()` / `.dismount()`.
+- Anatomy, OA "you or the mount", and drag-onto-token automount stay parked.
 
 ## Open items carried over from noodlr
 

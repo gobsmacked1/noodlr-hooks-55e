@@ -13,7 +13,7 @@
 // table, so the answer is a console call rather than an afternoon.
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
-import { enabledForEither, isInfluenceEnabled, isJumpEnabled } from "../settings";
+import { enabledForEither, isInfluenceEnabled, isJumpEnabled, isRidingEnabled } from "../settings";
 import { DC_LADDER, OBJECT_REFERENCE, generalRulesApply } from "../system/dnd5e-checks";
 
 /** What happened to one general rule. */
@@ -59,6 +59,13 @@ function dispositions(): Disposition[] {
       // The dying layer is per audience, so this is on if either side wants it; which creatures it
       // actually runs for is answered when one is in hand.
       enabled: enabledForEither(COMBAT_SETTINGS.dying),
+    },
+    {
+      key: "mountedcombat",
+      rule: "Mount or dismount a willing creature at least one size larger during your move, costing half Speed (round down). A controlled mount's initiative matches yours; it may Dash, Disengage or Dodge.",
+      enforcedBy: MODULE_ID,
+      why: "v1 mounts, dismounts and follows. Half Speed is stamped on the rider's turn budget. Rideable stands this aside. Controlled-mount action limits and falling-off saves are parked. The 2024 text does not grant a free Dash.",
+      enabled: isRidingEnabled(),
     },
     {
       key: "hazards",

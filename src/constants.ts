@@ -172,6 +172,10 @@ export const GENERAL_SETTINGS = {
   interactReach: "general.interactReach",
   /** Whether a creature's aura (Protection, Courage, …) is copied onto allies in range. */
   auras: "general.auras",
+  /** Whether a transformed token shows a restore icon (Wild Shape / Polymorph / Shapechange). */
+  transformUndo: "general.transformUndo",
+  /** Whether a creature may mount another token and follow it. */
+  riding: "general.riding",
 } as const;
 
 /** Settings that are this module's own rather than inherited. */

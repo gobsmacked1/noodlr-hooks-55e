@@ -49,6 +49,7 @@ import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules
 import { getAutoRecharge } from "../settings";
 import { systemOwnsRecharge } from "../rules/recharge";
 import { auraModuleOwns } from "../system/dnd5e-auras";
+import { rideableOwns } from "../system/dnd5e-riding";
 
 /** Who acts on a rule when its trigger fires. */
 export type Owner =
@@ -370,6 +371,20 @@ const AREAS: Area[] = [
       const other = auraModuleOwns();
       return other ? { by: other.by, note: other.note } : null;
     },
+  },
+  { id: "transformUndo", setting: GENERAL_SETTINGS.transformUndo },
+  {
+    id: "riding",
+    setting: GENERAL_SETTINGS.riding,
+    contender: () =>
+      rideableOwns()
+        ? {
+            by: "Rideable",
+            note:
+              "Rideable is active, so this module will not mount, follow, or veto a rider's walk. " +
+              "Two riding layers on one token fight.",
+          }
+        : null,
   },
   {
     id: "recharge",

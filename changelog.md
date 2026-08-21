@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.23
+
+**Wild Shape gets a token icon, and tokens can ride.** A transformed creature shows a restore
+badge in the same token corner as a Paladin's aura — click it (or the Token HUD control) and
+dnd5e restores the original form without spending a Wild Shape use. Argon's Wild Shape button
+is still not intercepted, so beast-to-beast stays legal.
+
+A creature may mount a larger willing token (same disposition or Neutral; player characters
+also mount Friendly), follow it, and dismount from the saddle icon or the HUD. Mounting or
+dismounting on your turn costs half Speed. Rideable, if active, keeps the layer. A rider
+cannot walk independently; follow does not provoke. Controlled-mount action limits and
+falling-off saves are not in this first slice. The 2024 rule does not grant a free Dash.
+
 ## 0.7.22
 
 **Wild Shape no longer counts as a walk, and a trail rider no longer burns the walker.** A Land

@@ -44,6 +44,7 @@ import { stoodThisTurn } from "../prone";
 import { isAutomating } from "./enforce";
 import { bonusDashSource } from "../../system/dnd5e-dash";
 import { JUMP_ACTION, jumpVeto } from "../jump";
+import { mountCostThisTurn } from "../riding";
 
 /**
  * What a creature may cross this turn, and what it has crossed already.
@@ -110,7 +111,10 @@ function budgetFor(doc: any): Budget | null {
   return {
     speed,
     spent: spentThisTurn(doc),
-    allowance: speed * (1 + dashes) - stoodThisTurn(actor, combat, combatant),
+    allowance:
+      speed * (1 + dashes) -
+      stoodThisTurn(actor, combat, combatant) -
+      mountCostThisTurn(actor, combat, combatant),
     dash: dashCost(actor, combat, combatant),
     combatant,
     actor,

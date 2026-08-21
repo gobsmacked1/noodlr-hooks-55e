@@ -343,6 +343,24 @@ const MECHANICS: Page = {
           ownership: "auras",
         },
         {
+          id: "transformUndo",
+          label: "NOODLRHOOKS.General.TransformUndo.Name",
+          hint: "NOODLRHOOKS.General.TransformUndo.Hint",
+          state: "live",
+          setting: G.transformUndo,
+          kind: "boolean",
+          ownership: "transformUndo",
+        },
+        {
+          id: "riding",
+          label: "NOODLRHOOKS.General.Riding.Name",
+          hint: "NOODLRHOOKS.General.Riding.Hint",
+          state: "live",
+          setting: G.riding,
+          kind: "boolean",
+          ownership: "riding",
+        },
+        {
           id: "blindAbility",
           label: "Ability checks rolled blind",
           hint:
@@ -455,13 +473,13 @@ const MECHANICS: Page = {
           state: "system",
         },
         {
-          id: "transformUndo",
+          id: "transformUndoNote",
           label: "Undoing transformations",
           hint:
-            "dnd5e already restores from the sheet header (tiny back-arrow, Restore Transformation) " +
-            "and the sidebar right-click. Do not intercept the Argon Wild Shape button — beast-to-beast " +
-            "must stay legal, and a revert must not spend a use. A token-corner revert icon is parked.",
-          state: "planned",
+            "Same restore as the sheet header, from the token. The live switch is on this page under " +
+            "Checks and saves, beside creature auras.",
+          state: "system",
+          today: "Token-corner Restore Transformation. Argon's Wild Shape button is not intercepted.",
         },
       ],
     },

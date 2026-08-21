@@ -47,6 +47,8 @@ const ALL_RULES = {
   [G.influence]: true,
   [G.interactReach]: true,
   [G.auras]: true,
+  [G.transformUndo]: true,
+  [G.riding]: true,
 };
 
 const OFF = Object.fromEntries(Object.keys(ALL_RULES).map((k) => [k, false]));

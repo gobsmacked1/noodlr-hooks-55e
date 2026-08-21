@@ -199,6 +199,8 @@ export function registerCombatSettings(): void {
   general(GENERAL_SETTINGS.influence, "Influence", Boolean, true);
   general(GENERAL_SETTINGS.interactReach, "InteractReach", Boolean, true);
   general(GENERAL_SETTINGS.auras, "Auras", Boolean, true);
+  general(GENERAL_SETTINGS.transformUndo, "TransformUndo", Boolean, true);
+  general(GENERAL_SETTINGS.riding, "Riding", Boolean, true);
 
   game.settings.register(MODULE_ID, SETTINGS.compileCapabilities, {
     name: "NOODLRHOOKS.Capabilities.Name",
@@ -772,6 +774,27 @@ export function isInteractReachEnabled(): boolean {
  */
 export function isAurasEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.auras));
+}
+
+/**
+ * Does a transformed token show a restore icon, like a Paladin's aura badge?
+ *
+ * On by default. dnd5e already restores from the sheet header; this is the same call
+ * (`revertOriginalForm`) from the token corner so a player does not have to open the sheet.
+ * It never spends a Wild Shape use. Off if the table only wants the system's own restore.
+ */
+export function isTransformUndoEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.transformUndo));
+}
+
+/**
+ * May a creature mount another token and follow it?
+ *
+ * On by default. Stands aside when Rideable is active. v1 is mount / dismount / follow and
+ * the half-Speed cost — not falling off, not restricting the mount to Dash / Disengage / Dodge.
+ */
+export function isRidingEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.riding));
 }
 
 export function getCombatAutomation(): CombatAutomationMode {

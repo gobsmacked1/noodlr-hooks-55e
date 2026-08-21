@@ -67,6 +67,8 @@ import { announceJump, registerJumpWatch, surveyJump } from "./rules/jump";
 import { registerProneWatch, surveyProne } from "./rules/prone";
 import { registerInteractReach, surveyInteract } from "./rules/interact";
 import { registerAuraWatch, surveyAuras } from "./rules/aura";
+import { registerTransformWatch, restoreOriginalForm, surveyTransform } from "./rules/transform";
+import { dismountSelected, mountSelected, registerRidingWatch, surveyRiding } from "./rules/riding";
 import {
   clearInfluenceLocks,
   influenceTargets,
@@ -157,6 +159,11 @@ export interface NoodlrHooksApi {
   jump(): Promise<void>;
   surveyInteract(): unknown;
   surveyAuras(): unknown;
+  surveyTransform(): unknown;
+  surveyRiding(): unknown;
+  mount(): Promise<unknown>;
+  dismount(): Promise<unknown>;
+  restoreTransformation(): Promise<unknown>;
   surveyFlee(): unknown;
   surveyRepeatSaves(): unknown;
   surveyRecharge(): unknown;
@@ -295,6 +302,22 @@ const api: NoodlrHooksApi = {
   surveyInteract: () => surveyInteract(),
   /** Which creature auras are on the scene, who they reach, and which copies we wrote. */
   surveyAuras: () => surveyAuras(),
+  /** Which tokens are transformed, and whether the restore badge is present. */
+  surveyTransform: () => surveyTransform(),
+  /** Who is riding whom, and whether Rideable has the layer. */
+  surveyRiding: () => surveyRiding(),
+  /** Mount every selected token onto the current target. */
+  mount: () => mountSelected(),
+  /** Dismount every selected rider. */
+  dismount: () => dismountSelected(),
+  /** Restore the selected token's original form. Does not spend a Wild Shape use. */
+  restoreTransformation: async () => {
+    let n = 0;
+    for (const token of (canvas as any)?.tokens?.controlled ?? []) {
+      if (await restoreOriginalForm(token?.actor)) n += 1;
+    }
+    return { restored: n };
+  },
   /** Tokens currently running off the scene, and how many of their own turns they have left. */
   surveyFlee: () => surveyFlee(),
   /** Which save-ends effects the selected creature is still carrying, and who is rolling them. */
@@ -441,6 +464,12 @@ Hooks.once("ready", () => {
   registerInteractReach();
   // Creature auras. Every client hears movement; only the primary GM writes copies onto other sheets.
   registerAuraWatch();
+  // Wild Shape restore icon. Every client: a player who Wild Shapes must get the badge on their token
+  // without waiting for the GM, and they are the one who clicks it.
+  registerTransformWatch();
+  // Mount / follow / dismount. Every client: the rider's own drag is the one that must be refused,
+  // and a player mounts from their own HUD.
+  registerRidingWatch();
   // Dodge: the same watch, plus the expiry nothing in the stack performs. Half of it is GM-only, and
   // that gate is inside.
   registerDodgeHooks();
