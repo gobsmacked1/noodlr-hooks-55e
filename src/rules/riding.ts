@@ -1,8 +1,9 @@
 // Token riding — sit on a larger creature, follow it, hop off.
 //
-// v1: eligibility, mount / dismount, follow after the mount moves, half-Speed stamp, stand aside
-// for Rideable. Parked: Dash/Disengage/Dodge-only on a controlled mount, falling-off saves,
-// opportunity-attack "you or the mount", anatomy, drag-onto-token automount.
+// Eligibility, mount / dismount, follow after the mount moves, half-Speed stamp, stand aside
+// for Rideable. Several riders share a mount when seats (half the token footprint) and remaining
+// carry weight both fit. Parked: Dash/Disengage/Dodge-only on a controlled mount, falling-off
+// saves, opportunity-attack "you or the mount", drag-onto-token automount.
 //
 // Rideable deletes `x`/`y` in `preUpdateToken`. We never do that. A rider who tries to walk is
 // refused (`preMoveToken` returns false) and told to click the saddle. Follow uses
@@ -19,6 +20,7 @@ import {
   defaultControlled,
   encumbranceMaxOf,
   encumbranceValueOf,
+  footprintSquaresOf,
   isOurRidingBadge,
   judgeMount,
   type MountCostStamp,
@@ -28,6 +30,9 @@ import {
   registerRidingStatus,
   rideableOwns,
   ridingBadgePayload,
+  seatCapacityFromSquares,
+  seatCellCenter,
+  seatCostFromSquares,
   sizeRankOf,
   walkSpeedOf,
 } from "../system/dnd5e-riding";
@@ -111,6 +116,15 @@ function ridersOf(mountId: string): any[] {
   return allTokenDocs().filter((doc) => ridingOn(doc)?.mount === mountId);
 }
 
+function riderSeatCost(doc: any): number {
+  const squares = footprintSquaresOf(doc?.width, doc?.height, sizeRankOf(doc?.actor));
+  return seatCostFromSquares(squares ?? 1);
+}
+
+function riderBurdenOf(doc: any): number {
+  return encumbranceValueOf(doc?.actor) ?? 0;
+}
+
 function dispositionOf(doc: any): number {
   const n = Number(doc?.disposition ?? doc?._source?.disposition);
   return Number.isFinite(n) ? n : 0;
@@ -155,9 +169,16 @@ function seatOf(mount: any, rider: any): { x: number; y: number; elevation: numb
   const mh = (Number(mount.height) || 1) * gs;
   const rw = (Number(rider.width) || 1) * gs;
   const rh = (Number(rider.height) || 1) * gs;
+  const mountId = String(mount.id);
+  const pack = ridersOf(mountId)
+    .filter((d) => d.id !== rider.id)
+    .concat(rider)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const index = Math.max(0, pack.findIndex((d) => d.id === rider.id));
+  const { fx, fy } = seatCellCenter(index, pack.length);
   return {
-    x: mx + mw / 2 - rw / 2,
-    y: my + mh / 2 - rh / 2,
+    x: mx + fx * mw - rw / 2,
+    y: my + fy * mh - rh / 2,
     elevation: Number(mount._source?.elevation ?? mount.elevation ?? 0),
   };
 }
@@ -235,12 +256,12 @@ function judgeDocs(rider: any, mount: any, opts?: { force?: boolean }): ReturnTy
   if (opts?.force) return { ok: true };
   const speed = walkSpeedOf(rider?.actor);
   const combatOn = Boolean((game as any).combat?.started);
+  const others = ridersOf(String(mount.id)).filter((d) => d.id !== rider.id);
   return judgeMount({
     rideableActive: rideableOwns(),
     riderId: String(rider.id),
     mountId: String(mount.id),
     riderAlreadyOn: ridingOn(rider)?.mount,
-    mountHasRider: ridersOf(String(mount.id)).some((d) => d.id !== rider.id),
     ridingOf: ridingMap(),
     riderRank: sizeRankOf(rider.actor),
     mountRank: sizeRankOf(mount.actor),
@@ -249,10 +270,20 @@ function judgeDocs(rider: any, mount: any, opts?: { force?: boolean }): ReturnTy
     riderIsPlayer: riderIsPlayer(rider),
     mountMax: encumbranceMaxOf(mount.actor),
     riderBurden: encumbranceValueOf(rider.actor),
+    carriedAlready: others.reduce((n, d) => n + riderBurdenOf(d), 0),
+    mountSquares: footprintSquaresOf(mount.width, mount.height, sizeRankOf(mount.actor)),
+    riderSquares: footprintSquaresOf(rider.width, rider.height, sizeRankOf(rider.actor)),
+    seatsUsed: others.reduce((n, d) => n + riderSeatCost(d), 0),
     inReach: withinMountReach(rider, mount),
     speed,
     checkSpeed: combatOn && speed !== null,
   });
+}
+
+async function reseatRiders(mount: any): Promise<void> {
+  for (const rider of ridersOf(String(mount.id))) {
+    await followMount(rider, mount);
+  }
 }
 
 async function followMount(rider: any, mount: any): Promise<void> {
@@ -305,13 +336,14 @@ export async function mountTokens(rider: any, mount: any, opts?: { force?: boole
     notify(refuseKey(verdict.reason));
     return false;
   }
+  const firstRider = ridersOf(String(mountDoc.id)).filter((d) => d.id !== riderDoc.id).length === 0;
   const controlled = defaultControlled(dispositionOf(mountDoc));
   try {
     await riderDoc.setFlag(FLAG_NAMESPACE, RIDING_FLAG, { mount: String(mountDoc.id), controlled });
     await stampCost(riderDoc.actor);
     await presentBadge(riderDoc.actor);
-    await followMount(riderDoc, mountDoc);
-    await syncControlledInitiative(riderDoc, mountDoc, controlled);
+    await reseatRiders(mountDoc);
+    await syncControlledInitiative(riderDoc, mountDoc, controlled && firstRider);
     info("NOODLRHOOKS.General.Riding.Mounted", {
       rider: String(riderDoc.name ?? "?"),
       mount: String(mountDoc.name ?? "?"),
@@ -325,11 +357,14 @@ export async function mountTokens(rider: any, mount: any, opts?: { force?: boole
 
 export async function dismountToken(rider: any, opts?: { silent?: boolean }): Promise<boolean> {
   const riderDoc = rider?.document ?? rider;
-  if (!riderDoc || !ridingOn(riderDoc)) return false;
+  const flag = ridingOn(riderDoc);
+  if (!riderDoc || !flag) return false;
   try {
     await riderDoc.unsetFlag(FLAG_NAMESPACE, RIDING_FLAG);
     await stampCost(riderDoc.actor);
     await stripBadge(riderDoc.actor);
+    const mount = tokenDoc(flag.mount);
+    if (mount) await reseatRiders(mount);
     if (!opts?.silent) {
       info("NOODLRHOOKS.General.Riding.Dismounted", { rider: String(riderDoc.name ?? "?") });
     }
@@ -495,6 +530,17 @@ export function registerRidingWatch(): void {
   debug("riding watch registered");
 }
 
+function mountCapacityLine(mount: any, riders: any[]): string {
+  const squares = footprintSquaresOf(mount?.width, mount?.height, sizeRankOf(mount?.actor));
+  const cap = squares != null ? seatCapacityFromSquares(squares) : null;
+  const used = riders.reduce((n, d) => n + riderSeatCost(d), 0);
+  const max = encumbranceMaxOf(mount?.actor);
+  const weight = riders.reduce((n, d) => n + riderBurdenOf(d), 0);
+  const seats = cap != null ? `${used}/${cap} seats` : `${used} rider(s)`;
+  const carry = max != null ? `, ${weight}/${max} lb` : "";
+  return `${seats}${carry}`;
+}
+
 export function surveyRiding(): unknown {
   const docs = allTokenDocs();
   const lines = [
@@ -502,13 +548,21 @@ export function surveyRiding(): unknown {
       (rideableOwns() ? " — standing aside for Rideable" : "") +
       ` — ${docs.length} token(s)`,
   ];
+  const seen = new Set<string>();
   for (const doc of docs) {
     const flag = ridingOn(doc);
     if (!flag) continue;
     const mount = tokenDoc(flag.mount);
+    const mountId = flag.mount;
+    if (!seen.has(mountId)) {
+      seen.add(mountId);
+      const pack = ridersOf(mountId);
+      lines.push(
+        `  ${String(mount?.name ?? mountId)}: ${mountCapacityLine(mount, pack)}`,
+      );
+    }
     lines.push(
-      `  ${String(doc.name)} on ${String(mount?.name ?? flag.mount)}` +
-        (flag.controlled ? " (controlled)" : " (independent)"),
+      `    ${String(doc.name)}` + (flag.controlled ? " (controlled)" : " (independent)"),
     );
   }
   const block = lines.join("\n");

@@ -571,8 +571,11 @@ to A is three events.
  (`restoreTransformation`, visible when `isPolymorphed`) and the sidebar right-click.
  **The token-corner icon is the same restore**, shipped with riding in v0.7.23:
  `src/rules/transform.ts`. Status `noodlr-transformed`, `hud: false`, Wild Shape item art,
- click → `revertOriginalForm({ renderSheet: false })`. Owner writes the badge, not only the
- primary GM. Token HUD has a backup control. Setting `general.transformUndo`.
+ click → `revertOriginalForm({ renderSheet: false })`. **`isOwner` must not be the write
+ gate** — player and GM both own a PC, transform fires four hooks, and creating an AE does
+ not `updateActor`, so a check-then-create raced two identical "Restore Transformation"
+ icons (v0.7.23). Create is `isRollerFor` plus a keepId (`noodlrTransform0`) and an
+ in-flight lock. Token HUD has a backup control. Setting `general.transformUndo`.
  `noodlrHooks.surveyTransform()` / `noodlrHooks.restoreTransformation()`.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
@@ -4731,16 +4734,28 @@ why `move() === true` is not evidence of movement. A rider who tries to walk is 
 `isForcedMovement` treats as displacement so it does not provoke a second OA.
 
 - **Who can mount:** same disposition or Neutral; player characters also mount Friendly. Mount at
-  least one size larger (`sizeRank`). Unreadable size refuses. Carrying: if both
-  `encumbrance.max` and the rider's burden are readable, burden must fit; unreadable allows.
-  One rider per mount. No riding loop.
-- **2024 cost:** half Speed, round down, stamped on the rider and subtracted from `budgetFor`.
-  Speed 0 cannot mount. Gemini's "controlled mount gets a free Dash" is **false** — Dash is one
-  of three actions, not an extra. Do not implement a free Dash.
-- **Controlled:** Neutral/Friendly default trained (initiative matches rider). Hostile is
-  independent. Action limits (Dash / Disengage / Dodge only) and falling-off saves are **parked**.
+  least one size larger (`sizeRank`). Unreadable size refuses. No riding loop.
+- **Several riders (house rule, not RAW).** The printed rule is written for *a* rider and never
+  forbids a second. Capacity is the **token footprint** plus remaining carry weight. Seats =
+  `max(1, floor(width×height / 2))` — a Large 2×2 horse is two (the real-world two-up the table
+  already plays); Huge 3×3 is four; Gargantuan 4×4 is eight, so a Wild Shaped Brontosaurus takes
+  a party of 4–6 Medium/Small. Each rider costs `max(1, round(their squares))`. Small and Medium
+  are both one square on the board; **weight** is what distinguishes them. Token dimensions win;
+  missing width/height falls back to the size-category default (1 / 4 / 9 / 16). `"occupied"`
+  now means no seats left, not "anyone is already up there."
+- **Carrying:** if both `encumbrance.max` and this rider's burden are readable, `already + this`
+  must fit (`already` = other riders' readable burdens; a null burden counts as 0 in the sum).
+  Unreadable max or this rider's burden still allows — do not invent body-weight tables.
+- **Seats offset** inside the mount so tokens do not stack. A new mount or dismount reseats the
+  whole pack.
+- **2024 cost:** half Speed, round down, stamped on **each** creature that mounts or dismounts
+  and subtracted from `budgetFor`. Speed 0 cannot mount. Gemini's "controlled mount gets a free
+  Dash" is **false** — Dash is one of three actions, not an extra. Do not implement a free Dash.
+- **Controlled:** Neutral/Friendly default trained. Initiative matches the **first** rider only;
+  a passenger does not steal the driver's init. Hostile is independent. Action limits (Dash /
+  Disengage / Dodge only) and falling-off saves are **parked**.
 - Setting `general.riding`. `noodlrHooks.surveyRiding()` / `.mount()` / `.dismount()`.
-- Anatomy, OA "you or the mount", and drag-onto-token automount stay parked.
+- OA "you or the mount" and drag-onto-token automount stay parked.
 
 ## Open items carried over from noodlr
 

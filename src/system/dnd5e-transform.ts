@@ -14,6 +14,14 @@ export const TRANSFORM_STATUS_IMG = "icons/creatures/mammals/bull-horns-eyes-glo
 
 export const TRANSFORM_BADGE_FLAG = "transformBadge";
 
+/**
+ * Fixed 16-char id so two clients (or four hooks on one) cannot stamp two badges.
+ * Creating an embedded AE does not fire `updateActor`, so a check-then-create race
+ * never reaches the "delete extras" path. `keepId: true` makes the second create a
+ * no-op against the same document. Same shape as dnd5e's bloodied / exhaustion ids.
+ */
+export const TRANSFORM_BADGE_ID = "noodlrTransform0";
+
 /** v14 `CONST.ACTIVE_EFFECT_SHOW_ICON.ALWAYS`. Same reason as the Paladin host badge. */
 export const TRANSFORM_SHOW_ICON_ALWAYS = 2;
 
@@ -47,12 +55,37 @@ export function isPolymorphed(actor: any): boolean {
 }
 
 export function isOurTransformBadge(effect: any): boolean {
+  if (effect?.id === TRANSFORM_BADGE_ID || effect?._id === TRANSFORM_BADGE_ID) return true;
   const flag = effect?.flags?.[MODULE_ID]?.[TRANSFORM_BADGE_FLAG];
   return flag === true || Boolean(flag && typeof flag === "object");
 }
 
+export function hasTransformStatus(effect: any): boolean {
+  const statuses = effect?.statuses;
+  if (statuses instanceof Set) return statuses.has(TRANSFORM_STATUS_ID);
+  if (Array.isArray(statuses)) return statuses.includes(TRANSFORM_STATUS_ID);
+  return false;
+}
+
+/** Ours, or any AE carrying the restore status — both draw the same token icon. */
+export function isTransformBadge(effect: any): boolean {
+  return isOurTransformBadge(effect) || hasTransformStatus(effect);
+}
+
+/** Keep one badge; prefer the keepId document so a leftover random-id twin is the extra. */
+export function extrasToDrop(effects: readonly any[]): any[] {
+  const ours = effects.filter(isTransformBadge);
+  if (ours.length <= 1) return [];
+  const keep =
+    ours.find((e) => e?.id === TRANSFORM_BADGE_ID || e?._id === TRANSFORM_BADGE_ID) ??
+    ours.find(isOurTransformBadge) ??
+    ours[0];
+  return ours.filter((e) => e !== keep);
+}
+
 export function transformBadgePayload(actor: any): Record<string, unknown> {
   return {
+    _id: TRANSFORM_BADGE_ID,
     name: "Restore Transformation",
     img: TRANSFORM_STATUS_IMG,
     origin: String(actor?.uuid ?? ""),

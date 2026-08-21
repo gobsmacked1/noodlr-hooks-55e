@@ -10,13 +10,20 @@ import {
   canAffordMount,
   carryingAllowsMount,
   defaultControlled,
+  defaultFootprintSquares,
   dispositionAllowsMount,
+  footprintSquares,
   isOurRidingBadge,
   judgeMount,
   mountCostFeet,
   mountCostFromStamp,
   ridingBadgePayload,
   ridingStatusEntry,
+  seatCapacityFromSquares,
+  seatCellCenter,
+  seatCostFromSquares,
+  seatPlan,
+  seatsAllowMount,
   sizeAllowsMount,
   wouldLoop,
 } from "../src/system/dnd5e-riding";
@@ -121,6 +128,31 @@ test("unreadable carrying allows; a known overload refuses", () => {
   assert.equal(carryingAllowsMount(240, null), true);
   assert.equal(carryingAllowsMount(240, 80), true);
   assert.equal(carryingAllowsMount(50, 80), false);
+  assert.equal(carryingAllowsMount(240, 80, 100), true);
+  assert.equal(carryingAllowsMount(240, 80, 200), false);
+});
+
+test("seats are half the mount footprint; a horse holds two, a brontosaurus a party", () => {
+  assert.equal(footprintSquares(2, 2), 4);
+  assert.equal(footprintSquares(4, 4), 16);
+  assert.equal(footprintSquares(0, 2), null);
+  assert.equal(defaultFootprintSquares(2), 1);
+  assert.equal(defaultFootprintSquares(3), 4);
+  assert.equal(defaultFootprintSquares(5), 16);
+  assert.equal(seatCapacityFromSquares(4), 2);
+  assert.equal(seatCapacityFromSquares(9), 4);
+  assert.equal(seatCapacityFromSquares(16), 8);
+  assert.equal(seatCostFromSquares(1), 1);
+  assert.equal(seatCostFromSquares(0.25), 1);
+  assert.equal(seatCostFromSquares(4), 4);
+  assert.equal(seatsAllowMount(seatPlan({ mountRank: 3, riderRank: 2, seatsUsed: 0 })), true);
+  assert.equal(seatsAllowMount(seatPlan({ mountRank: 3, riderRank: 2, seatsUsed: 1 })), true);
+  assert.equal(seatsAllowMount(seatPlan({ mountRank: 3, riderRank: 2, seatsUsed: 2 })), false);
+  assert.equal(
+    seatsAllowMount(seatPlan({ mountSquares: 16, riderSquares: 1, mountRank: 5, riderRank: 2, seatsUsed: 5 })),
+    true,
+  );
+  assert.deepEqual(seatCellCenter(0, 1), { fx: 0.5, fy: 0.5 });
 });
 
 test("a riding loop or self-mount is refused", () => {
@@ -151,7 +183,15 @@ test("judgeMount names each refusal", () => {
     ok: false,
     reason: "already-riding",
   });
-  assert.deepEqual(judgeMount({ ...legal, mountHasRider: true }), { ok: false, reason: "occupied" });
+  assert.deepEqual(judgeMount({ ...legal, seatsUsed: 1 }), { ok: true });
+  assert.deepEqual(judgeMount({ ...legal, seatsUsed: 2 }), { ok: false, reason: "occupied" });
+  assert.deepEqual(judgeMount({ ...legal, mountSquares: 16, riderSquares: 1, seatsUsed: 5 }), {
+    ok: true,
+  });
+  assert.deepEqual(judgeMount({ ...legal, mountMax: 240, riderBurden: 80, carriedAlready: 200 }), {
+    ok: false,
+    reason: "carrying",
+  });
   assert.deepEqual(judgeMount({ ...legal, ridingOf: { horse: "rider" } }), {
     ok: false,
     reason: "loop",

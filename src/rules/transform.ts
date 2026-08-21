@@ -10,12 +10,17 @@ import { isTransformUndoEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   TRANSFORM_STATUS_IMG,
-  isOurTransformBadge,
+  extrasToDrop,
   isPolymorphed,
+  isTransformBadge,
   registerTransformStatus,
   transformBadgePayload,
 } from "../system/dnd5e-transform";
+import { isRollerFor } from "../util/gm";
 import { wireEffectClicks } from "../util/token-badge";
+
+/** One sync at a time per actor — transform fires updateActor + updateToken + two dnd5e hooks. */
+const inflight = new Map<string, Promise<void>>();
 
 function notify(key: string): void {
   try {
@@ -25,8 +30,8 @@ function notify(key: string): void {
   }
 }
 
-function hasBadge(actor: any): boolean {
-  return [...(actor?.effects ?? [])].some(isOurTransformBadge);
+function actorKey(actor: any): string {
+  return String(actor?.uuid ?? actor?.id ?? "");
 }
 
 export async function restoreOriginalForm(actor: any): Promise<boolean> {
@@ -53,11 +58,30 @@ export async function restoreOriginalForm(actor: any): Promise<boolean> {
 }
 
 async function syncBadge(actor: any): Promise<void> {
+  const key = actorKey(actor);
+  if (!key) return;
+  const prev = inflight.get(key);
+  if (prev) {
+    try {
+      await prev;
+    } catch {
+      /* first pass already logged */
+    }
+    return doSyncBadge(actor);
+  }
+  const run = doSyncBadge(actor).finally(() => {
+    if (inflight.get(key) === run) inflight.delete(key);
+  });
+  inflight.set(key, run);
+  await run;
+}
+
+async function doSyncBadge(actor: any): Promise<void> {
   if (!isTransformUndoEnabled() || !isDnd5e() || !actor) return;
-  if (!actor.isOwner) return;
   const want = isPolymorphed(actor);
-  const existing = [...(actor.effects ?? [])].filter(isOurTransformBadge);
+  const existing = [...(actor.effects ?? [])].filter(isTransformBadge);
   if (!want) {
+    if (!actor.isOwner) return;
     for (const effect of existing) {
       try {
         await effect.delete();
@@ -67,8 +91,10 @@ async function syncBadge(actor: any): Promise<void> {
     }
     return;
   }
-  if (existing.length > 1) {
-    for (const extra of existing.slice(1)) {
+  const extras = extrasToDrop(existing);
+  if (extras.length) {
+    if (!actor.isOwner) return;
+    for (const extra of extras) {
       try {
         await extra.delete();
       } catch {
@@ -77,13 +103,20 @@ async function syncBadge(actor: any): Promise<void> {
     }
     return;
   }
-  if (existing.length === 1) return;
+  if (existing.length >= 1) return;
+  // Exactly one writer. `isOwner` is true for the player AND the GM, so both used to create.
+  if (!isRollerFor(actor)) return;
   registerTransformStatus();
   try {
-    await actor.createEmbeddedDocuments("ActiveEffect", [transformBadgePayload(actor)]);
+    await actor.createEmbeddedDocuments("ActiveEffect", [transformBadgePayload(actor)], { keepId: true });
   } catch (err) {
+    if (existingAfterCreate(actor)) return;
     warn(`transform: could not present badge on ${String(actor.name)}:`, err);
   }
+}
+
+function existingAfterCreate(actor: any): boolean {
+  return [...(actor?.effects ?? [])].some(isTransformBadge);
 }
 
 function wireToken(token: any): void {
@@ -182,12 +215,14 @@ export function surveyTransform(): unknown {
     const actor = token.actor ?? token.document?.actor;
     if (!actor) continue;
     const form = isPolymorphed(actor);
-    const badge = hasBadge(actor);
+    const badges = [...(actor.effects ?? [])].filter(isTransformBadge);
+    const badge = badges.length > 0;
     if (!form && !badge) continue;
     lines.push(
-      `  ${String(token.name ?? actor.name)} polymorphed=${form} badge=${badge}` +
+      `  ${String(token.name ?? actor.name)} polymorphed=${form} badge=${badges.length}` +
         (form && !badge ? " — MISSING ICON" : "") +
-        (!form && badge ? " — STALE BADGE" : ""),
+        (!form && badge ? " — STALE BADGE" : "") +
+        (badges.length > 1 ? " — DUPLICATE ICON" : ""),
     );
   }
   const block = lines.join("\n");

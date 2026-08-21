@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.24
+
+**A mount can carry more than one rider, and Wild Shape no longer draws two restore icons.** How
+many fit is the token's grid space (half its squares — a Large horse seats two, a Gargantuan
+dinosaur a party) plus remaining carry weight. Riders spread across the mount; a controlled
+mount still matches initiative to the first rider. The printed "one rider" reading was a v1
+lock, not RAW.
+
+The restore badge is now a keepId (`noodlrTransform0`) written by the roller, not every owner.
+Player and GM both own a PC, so the old check-then-create raced two identical icons.
+
 ## 0.7.23
 
 **Wild Shape gets a token icon, and tokens can ride.** A transformed creature shows a restore

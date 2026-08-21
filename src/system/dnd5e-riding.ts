@@ -5,7 +5,9 @@
 // slice. Gemini's "controlled mount gets a free Dash" is not in the 2024 text — Dash is one of three
 // actions the mount may take, not an extra one.
 //
-// Willingness is a disposition proxy in v1, not a prompt. Anatomy stays the DM's.
+// Willingness is a disposition proxy, not a prompt. The printed rule is written for *a* rider and
+// never says "one seat". Tables play horses as two-up and a Wild Shaped Brontosaurus as a party
+// wagon, so capacity is the token's grid footprint plus remaining carry weight — not a seat lock.
 
 import { MODULE_ID } from "../constants";
 import { sizeRank } from "./dnd5e-forced-movement";
@@ -87,9 +89,94 @@ export function sizeAllowsMount(riderRank: number | null, mountRank: number | nu
 }
 
 /** Unreadable encumbrance allows — size already passed. Do not invent body-weight tables. */
-export function carryingAllowsMount(mountMax: number | null, riderBurden: number | null): boolean {
+export function carryingAllowsMount(
+  mountMax: number | null,
+  riderBurden: number | null,
+  already = 0,
+): boolean {
   if (mountMax === null || riderBurden === null) return true;
-  return riderBurden <= mountMax;
+  const prior = Number.isFinite(already) && already > 0 ? already : 0;
+  return prior + riderBurden <= mountMax;
+}
+
+/**
+ * Squares this token covers. Tiny is often 0.5×0.5. Null when the dimensions cannot be read —
+ * do not invent a 1×1 that would seat a Brontosaurus as a pony.
+ */
+export function footprintSquares(width: unknown, height: unknown): number | null {
+  const w = Number(width);
+  const h = Number(height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null;
+  return w * h;
+}
+
+/**
+ * Default squares from the size ladder when the token width/height is missing.
+ * tiny/sm/med 1, Large 4, Huge 9, Gargantuan 16 (20 ft).
+ */
+export function defaultFootprintSquares(rank: number | null): number | null {
+  if (rank === null || !Number.isFinite(rank)) return null;
+  if (rank <= 2) return 1;
+  if (rank === 3) return 4;
+  if (rank === 4) return 9;
+  return 16;
+}
+
+export function footprintSquaresOf(
+  width: unknown,
+  height: unknown,
+  rank: number | null,
+): number | null {
+  return footprintSquares(width, height) ?? defaultFootprintSquares(rank);
+}
+
+/**
+ * How many Medium-equivalent seats the mount has.
+ *
+ * Half the footprint, at least one: a Large 2×2 horse is 2 (two human riders), Huge 3×3 is 4,
+ * Gargantuan 4×4 is 8 (a Brontosaurus and a party of 6). The divisor is the horse, not a printed
+ * rule. Token squares win over the size-category default.
+ */
+export function seatCapacityFromSquares(squares: number): number {
+  if (!Number.isFinite(squares) || squares <= 0) return 1;
+  return Math.max(1, Math.floor(squares / 2));
+}
+
+/** Small and Medium are both 1 square on the board. Weight is what distinguishes them. */
+export function seatCostFromSquares(squares: number): number {
+  if (!Number.isFinite(squares) || squares <= 0) return 1;
+  return Math.max(1, Math.round(squares));
+}
+
+export function seatPlan(opts: {
+  mountSquares?: number | null;
+  riderSquares?: number | null;
+  mountRank: number | null;
+  riderRank: number | null;
+  seatsUsed?: number;
+}): { capacity: number; used: number; cost: number } | null {
+  const mountSq = opts.mountSquares ?? defaultFootprintSquares(opts.mountRank);
+  const riderSq = opts.riderSquares ?? defaultFootprintSquares(opts.riderRank);
+  if (mountSq == null || riderSq == null) return null;
+  return {
+    capacity: seatCapacityFromSquares(mountSq),
+    used: Math.max(0, Number(opts.seatsUsed) || 0),
+    cost: seatCostFromSquares(riderSq),
+  };
+}
+
+export function seatsAllowMount(plan: { capacity: number; used: number; cost: number } | null): boolean {
+  if (!plan) return true;
+  return plan.used + plan.cost <= plan.capacity;
+}
+
+/** Fractional centre of seat `index` inside the mount, for packing several riders. */
+export function seatCellCenter(index: number, count: number): { fx: number; fy: number } {
+  const n = Math.max(1, Math.floor(count) || 1);
+  const i = Math.min(Math.max(0, Math.floor(index) || 0), n - 1);
+  const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+  const rows = Math.max(1, Math.ceil(n / cols));
+  return { fx: (i % cols + 0.5) / cols, fy: (Math.floor(i / cols) + 0.5) / rows };
 }
 
 /** Half Speed, rounded down. Speed 0 is not a cost of 0 that we then allow — see `canAffordMount`. */
@@ -156,7 +243,6 @@ export interface MountJudgeInput {
   riderId: string;
   mountId: string;
   riderAlreadyOn?: string;
-  mountHasRider?: boolean;
   ridingOf: Record<string, string | undefined>;
   riderRank: number | null;
   mountRank: number | null;
@@ -165,6 +251,10 @@ export interface MountJudgeInput {
   riderIsPlayer: boolean;
   mountMax?: number | null;
   riderBurden?: number | null;
+  carriedAlready?: number;
+  mountSquares?: number | null;
+  riderSquares?: number | null;
+  seatsUsed?: number;
   inReach: boolean;
   speed?: number | null;
   checkSpeed?: boolean;
@@ -174,7 +264,6 @@ export function judgeMount(input: MountJudgeInput): { ok: true } | { ok: false; 
   if (input.rideableActive) return { ok: false, reason: "rideable" };
   if (input.riderId === input.mountId) return { ok: false, reason: "same" };
   if (input.riderAlreadyOn) return { ok: false, reason: "already-riding" };
-  if (input.mountHasRider) return { ok: false, reason: "occupied" };
   if (wouldLoop(input.riderId, input.mountId, input.ridingOf)) return { ok: false, reason: "loop" };
   if (!sizeAllowsMount(input.riderRank, input.mountRank)) return { ok: false, reason: "size" };
   if (
@@ -186,7 +275,17 @@ export function judgeMount(input: MountJudgeInput): { ok: true } | { ok: false; 
   ) {
     return { ok: false, reason: "disposition" };
   }
-  if (!carryingAllowsMount(input.mountMax ?? null, input.riderBurden ?? null)) {
+  const plan = seatPlan({
+    mountSquares: input.mountSquares,
+    riderSquares: input.riderSquares,
+    mountRank: input.mountRank,
+    riderRank: input.riderRank,
+    seatsUsed: input.seatsUsed,
+  });
+  if (!seatsAllowMount(plan)) return { ok: false, reason: "occupied" };
+  if (
+    !carryingAllowsMount(input.mountMax ?? null, input.riderBurden ?? null, input.carriedAlready ?? 0)
+  ) {
     return { ok: false, reason: "carrying" };
   }
   if (!input.inReach) return { ok: false, reason: "too-far" };
