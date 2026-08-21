@@ -33,12 +33,17 @@ import {
   type AuraSource,
   auraDominates,
   auraModuleOwns,
+  AURA_AA_FLAGS,
   AURA_STATUS_IMG,
   auraSourcesOn,
   auraStatusId,
   auraStrength,
+  auraPresentationPatch,
   auraWriteFlags,
   collapseOverlappingAuras,
+  hostNeedsPresentation,
+  looksLikeGuttedHostAura,
+  looksLikeTransferredAura,
   paladinClassLevel,
   registerAuraStatus,
   registerKnownAuraStatuses,
@@ -274,6 +279,22 @@ function effectPayload(row: Desired): Record<string, unknown> {
   };
 }
 
+/** Update path: dotted flags so we never replace `flags.dnd5e` wholesale. */
+function effectRefresh(row: Desired): Record<string, unknown> {
+  const img = String(row.source.img || AURA_STATUS_IMG);
+  registerAuraStatus(row.identifier || row.source.id, row.source.name, img);
+  return {
+    name: row.source.name,
+    img,
+    origin: row.source.origin,
+    transfer: false,
+    disabled: false,
+    changes: row.changes,
+    ...auraPresentationPatch(statusOf(row), img),
+    [`flags.${MODULE_ID}.${FLAG}`]: { sourceToken: row.sourceTokenId, sourceId: row.source.id },
+  };
+}
+
 async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: number; removed: number }> {
   let wrote = 0;
   let removed = 0;
@@ -284,6 +305,7 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
     if (!flag) continue;
     const key = `${flag.sourceToken}:${flag.sourceId}`;
     if (keep.has(key)) continue;
+    if (isProtectedHostAura(actor, effect)) continue;
     try {
       await effect.delete();
       removed += 1;
@@ -300,7 +322,7 @@ async function applyDesired(actor: any, desired: Desired[]): Promise<{ wrote: nu
     if (have) {
       if (sameChanges(have, row.changes) && samePresentation(have, row) && !have.disabled) continue;
       try {
-        await have.update(effectPayload(row));
+        await have.update(effectRefresh(row));
         wrote += 1;
       } catch (err) {
         warn(`aura: could not refresh "${row.source.name}" on ${String(actor.name)}:`, err);
@@ -321,6 +343,7 @@ async function stripActor(actor: any): Promise<number> {
   let n = 0;
   for (const effect of [...(actor?.effects ?? [])]) {
     if (!ourAura(effect)) continue;
+    if (isProtectedHostAura(actor, effect)) continue;
     try {
       await effect.delete();
       n += 1;
@@ -331,30 +354,123 @@ async function stripActor(actor: any): Promise<number> {
   return n;
 }
 
-/**
- * A transferred aura never writes a second bonus on the Paladin (`receivesOwnAura` is
- * false). That also left them with no token icon — their sheet AE has no status. A
- * badge is the same document with empty changes: visible, no double +Cha.
- */
-function addCarrierBadges(token: any, desired: Desired[]): Desired[] {
-  const actor = token.actor;
-  if (sourceIsSuppressed(actor)) return desired;
-  const have = new Set(desired.map((d) => d.identifier));
-  const out = [...desired];
-  for (const source of auraSourcesOn(actor)) {
-    if (!source.includeSelf || !source.transferSelf) continue;
-    if (!spellAuraIsActive(actor, source)) continue;
-    if (have.has(source.identifier)) continue;
-    out.push({
-      identifier: source.identifier,
-      source,
-      sourceTokenId: tokenIdOf(token),
-      sourceName: String(tokenNameOf(token) || actor?.name || "?"),
-      changes: [],
-    });
-    have.add(source.identifier);
+function hostSources(actor: any): AuraSource[] {
+  return auraSourcesOn(actor).filter((source) => source.includeSelf && source.transferSelf);
+}
+
+function transferredOn(actor: any, source: AuraSource): any | null {
+  for (const effect of actor?.effects ?? []) {
+    if (looksLikeTransferredAura(effect, source)) return effect;
   }
-  return out;
+  return null;
+}
+
+function guttedOn(actor: any, source: AuraSource): any | null {
+  for (const effect of actor?.effects ?? []) {
+    if (looksLikeGuttedHostAura(effect, source)) return effect;
+  }
+  return null;
+}
+
+async function dropOurFlag(effect: any): Promise<void> {
+  if (typeof effect?.unsetFlag === "function") {
+    await effect.unsetFlag(MODULE_ID, FLAG);
+    return;
+  }
+  await effect.update({ [`flags.${MODULE_ID}.-=${FLAG}`]: null });
+}
+
+/**
+ * The Paladin's +Cha is the sheet-transferred AE. v0.7.19 created a second document
+ * with the same name and origin and empty changes so the token would show an icon.
+ * Same-origin create (and DAE's name merge) can land that payload on the transferred
+ * AE itself: the Paladin loses the bonus, allies still get copies read off the item.
+ * Stamp the existing document. Never create a hollow twin. Restore a gutted one
+ * before `stripActor` — that path deletes anything carrying our flag.
+ */
+async function presentHostAuras(actor: any): Promise<number> {
+  if (!actor || sourceIsSuppressed(actor)) return 0;
+  const data = rollDataOf(actor);
+  let wrote = 0;
+  for (const source of hostSources(actor)) {
+    if (!spellAuraIsActive(actor, source)) continue;
+    const img = String(source.img || AURA_STATUS_IMG);
+    const status = auraStatusId(source.identifier, source.id);
+    registerAuraStatus(source.identifier || source.id, source.name, img);
+    const patch = auraPresentationPatch(status, img);
+    const have = transferredOn(actor, source);
+    const gutted = guttedOn(actor, source);
+    if (have && gutted && have !== gutted) {
+      if (hostNeedsPresentation(have, status, img)) {
+        try {
+          await have.update(patch);
+          wrote += 1;
+        } catch (err) {
+          warn(`aura: could not present "${source.name}" on ${String(actor.name)}:`, err);
+        }
+      }
+      continue;
+    }
+    if (gutted) {
+      try {
+        await gutted.update({
+          changes: resolveChanges(source, data),
+          disabled: false,
+          ...patch,
+        });
+        await dropOurFlag(gutted);
+        wrote += 1;
+      } catch (err) {
+        warn(`aura: could not restore "${source.name}" on ${String(actor.name)}:`, err);
+      }
+      continue;
+    }
+    if (have) {
+      if (!hostNeedsPresentation(have, status, img)) continue;
+      try {
+        await have.update(patch);
+        wrote += 1;
+      } catch (err) {
+        warn(`aura: could not present "${source.name}" on ${String(actor.name)}:`, err);
+      }
+      continue;
+    }
+    if (actorHasItemAura(actor, source)) continue;
+    try {
+      await actor.createEmbeddedDocuments("ActiveEffect", [
+        {
+          name: source.name,
+          img,
+          origin: source.origin,
+          transfer: false,
+          disabled: false,
+          statuses: [status],
+          changes: resolveChanges(source, data),
+          flags: { dnd5e: { isTemporary: true }, autoanimations: { ...AURA_AA_FLAGS } },
+        },
+      ]);
+      wrote += 1;
+    } catch (err) {
+      warn(`aura: could not replace "${source.name}" on ${String(actor.name)}:`, err);
+    }
+  }
+  return wrote;
+}
+
+function actorHasItemAura(actor: any, source: AuraSource): boolean {
+  if (!source.itemId) return false;
+  for (const effect of actor?.effects ?? []) {
+    if (String(effect?.origin ?? "").includes(source.itemId)) return true;
+  }
+  return false;
+}
+
+function isProtectedHostAura(actor: any, effect: any): boolean {
+  return hostSources(actor).some((source) => {
+    if (!looksLikeGuttedHostAura(effect, source)) return false;
+    const have = transferredOn(actor, source);
+    return !have || have === effect;
+  });
 }
 
 async function refreshAuras(): Promise<void> {
@@ -368,10 +484,8 @@ async function refreshAuras(): Promise<void> {
     const id = String(actor?.uuid ?? actor?.id ?? "");
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const desired = addCarrierBadges(
-      token,
-      collapseOverlappingAuras(wanted.get(id) ?? [], ownTransferredStrengths(actor)),
-    );
+    wrote += await presentHostAuras(actor);
+    const desired = collapseOverlappingAuras(wanted.get(id) ?? [], ownTransferredStrengths(actor));
     if (!desired.length) {
       removed += await stripActor(actor);
       continue;

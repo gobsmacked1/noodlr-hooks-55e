@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.20
+
+**The Paladin no longer loses his own Aura of Protection.** v0.7.19 created a hollow
+badge effect with the same name and origin as the sheet-transferred +Cha, so the token
+would show an icon without doubling the bonus. A same-origin create — or DAE merging
+by name — could land that empty payload and our delete flag on the real grant. The
+next poll then stripped the Paladin's aura while allies kept theirs, because those
+copies are read off the item. Presentation is now stamped onto the existing
+transferred effect. A gutted one is restored from the item before anything is
+stripped. There is no second document.
+
 ## 0.7.19
 
 **The Paladin sees the aura icon too, without a second save bonus.** The sheet already

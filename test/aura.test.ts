@@ -11,11 +11,15 @@ import {
   auraStatusEntry,
   auraStatusId,
   auraStrength,
+  auraPresentationPatch,
   auraWriteFlags,
   collapseOverlappingAuras,
+  hostNeedsPresentation,
   interpolateAtRefs,
   isOccupyingField,
   knownAuraOf,
+  looksLikeGuttedHostAura,
+  looksLikeTransferredAura,
   normalizeRadiusFormula,
   paladinAuraRadiusAtLevel,
   parseAuraLength,
@@ -220,6 +224,76 @@ test("a transferred aura does not write a second copy onto the carrier", () => {
   assert.equal(receivesOwnAura({ includeSelf: true, transferSelf: true } as any), false);
   assert.equal(receivesOwnAura({ includeSelf: true, transferSelf: false } as any), true);
   assert.equal(receivesOwnAura({ includeSelf: false, transferSelf: false } as any), false);
+});
+
+test("the Paladin's transferred AE is never classified as ours", () => {
+  const source = {
+    id: "prot:fx",
+    itemId: "prot",
+    identifier: "aura-of-protection",
+    name: "Aura of Protection",
+  } as any;
+  const transferred = {
+    name: "Aura of Protection",
+    origin: "Actor.p.Item.prot",
+    changes: [{ key: "system.bonuses.abilities.save", value: "5" }],
+    flags: { dnd5e: {} },
+  };
+  assert.equal(looksLikeTransferredAura(transferred, source), true);
+  assert.equal(looksLikeGuttedHostAura(transferred, source), false);
+});
+
+test("a hollow badge that ate the transferred AE is gutted, not a copy to delete", () => {
+  const source = {
+    id: "prot:fx",
+    itemId: "prot",
+    identifier: "aura-of-protection",
+    name: "Aura of Protection",
+  } as any;
+  const gutted = {
+    name: "Aura of Protection",
+    origin: "Actor.p.Item.prot",
+    changes: [],
+    flags: { "noodlr-hooks-55e": { aura: { sourceToken: "tok", sourceId: "prot:fx" } } },
+  };
+  assert.equal(looksLikeGuttedHostAura(gutted, source), true);
+  assert.equal(looksLikeTransferredAura(gutted, source), false);
+});
+
+test("an ally copy with real changes is not a gutted host aura", () => {
+  const source = {
+    id: "prot:fx",
+    itemId: "prot",
+    identifier: "aura-of-protection",
+    name: "Aura of Protection",
+  } as any;
+  const copy = {
+    name: "Aura of Protection",
+    origin: "Actor.p.Item.prot",
+    changes: [{ key: "system.bonuses.abilities.save", value: "5" }],
+    flags: { "noodlr-hooks-55e": { aura: { sourceToken: "tok", sourceId: "prot:fx" } } },
+  };
+  assert.equal(looksLikeGuttedHostAura(copy, source), false);
+  assert.equal(looksLikeTransferredAura(copy, source), false);
+});
+
+test("host presentation is a dotted patch and does not replace flags.dnd5e", () => {
+  const patch = auraPresentationPatch("noodlr-aura-of-protection", "icons/svg/aura.svg");
+  assert.equal(patch["flags.dnd5e.isTemporary"], true);
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, "flags"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(patch, "dnd5e"), false);
+  const bare = {
+    img: "icons/svg/mystery-man.svg",
+    statuses: [],
+    flags: { dnd5e: { dependents: [{ uuid: "keep-me" }] } },
+  };
+  assert.equal(hostNeedsPresentation(bare, "noodlr-aura-of-protection", "icons/svg/aura.svg"), true);
+  const stamped = {
+    img: "icons/svg/aura.svg",
+    statuses: ["noodlr-aura-of-protection"],
+    flags: { dnd5e: { isTemporary: true }, autoanimations: { killAnim: true, isEnabled: false } },
+  };
+  assert.equal(hostNeedsPresentation(stamped, "noodlr-aura-of-protection", "icons/svg/aura.svg"), false);
 });
 
 test("Aura of Courage with an empty tracker AE still grants frightened immunity", () => {

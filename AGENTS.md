@@ -868,12 +868,18 @@ migrate, so the inherited prefix would have implied one.
     A canned id would overlay Paralyzed / Frightened. Token HUD skips `hud: false`
     (`token-hud.mjs` `_getStatusEffectChoices`), so there is no click-toggle.
     `auraStatusId` is `noodlr-aura-of-protection`. Also `flags.dnd5e.isTemporary`.
-    The Paladin's transferred AE has neither, so a **badge** copy with empty
-    `changes` carries the icon without doubling +Cha. Automated Animations matches
-    "Aura of Protection" as a persistent aefx — every copy writes
-    `flags.autoanimations.killAnim`. Existing copies pick flags and status up on
-    the next poll. Sequencer persistents already playing need the Effect Manager
-    once; new applies do not start them.
+    Stamp those onto the Paladin's **existing transferred AE** — never a second
+    document. v0.7.19 wrote a hollow badge with the same name and origin; a
+    same-origin create (or DAE merging by name) landed empty `changes` and our
+    delete flag on the sheet AE. Allies still got copies (those are read off the
+    item). The Paladin lost their own bonus when the poll deleted "ours" or when
+    the merge gutted the grant. **Fixed in v0.7.20:** `looksLikeGuttedHostAura`
+    restores the item numbers and drops our flag before `stripActor`. Presentation
+    updates use dotted `flags.dnd5e.isTemporary` so they cannot replace that
+    namespace.
+    Automated Animations matches "Aura of Protection" as a persistent aefx —
+    copies and the stamped host AE write `flags.autoanimations.killAnim`.
+    Sequencer persistents already playing need the Effect Manager once.
   - **Same identifier, highest number; different identifiers independently (user, 2026-08-21).**
     Two Paladins both hosting Aura of Protection is one bonus — the +5, not +5 and +3. Protection
     beside Courage (or any other distinct aura) both apply. The Paladin's own transferred AE

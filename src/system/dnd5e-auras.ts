@@ -355,6 +355,61 @@ export function auraWriteFlags(sourceToken: string, sourceId: string): Record<st
   };
 }
 
+/** Dotted paths so an update cannot replace `flags.dnd5e` and wipe dependents. */
+export function auraPresentationPatch(statusId: string, img: string): Record<string, unknown> {
+  return {
+    statuses: [statusId],
+    img,
+    "flags.dnd5e.isTemporary": true,
+    "flags.autoanimations.killAnim": true,
+    "flags.autoanimations.isEnabled": false,
+    "flags.autoanimations.version": 99,
+  };
+}
+
+function effectHasStatus(effect: any, status: string): boolean {
+  const statuses = effect?.statuses;
+  if (statuses instanceof Set) return statuses.has(status);
+  if (Array.isArray(statuses)) return statuses.includes(status);
+  return false;
+}
+
+export function hostNeedsPresentation(effect: any, statusId: string, img: string): boolean {
+  if (!effectHasStatus(effect, statusId)) return true;
+  const aa = effect?.flags?.autoanimations;
+  if (!aa?.killAnim && aa?.isEnabled !== false) return true;
+  if (effect?.flags?.dnd5e?.isTemporary !== true) return true;
+  return Boolean(img) && String(effect?.img ?? "") !== img;
+}
+
+/**
+ * The sheet-transferred AE on the Paladin. Never ours — no `flags.<ns>.aura`.
+ * Origin is the item; name is a fallback when an importer dropped origin.
+ */
+export function looksLikeTransferredAura(effect: any, source: AuraSource): boolean {
+  if (!effect || effect.disabled) return false;
+  if (effect.flags?.[MODULE_ID]?.aura) return false;
+  const origin = String(effect.origin ?? "");
+  if (source.itemId && origin.includes(source.itemId)) return true;
+  const named = String(effect.name ?? "").toLowerCase() === source.name.toLowerCase();
+  return named && Array.isArray(effect.changes) && effect.changes.length > 0;
+}
+
+/**
+ * v0.7.19 wrote a hollow badge with the transferred AE's name and origin. DAE / same-origin
+ * create can merge that into the sheet AE: empty changes, our delete flag. Allies still
+ * receive copies (those are read off the item). The Paladin has lost their own bonus.
+ */
+export function looksLikeGuttedHostAura(effect: any, source: AuraSource): boolean {
+  const flag = effect?.flags?.[MODULE_ID]?.aura;
+  if (!flag || typeof flag !== "object") return false;
+  if (Array.isArray(effect?.changes) && effect.changes.length > 0) return false;
+  const origin = String(effect.origin ?? "");
+  if (source.itemId && origin.includes(source.itemId)) return true;
+  if (String(flag.sourceId ?? "") === source.id) return true;
+  return String(effect.name ?? "").toLowerCase() === source.name.toLowerCase();
+}
+
 export function audienceOfFlag(raw: unknown): AuraAudience {
   const s = String(raw ?? "").toLowerCase();
   if (s === "enemy" || s === "enemies" || s === "hostile") return "enemies";
