@@ -33,7 +33,7 @@ import {
 import { readRest } from "../system/dnd5e-rest";
 import { bindingsFor } from "./bindings";
 import { conditionsMet, type EvalContext, type Subject } from "./predicates";
-import { describePredicate, describeRule, staticRefusal } from "./describe";
+import { describePredicate, describeRule, onMoveDamageRefusal, staticRefusal } from "./describe";
 import { asQuantity, resolveQuantity } from "./quantity";
 import {
   addCombatants,
@@ -194,18 +194,13 @@ export async function fireTrigger(
         continue;
       }
       try {
-        if (
-          event === "on_move" &&
-          rule.effect?.kind === "damage" &&
-          (rule.effect.target === undefined || rule.effect.target === null)
-        ) {
-          // Ashardalon's Stride in the live cache left target unset; `subjectOf` would default
-          // that to the mover and the caster would burn themselves. See `capability/move.ts`.
+        const moveRefuse = onMoveDamageRefusal(rule);
+        if (moveRefuse) {
           outcomes.push({
             capability: capability.label,
             ruleIndex: index,
             fired: false,
-            reason: "on_move damage left its target unset — refusing to guess the mover",
+            reason: moveRefuse,
           });
           continue;
         }

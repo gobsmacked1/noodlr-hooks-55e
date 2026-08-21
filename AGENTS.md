@@ -552,6 +552,24 @@ to A is three events.
  refusal burns the caster for 1d6 fire every turn they walk. The refusal reason is on the
  capability sheet: `"on_move damage left its target unset — refusing to guess the mover"`. An
  explicit `target: "self"` still runs — that is a stated reading, not a guess.
+- **`target: "trigger"` ON THIS EVENT IS THE SAME HOLE (v0.7.22).** `on_move` sets `ctx.trigger`
+ to the mover, so a compiled "damage whoever triggered this" always hits the walker. Investiture
+ of Flame (flames don't harm *you*; others take 1d10 if they enter/end turn within 5 ft) and
+ Spike Growth (2d4 in the *area*) both compiled that way. A level-20 Land Druid Wild Shaped into
+ a Giant Owl, the token recentered Medium→Large, and both riders plus a follow-on Feast of Flesh
+ advantage posted — 6 HP written through to the original sheet. `onMoveDamageRefusal` is the
+ one answer; the capability sheet and the executor both call it. Do not recompile the world to
+ "fix" those descriptors — the guard is what ships.
+- **A TRANSFORM IS NOT A WALK.** The same incident: Wild Shape / Polymorph / Shapechange writes
+ `actorId` and/or `width`/`height`/`shape` and often `x`/`y` because Foundry keeps the centre.
+ Core lists those dimension keys on `TokenDocument.MOVEMENT_FIELDS`. `tokenDeltaIsTransform`
+ skips the combined write; a follow-up x/y-only recenter inside `TRANSFORM_GRACE_MS` (500 ms)
+ is skipped too. A later walk is a full square and is not. Forced movement still fires —
+ `isForcedMovement` is still not consulted.
+- **Do not intercept the Argon Wild Shape button as revert.** Beast-to-beast must stay legal,
+ and a revert must not spend a Wild Shape use. dnd5e already restores from the sheet header
+ (`restoreTransformation`, visible when `isPolymorphed`) and the sidebar right-click. A
+ token-corner revert icon — clear of stock statuses and Paladin aura badges — is parked.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
 
@@ -4699,6 +4717,21 @@ an argument.
   walk/fly, so crawl rates never applied. Default stand. Stay down only when keepDistance,
   no melee within 5 feet, and the plan does not travel. `core/` still names no D&D status
   — crawl is `intent.action` from execute.
+
+## Next: mount riding (after the v0.7.22 Wild Shape re-test)
+
+Parked 2026-08-21. Do not start until the Wild Shape `on_move` guards have been seen at the table.
+
+- **No Rideable dependency.** Learn from https://github.com/Saibot393/Rideable (it deletes `x`/`y` in
+  `preUpdateToken` for grappled/mounted — `move() === true` is not evidence of movement), then
+  implement against core + dnd5e.
+- **Who can mount (user):** any disposition may mount the same disposition plus Neutral. Players
+  mount Friendly and Neutral. Strength and size must allow it.
+- **Verify Gemini's 2024 summary against the PHB / dnd5e before coding.** Willing; anatomy is the
+  DM; at least one size larger; carrying capacity (not a separate rider-weight penalty); use the
+  mount's speed and locomotion; mount/dismount costs half the rider's speed (speed 0 cannot);
+  Controlled (initiative matches, Dash / Disengage / Dodge only) vs Independent (own turn, full
+  actions). The "controlled mount gets a free Dash" claim especially needs a page cite.
 
 ## Open items carried over from noodlr
 

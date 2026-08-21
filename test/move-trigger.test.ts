@@ -1,8 +1,18 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { alreadyMoved, fireMoveTriggers, resetMoveDispatch } from "../src/capability/move";
+import {
+  alreadyMoved,
+  fireMoveTriggers,
+  noteTokenTransformed,
+  resetMoveDispatch,
+  skipBecauseTransformed,
+  tokenDeltaIsLocomotion,
+  tokenDeltaIsTransform,
+  TRANSFORM_GRACE_MS,
+} from "../src/capability/move";
 import { bindCapabilities, clearBindings } from "../src/capability/bindings";
+import { onMoveDamageRefusal } from "../src/capability/describe";
 import { __clearShadow } from "../src/capability/uses";
 import { __damageLogInternals } from "../src/capability/damage-log";
 import { validateCapability, type Capability } from "../src/integration/capability";
@@ -201,4 +211,51 @@ test("alreadyMoved keys on destination, not on the token alone", () => {
   assert.equal(alreadyMoved(walker.doc, 1_100), true);
   walker.doc.x = 300;
   assert.equal(alreadyMoved(walker.doc, 1_200), false);
+});
+
+/** Investiture of Flame as the live cache compiled it: on_move, damage the trigger. */
+const INVESTITURE: Capability = {
+  id: "hash-investiture",
+  label: "Investiture of Flame",
+  status: "compiled",
+  rules: [
+    {
+      trigger: { event: "on_move" },
+      condition: [{ kind: "within_distance", feet: { value: 5, units: "ft" } }],
+      effect: { kind: "damage", amount: { dice: "1d10" }, damageType: "fire", target: "trigger" },
+      adjudication: "engine",
+    },
+  ],
+};
+
+test("on_move damage aimed at trigger is refused — that is the mover", async () => {
+  const druid = creature("Drew Id", "Actor.drew");
+  assert.deepEqual(validateCapability(INVESTITURE), { ok: true, errors: [], warnings: [] });
+  bindCapabilities(druid.actor.uuid, [{ capability: INVESTITURE }]);
+
+  await fireMoveTriggers(druid.doc);
+  assert.deepEqual(damaged, [], "trigger on on_move is the walker; we do not burn them");
+  assert.match(onMoveDamageRefusal(INVESTITURE.rules[0]), /trigger/);
+});
+
+test("a walk is locomotion; a Wild Shape recenter is not", () => {
+  assert.equal(tokenDeltaIsLocomotion({ x: 100, y: 200 }), true);
+  assert.equal(tokenDeltaIsLocomotion({ elevation: 5 }), true);
+  assert.equal(tokenDeltaIsLocomotion({ hidden: true }), false);
+
+  assert.equal(tokenDeltaIsTransform({ x: 50, y: 50, width: 2, height: 2 }), true);
+  assert.equal(tokenDeltaIsLocomotion({ x: 50, y: 50, width: 2, height: 2 }), false);
+  assert.equal(tokenDeltaIsTransform({ actorId: "Actor.owl", x: 50, y: 50 }), true);
+  assert.equal(tokenDeltaIsTransform({ flags: { dnd5e: { isPolymorphed: true } } }), true);
+  assert.equal(tokenDeltaIsTransform({ "flags.dnd5e.isPolymorphed": true, x: 50 }), true);
+  assert.equal(tokenDeltaIsTransform({ x: 100, y: 200 }), false);
+});
+
+test("a follow-up x/y after a transform is skipped, a later walk is not", () => {
+  const id = "token-drew";
+  const t0 = 10_000;
+  noteTokenTransformed(id, t0);
+  assert.equal(skipBecauseTransformed(id, t0 + 100), true);
+  assert.equal(skipBecauseTransformed(id, t0 + TRANSFORM_GRACE_MS - 1), true);
+  assert.equal(skipBecauseTransformed(id, t0 + TRANSFORM_GRACE_MS), false);
 });

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.22
+
+**Wild Shape no longer counts as a walk, and a trail rider no longer burns the walker.** A Land
+Druid turning into a Giant Owl recentered the token (Medium → Large). Compiled Investiture of
+Flame and Spike Growth then fired as `on_move` damage aimed at `trigger` — which on that event
+is the mover — and wrote the hits through to the original sheet. Changing size, swapping the
+actor, or landing a polymorph flag is not locomotion. Damage that does not name anyone, or names
+`trigger`, is refused; an explicit `self` still runs. Revert stays on dnd5e's sheet header
+(Restore Transformation). The Argon Wild Shape button is not intercepted.
+
 ## 0.7.21
 
 **The Paladin shows Aura of Protection as well as Courage, and the icons stay.** Allies

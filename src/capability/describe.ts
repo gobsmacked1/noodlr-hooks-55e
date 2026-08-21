@@ -314,10 +314,31 @@ export interface RuleView {
  * the two answers to "can X see Y" and the two answers to "how far is that": the cheap local copy looks
  * reasonable in isolation and is quietly missing a case.
  *
- * Absent `item` is "not checked", never "clear" — the callers that have no feature in hand must not be
- * able to report a clean bill of health they never asked for.
+ * Absent `item` is "not checked" for the item-scoped predicates, never "clear" — the callers that
+ * have no feature in hand must not be able to report a clean bill of health they never asked for.
+ * `onMoveDamageRefusal` is about the rule's own shape and does not need an item.
  */
+/**
+ * `on_move` damage aimed at the mover. Unset defaults to `self` via `subjectOf`; `trigger` IS the
+ * mover on this event (Investiture of Flame, Spike Growth, Crown of Radiance compiled as the
+ * watcher's reading). Explicit `target: "self"` is a stated reading and is not refused here.
+ */
+export function onMoveDamageRefusal(rule: CapabilityRule): string {
+  if (rule.trigger?.event !== "on_move") return "";
+  if (rule.effect?.kind !== "damage") return "";
+  const target = rule.effect.target;
+  if (target === undefined || target === null) {
+    return "on_move damage left its target unset — refusing to guess the mover";
+  }
+  if (target === "trigger") {
+    return "on_move damage targeting trigger — that is the mover, and the watcher's reading is not implemented";
+  }
+  return "";
+}
+
 export function staticRefusal(rule: CapabilityRule, item: unknown): string {
+  const move = onMoveDamageRefusal(rule);
+  if (move) return move;
   if (!item) return "";
   return duplicatesItemDamage(rule, item) ?? sneakClaimedNatively(rule, item) ?? "";
 }

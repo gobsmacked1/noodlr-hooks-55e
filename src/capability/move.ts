@@ -16,7 +16,16 @@
 // `effect.target` as `self`, and Ashardalon's Stride in the live cache left the target unset with
 // a `within_distance` guard that compares the mover to itself (0 ft ≤ 5). Wiring that without a
 // refusal burns the caster for 1d6 fire every turn they walk. "I could not name who" is not
-// "damage the person who moved".
+// "damage the person who moved". `target: "trigger"` is the same hole on this event — the mover
+// IS the trigger — and is how Investiture of Flame and Spike Growth burned a Wild Shaped druid
+// who had not walked. See `onMoveDamageRefusal`.
+//
+// A TRANSFORM IS NOT A WALK. Wild Shape / Polymorph / Shapechange recenters the token when the
+// footprint grows (Medium → Large shifts `x`/`y` by half a square). Core even lists `width` /
+// `height` / `shape` on `TokenDocument.MOVEMENT_FIELDS`. Those updates must not fire `on_move`,
+// or every compiled trail/aura rider on the original sheet lands on the new form. `actorId` and
+// the polymorph flags are the other half of the same write. A follow-up x/y-only recenter inside
+// `TRANSFORM_GRACE_MS` is skipped too; a later walk is a full square and is not.
 //
 // ONE FIRE PER SETTLE. A drag or a multi-waypoint `move()` can emit several `updateToken`s; the
 // Ready layer coalesces those, and so do we. Keyed on token + destination so walking to A, then
@@ -28,8 +37,57 @@ import type { Subject } from "./predicates";
 
 const last = new Map<string, { x: number; y: number; elev: number; at: number }>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const transformedAt = new Map<string, number>();
 const SETTLE_MS = 400;
 const DEBOUNCE_MS = 150;
+/** Long enough to swallow a size-recenter that arrives as a second write; short enough that a
+ *  Moon Druid who Wild Shapes and then walks is not robbed of the walk. */
+export const TRANSFORM_GRACE_MS = 500;
+
+/**
+ * This token update is a transform, a resize, or an actor swap — not locomotion.
+ *
+ * Linked Wild Shape writes `actorId` plus the new footprint; unlinked writes `width`/`height` and
+ * `flags.dnd5e.isPolymorphed`. Either may also carry `x`/`y` because Foundry keeps the centre.
+ */
+export function tokenDeltaIsTransform(changes: unknown): boolean {
+  const c = changes as Record<string, unknown> | null;
+  if (!c || typeof c !== "object") return false;
+  if ("actorId" in c) return true;
+  if ("width" in c || "height" in c || "shape" in c) return true;
+  const flags = c.flags as Record<string, unknown> | undefined;
+  const dnd5e = flags?.dnd5e as Record<string, unknown> | undefined;
+  if (dnd5e && typeof dnd5e === "object" && ("isPolymorphed" in dnd5e || "originalActor" in dnd5e)) {
+    return true;
+  }
+  return Object.keys(c).some(
+    (k) => k === "flags.dnd5e.isPolymorphed" || k === "flags.dnd5e.originalActor",
+  );
+}
+
+/** Position changed, and nothing about the update says this is a transform or a resize. */
+export function tokenDeltaIsLocomotion(changes: unknown): boolean {
+  const c = changes as Record<string, unknown> | null;
+  if (!c || typeof c !== "object") return false;
+  if (c.x === undefined && c.y === undefined && c.elevation === undefined) return false;
+  return !tokenDeltaIsTransform(c);
+}
+
+export function noteTokenTransformed(tokenId: string, at = Date.now()): void {
+  if (!tokenId) return;
+  transformedAt.set(tokenId, at);
+}
+
+export function skipBecauseTransformed(tokenId: string, at = Date.now()): boolean {
+  if (!tokenId) return false;
+  const stamped = transformedAt.get(tokenId);
+  if (stamped === undefined) return false;
+  if (at - stamped >= TRANSFORM_GRACE_MS) {
+    transformedAt.delete(tokenId);
+    return false;
+  }
+  return true;
+}
 
 function docOf(token: any): any {
   return token?.document ?? token;
@@ -103,9 +161,13 @@ export function scheduleMove(token: any): void {
 
 export function registerMoveTriggers(): void {
   Hooks.on("updateToken", (doc: any, changes: any) => {
-    if (changes?.x === undefined && changes?.y === undefined && changes?.elevation === undefined) {
+    const id = String(doc?.id ?? "");
+    if (tokenDeltaIsTransform(changes)) {
+      noteTokenTransformed(id);
       return;
     }
+    if (!tokenDeltaIsLocomotion(changes)) return;
+    if (skipBecauseTransformed(id)) return;
     scheduleMove(doc);
   });
 }
@@ -114,4 +176,5 @@ export function resetMoveDispatch(): void {
   last.clear();
   for (const t of timers.values()) clearTimeout(t);
   timers.clear();
+  transformedAt.clear();
 }

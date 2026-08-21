@@ -458,8 +458,9 @@ const MECHANICS: Page = {
           id: "transformUndo",
           label: "Undoing transformations",
           hint:
-            "Reverting a polymorphed or wild-shaped actor cleanly. dnd5e stores the original and can " +
-            "restore it; doing so automatically when the effect ends is not built.",
+            "dnd5e already restores from the sheet header (tiny back-arrow, Restore Transformation) " +
+            "and the sidebar right-click. Do not intercept the Argon Wild Shape button — beast-to-beast " +
+            "must stay legal, and a revert must not spend a use. A token-corner revert icon is parked.",
           state: "planned",
         },
       ],
