@@ -23,6 +23,7 @@ import {
   footprintSquaresOf,
   isOurRidingBadge,
   judgeMount,
+  judgeStayMounted,
   type MountCostStamp,
   type MountRefuse,
   mountCostFeet,
@@ -37,7 +38,11 @@ import {
   walkSpeedOf,
 } from "../system/dnd5e-riding";
 import { FLAG_NAMESPACE, readFlag } from "../util/flags";
-import { wireEffectClicks } from "../util/token-badge";
+import { isPrimaryGM } from "../util/gm";
+import { registerBadgeClick, wireEffectClicks } from "../util/token-badge";
+
+/** Same cadence as auras and perception — a walk hook misses a mount that changed size in place. */
+export const RIDING_FIT_POLL_MS = 6000;
 
 export interface RidingFlag {
   mount: string;
@@ -156,7 +161,8 @@ export function withinMountReach(
   const from = centerOf(rider);
   const to = centerOf(mount);
   if (!from || !to) return false;
-  const reach = gridDistance + tokenRadiusFeet(rider, gridDistance) + tokenRadiusFeet(mount, gridDistance);
+  const reach =
+    gridDistance + tokenRadiusFeet(rider, gridDistance) + tokenRadiusFeet(mount, gridDistance);
   return measure(from, to) <= reach + 0.05;
 }
 
@@ -174,7 +180,10 @@ function seatOf(mount: any, rider: any): { x: number; y: number; elevation: numb
     .filter((d) => d.id !== rider.id)
     .concat(rider)
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
-  const index = Math.max(0, pack.findIndex((d) => d.id === rider.id));
+  const index = Math.max(
+    0,
+    pack.findIndex((d) => d.id === rider.id),
+  );
   const { fx, fy } = seatCellCenter(index, pack.length);
   return {
     x: mx + fx * mw - rw / 2,
@@ -252,16 +261,12 @@ async function stripBadge(actor: any): Promise<void> {
   }
 }
 
-function judgeDocs(rider: any, mount: any, opts?: { force?: boolean }): ReturnType<typeof judgeMount> {
-  if (opts?.force) return { ok: true };
-  const speed = walkSpeedOf(rider?.actor);
-  const combatOn = Boolean((game as any).combat?.started);
+function stayInput(rider: any, mount: any) {
   const others = ridersOf(String(mount.id)).filter((d) => d.id !== rider.id);
-  return judgeMount({
+  return {
     rideableActive: rideableOwns(),
     riderId: String(rider.id),
     mountId: String(mount.id),
-    riderAlreadyOn: ridingOn(rider)?.mount,
     ridingOf: ridingMap(),
     riderRank: sizeRankOf(rider.actor),
     mountRank: sizeRankOf(mount.actor),
@@ -271,13 +276,39 @@ function judgeDocs(rider: any, mount: any, opts?: { force?: boolean }): ReturnTy
     mountMax: encumbranceMaxOf(mount.actor),
     riderBurden: encumbranceValueOf(rider.actor),
     carriedAlready: others.reduce((n, d) => n + riderBurdenOf(d), 0),
-    mountSquares: footprintSquaresOf(mount.width, mount.height, sizeRankOf(mount.actor)),
-    riderSquares: footprintSquaresOf(rider.width, rider.height, sizeRankOf(rider.actor)),
+    mountSquares: footprintSquaresOf(
+      mount.width ?? mount._source?.width,
+      mount.height ?? mount._source?.height,
+      sizeRankOf(mount.actor),
+    ),
+    riderSquares: footprintSquaresOf(
+      rider.width ?? rider._source?.width,
+      rider.height ?? rider._source?.height,
+      sizeRankOf(rider.actor),
+    ),
     seatsUsed: others.reduce((n, d) => n + riderSeatCost(d), 0),
+  };
+}
+
+function judgeDocs(
+  rider: any,
+  mount: any,
+  opts?: { force?: boolean },
+): ReturnType<typeof judgeMount> {
+  if (opts?.force) return { ok: true };
+  const speed = walkSpeedOf(rider?.actor);
+  const combatOn = Boolean((game as any).combat?.started);
+  return judgeMount({
+    ...stayInput(rider, mount),
+    riderAlreadyOn: ridingOn(rider)?.mount,
     inReach: withinMountReach(rider, mount),
     speed,
     checkSpeed: combatOn && speed !== null,
   });
+}
+
+function judgeStay(rider: any, mount: any): ReturnType<typeof judgeStayMounted> {
+  return judgeStayMounted(stayInput(rider, mount));
 }
 
 async function reseatRiders(mount: any): Promise<void> {
@@ -292,7 +323,11 @@ async function followMount(rider: any, mount: any): Promise<void> {
   const x = Number(rider._source?.x ?? rider.x);
   const y = Number(rider._source?.y ?? rider.y);
   const elev = Number(rider._source?.elevation ?? rider.elevation ?? 0);
-  if (Math.abs(x - seat.x) < 1 && Math.abs(y - seat.y) < 1 && Math.abs(elev - seat.elevation) < 0.01) {
+  if (
+    Math.abs(x - seat.x) < 1 &&
+    Math.abs(y - seat.y) < 1 &&
+    Math.abs(elev - seat.elevation) < 0.01
+  ) {
     return;
   }
   try {
@@ -305,7 +340,11 @@ async function followMount(rider: any, mount: any): Promise<void> {
   }
 }
 
-async function syncControlledInitiative(rider: any, mount: any, controlled: boolean): Promise<void> {
+async function syncControlledInitiative(
+  rider: any,
+  mount: any,
+  controlled: boolean,
+): Promise<void> {
   if (!controlled) return;
   const combat = (game as any).combat;
   if (!combat?.started) return;
@@ -322,7 +361,11 @@ async function syncControlledInitiative(rider: any, mount: any, controlled: bool
   }
 }
 
-export async function mountTokens(rider: any, mount: any, opts?: { force?: boolean }): Promise<boolean> {
+export async function mountTokens(
+  rider: any,
+  mount: any,
+  opts?: { force?: boolean },
+): Promise<boolean> {
   if (!isRidingEnabled() && !opts?.force) return false;
   if (rideableOwns()) {
     notify("NOODLRHOOKS.General.Riding.Rideable");
@@ -355,18 +398,28 @@ export async function mountTokens(rider: any, mount: any, opts?: { force?: boole
   }
 }
 
-export async function dismountToken(rider: any, opts?: { silent?: boolean }): Promise<boolean> {
+export async function dismountToken(
+  rider: any,
+  opts?: { silent?: boolean; cost?: boolean; fell?: boolean },
+): Promise<boolean> {
   const riderDoc = rider?.document ?? rider;
   const flag = ridingOn(riderDoc);
   if (!riderDoc || !flag) return false;
   try {
     await riderDoc.unsetFlag(FLAG_NAMESPACE, RIDING_FLAG);
-    await stampCost(riderDoc.actor);
+    if (opts?.cost !== false) await stampCost(riderDoc.actor);
     await stripBadge(riderDoc.actor);
     const mount = tokenDoc(flag.mount);
     if (mount) await reseatRiders(mount);
     if (!opts?.silent) {
-      info("NOODLRHOOKS.General.Riding.Dismounted", { rider: String(riderDoc.name ?? "?") });
+      if (opts?.fell) {
+        info("NOODLRHOOKS.General.Riding.FellOff", {
+          rider: String(riderDoc.name ?? "?"),
+          mount: String(mount?.name ?? "?"),
+        });
+      } else {
+        info("NOODLRHOOKS.General.Riding.Dismounted", { rider: String(riderDoc.name ?? "?") });
+      }
     }
     return true;
   } catch (err) {
@@ -415,6 +468,72 @@ function wireToken(token: any): void {
   });
 }
 
+let fitTimer: ReturnType<typeof setTimeout> | null = null;
+let fitPoll: ReturnType<typeof setInterval> | null = null;
+let fitRunning = false;
+let fitAgain = false;
+
+/** Immediate courtesy after a revert or a size write; the 6s poll is the backstop. */
+export function scheduleRidingFit(): void {
+  if (fitTimer) clearTimeout(fitTimer);
+  fitTimer = setTimeout(() => {
+    fitTimer = null;
+    void runRidingFit();
+  }, 150);
+}
+
+async function runRidingFit(): Promise<void> {
+  if (fitRunning) {
+    fitAgain = true;
+    return;
+  }
+  fitRunning = true;
+  try {
+    await dropUnfitRiders();
+  } catch (err) {
+    warn("riding: accommodation poll failed:", err);
+  } finally {
+    fitRunning = false;
+    if (fitAgain) {
+      fitAgain = false;
+      scheduleRidingFit();
+    }
+  }
+}
+
+export async function dropUnfitRiders(): Promise<number> {
+  if (!isRidingEnabled() || rideableOwns()) return 0;
+  if (!isPrimaryGM()) return 0;
+  let n = 0;
+  for (const rider of allTokenDocs()) {
+    const flag = ridingOn(rider);
+    if (!flag) continue;
+    const mount = tokenDoc(flag.mount);
+    if (!mount) {
+      if (await dismountToken(rider, { silent: true, cost: false })) n += 1;
+      continue;
+    }
+    const verdict = judgeStay(rider, mount);
+    if (verdict.ok) continue;
+    debug(
+      "riding",
+      `${String(rider.name)} no longer fits on ${String(mount.name)} (${verdict.reason})`,
+    );
+    if (await dismountToken(rider, { cost: false, fell: true })) n += 1;
+  }
+  return n;
+}
+
+function mountShapeChanged(changed: Record<string, unknown> | undefined): boolean {
+  if (!changed) return false;
+  return (
+    changed.width !== undefined ||
+    changed.height !== undefined ||
+    changed.actorId !== undefined ||
+    (changed as any).delta !== undefined
+  );
+}
+
 function addHudButton(
   root: HTMLElement,
   attr: string,
@@ -444,6 +563,9 @@ function locChanged(changed: any): boolean {
 
 export function registerRidingWatch(): void {
   registerRidingStatus();
+  registerBadgeClick(RIDING_STATUS_IMG, (token) => {
+    void dismountToken(token?.document ?? token);
+  });
 
   Hooks.on("preMoveToken", (doc: any, movement: any, operation: any) => {
     if (!isRidingEnabled()) return;
@@ -459,17 +581,30 @@ export function registerRidingWatch(): void {
   Hooks.on("updateToken", (doc: any, changed: any, operation: any) => {
     if (!isRidingEnabled() || rideableOwns()) return;
     if (operation?.noodlrRiding === "follow") return;
+    if (mountShapeChanged(changed as Record<string, unknown>)) scheduleRidingFit();
     if (!locChanged(changed)) return;
     for (const rider of ridersOf(String(doc.id))) {
       void followMount(rider, doc);
     }
   });
 
+  Hooks.on("updateActor", (_actor: any, changed: any) => {
+    const traits = changed?.system?.traits;
+    if (traits?.size !== undefined || changed?.items) scheduleRidingFit();
+  });
+
+  if (fitPoll === null) {
+    fitPoll = setInterval(() => {
+      if ((globalThis as any).game?.paused) return;
+      scheduleRidingFit();
+    }, RIDING_FIT_POLL_MS);
+  }
+
   Hooks.on("deleteToken", (doc: any) => {
     const id = String(doc?.id ?? "");
     if (!id) return;
     for (const rider of ridersOf(id)) {
-      void dismountToken(rider, { silent: true });
+      void dismountToken(rider, { silent: true, cost: false });
     }
   });
 
@@ -518,7 +653,10 @@ export function registerRidingWatch(): void {
   }
 
   Hooks.on("updateSetting", (_setting: any, _value: any, key?: string) => {
-    if (key === `${MODULE_ID}.${GENERAL_SETTINGS.riding}` || key?.endsWith(`.${GENERAL_SETTINGS.riding}`)) {
+    if (
+      key === `${MODULE_ID}.${GENERAL_SETTINGS.riding}` ||
+      key?.endsWith(`.${GENERAL_SETTINGS.riding}`)
+    ) {
       if (!isRidingEnabled()) {
         for (const doc of allTokenDocs()) {
           if (ridingOn(doc)) void dismountToken(doc, { silent: true });
@@ -546,7 +684,7 @@ export function surveyRiding(): unknown {
   const lines = [
     `riding: ${isRidingEnabled() ? "on" : "off"}` +
       (rideableOwns() ? " — standing aside for Rideable" : "") +
-      ` — ${docs.length} token(s)`,
+      ` — poll ${RIDING_FIT_POLL_MS / 1000}s — ${docs.length} token(s)`,
   ];
   const seen = new Set<string>();
   for (const doc of docs) {
@@ -557,13 +695,9 @@ export function surveyRiding(): unknown {
     if (!seen.has(mountId)) {
       seen.add(mountId);
       const pack = ridersOf(mountId);
-      lines.push(
-        `  ${String(mount?.name ?? mountId)}: ${mountCapacityLine(mount, pack)}`,
-      );
+      lines.push(`  ${String(mount?.name ?? mountId)}: ${mountCapacityLine(mount, pack)}`);
     }
-    lines.push(
-      `    ${String(doc.name)}` + (flag.controlled ? " (controlled)" : " (independent)"),
-    );
+    lines.push(`    ${String(doc.name)}` + (flag.controlled ? " (controlled)" : " (independent)"));
   }
   const block = lines.join("\n");
   log(block);

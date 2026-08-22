@@ -165,7 +165,9 @@ export function seatPlan(opts: {
   };
 }
 
-export function seatsAllowMount(plan: { capacity: number; used: number; cost: number } | null): boolean {
+export function seatsAllowMount(
+  plan: { capacity: number; used: number; cost: number } | null,
+): boolean {
   if (!plan) return true;
   return plan.used + plan.cost <= plan.capacity;
 }
@@ -176,7 +178,7 @@ export function seatCellCenter(index: number, count: number): { fx: number; fy: 
   const i = Math.min(Math.max(0, Math.floor(index) || 0), n - 1);
   const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
   const rows = Math.max(1, Math.ceil(n / cols));
-  return { fx: (i % cols + 0.5) / cols, fy: (Math.floor(i / cols) + 0.5) / rows };
+  return { fx: ((i % cols) + 0.5) / cols, fy: (Math.floor(i / cols) + 0.5) / rows };
 }
 
 /** Half Speed, rounded down. Speed 0 is not a cost of 0 that we then allow — see `canAffordMount`. */
@@ -203,7 +205,8 @@ export function mountCostFromStamp(
   round: number,
 ): number {
   if (!stamp) return 0;
-  if (stamp.combat !== combatId || stamp.combatant !== combatantId || stamp.round !== round) return 0;
+  if (stamp.combat !== combatId || stamp.combatant !== combatantId || stamp.round !== round)
+    return 0;
   const cost = Number(stamp.cost);
   return cost > 0 ? cost : 0;
 }
@@ -260,7 +263,9 @@ export interface MountJudgeInput {
   checkSpeed?: boolean;
 }
 
-export function judgeMount(input: MountJudgeInput): { ok: true } | { ok: false; reason: MountRefuse } {
+export function judgeMount(
+  input: MountJudgeInput,
+): { ok: true } | { ok: false; reason: MountRefuse } {
   if (input.rideableActive) return { ok: false, reason: "rideable" };
   if (input.riderId === input.mountId) return { ok: false, reason: "same" };
   if (input.riderAlreadyOn) return { ok: false, reason: "already-riding" };
@@ -284,7 +289,11 @@ export function judgeMount(input: MountJudgeInput): { ok: true } | { ok: false; 
   });
   if (!seatsAllowMount(plan)) return { ok: false, reason: "occupied" };
   if (
-    !carryingAllowsMount(input.mountMax ?? null, input.riderBurden ?? null, input.carriedAlready ?? 0)
+    !carryingAllowsMount(
+      input.mountMax ?? null,
+      input.riderBurden ?? null,
+      input.carriedAlready ?? 0,
+    )
   ) {
     return { ok: false, reason: "carrying" };
   }
@@ -296,6 +305,21 @@ export function judgeMount(input: MountJudgeInput): { ok: true } | { ok: false; 
     }
   }
   return { ok: true };
+}
+
+/**
+ * Already sitting on this mount. Reach, Speed, and "already riding" are doors for getting ON,
+ * not for staying. Size, seats, carrying and disposition still apply — a Medium revert dumps
+ * Medium riders, and a full seat plan dumps the overflow.
+ */
+export function judgeStayMounted(
+  input: Omit<MountJudgeInput, "inReach" | "checkSpeed" | "speed" | "riderAlreadyOn">,
+): ReturnType<typeof judgeMount> {
+  return judgeMount({
+    ...input,
+    inReach: true,
+    checkSpeed: false,
+  });
 }
 
 export function sizeRankOf(actor: any): number | null {

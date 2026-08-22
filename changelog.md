@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.25
+
+**The Wild Shape restore icon actually restores, and riders fall off a mount that can no longer
+carry them.** Foundry never delivers pointer events to token-corner effect sprites — the click is
+on the token — so the restore badge looked pressable and did nothing. Clicks are now hit-tested
+inside `Token#_onClickLeft`. A linked Wild Shape revert keeps the same token id and only shrinks
+it, so the old "mount deleted" path never dumped the party. Each rider is re-checked when the
+mount changes size, and every six seconds; anyone who no longer fits falls off without spending
+Speed.
+
 ## 0.7.24
 
 **A mount can carry more than one rider, and Wild Shape no longer draws two restore icons.** How

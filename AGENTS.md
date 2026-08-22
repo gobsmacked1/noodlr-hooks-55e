@@ -577,6 +577,14 @@ to A is three events.
  icons (v0.7.23). Create is `isRollerFor` plus a keepId (`noodlrTransform0`) and an
  in-flight lock. Token HUD has a backup control. Setting `general.transformUndo`.
  `noodlrHooks.surveyTransform()` / `noodlrHooks.restoreTransformation()`.
+- **A PIXI listener on the effect sprite is not a click (2026-08-21).** Core's
+ `MouseInteractionManager` binds `clickLeft` to the Token. The sprite can look like a
+ button and still never fire. `src/util/token-badge.ts` hit-tests the icon inside
+ `Token#_onClickLeft` (wrapped on `CONFIG.Token.objectClass` at `setup`, after the Speed
+ subclass — MouseInteractionManager copies the method when the token is drawn, and
+ canvas init finishes before `ready`). The PIXI `pointerdown` stays as a cursor hint
+ and a second path, with a 400 ms lock so both cannot restore twice. Same wrap serves
+ the saddle icon.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
 
@@ -4748,9 +4756,18 @@ why `move() === true` is not evidence of movement. A rider who tries to walk is 
   Unreadable max or this rider's burden still allows — do not invent body-weight tables.
 - **Seats offset** inside the mount so tokens do not stack. A new mount or dismount reseats the
   whole pack.
-- **2024 cost:** half Speed, round down, stamped on **each** creature that mounts or dismounts
-  and subtracted from `budgetFor`. Speed 0 cannot mount. Gemini's "controlled mount gets a free
-  Dash" is **false** — Dash is one of three actions, not an extra. Do not implement a free Dash.
+- **2024 cost:** half Speed, round down, stamped on **each** creature that mounts or
+  dismounts **by choice** and subtracted from `budgetFor`. Speed 0 cannot mount. An
+  involuntary fall-off (mount too small, seats gone, mount deleted) skips the stamp —
+  they did not spend the movement. Gemini's "controlled mount gets a free Dash" is
+  **false** — Dash is one of three actions, not an extra. Do not implement a free Dash.
+- **Riders re-check the mount every 6 seconds (2026-08-21).** A linked Wild Shape revert
+  keeps the token id and only shrinks it, so `deleteToken` never runs and three Medium
+  PCs stayed on a Medium Druid. `judgeStayMounted` is `judgeMount` with reach, Speed and
+  "already riding" skipped — those are doors for getting on, not for staying. Size,
+  seats, carrying and disposition still refuse. Immediate courtesy on `width` / `height`
+  / `actorId` and after our own restore; the poll is the backstop, same doctrine as
+  aura range. Primary GM writes. Announces a fall-off, not a chosen dismount.
 - **Controlled:** Neutral/Friendly default trained. Initiative matches the **first** rider only;
   a passenger does not steal the driver's init. Hostile is independent. Action limits (Dash /
   Disengage / Dodge only) and falling-off saves are **parked**.

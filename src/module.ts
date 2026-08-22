@@ -93,6 +93,7 @@ import { openRulesConfig } from "./apps/rules-config";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
 import { registerEconomyHooks } from "./rules/economy/enforce";
 import { registerMovementCap, surveyMovement } from "./rules/economy/speed";
+import { installTokenBadgeClicks } from "./util/token-badge";
 import { surveyEconomy } from "./rules/economy/survey";
 import { registerEncounterTracking } from "./tactics/encounter";
 import { explainTurn } from "./tactics/explain";
@@ -415,6 +416,10 @@ Hooks.once("init", () => {
   // time `ready` runs, and it has to be on the PLAYERS' clients, since a player dragging their own
   // token is the only thing it constrains.
   registerMovementCap();
+  // After the Speed subclass: MouseInteractionManager copies `_onClickLeft` at draw, and canvas
+  // init finishes before `ready`. A wrap registered here at `setup` is what makes the Wild Shape
+  // restore icon actually fire.
+  installTokenBadgeClicks();
 
   // A zero-cost, wall-respecting movement action for pushes and pulls. Must be here: core deep-freezes
   // the action registry inside `setupGame()`, before the `setup` hook, and writing to a frozen object

@@ -3,7 +3,8 @@
 // dnd5e's restore is `Actor#revertOriginalForm`. It does not spend a Wild Shape use. Argon's Wild
 // Shape button *does* use the activity, so this never intercepts it: beast-to-beast stays legal,
 // and revert stays free. The badge is `hud: false` so Token HUD cannot toggle it off as a condition.
-// The sprite itself is the click, plus a HUD control as backup.
+// The sprite is the affordance; the click is Token#_onClickLeft (Foundry never delivers pointer
+// events to effect children). Token HUD is the backup.
 
 import { GENERAL_SETTINGS, MODULE_ID, debug, log, warn } from "../constants";
 import { isTransformUndoEnabled } from "../settings";
@@ -17,7 +18,8 @@ import {
   transformBadgePayload,
 } from "../system/dnd5e-transform";
 import { isRollerFor } from "../util/gm";
-import { wireEffectClicks } from "../util/token-badge";
+import { registerBadgeClick, rebindTokenBadgeClicks, wireEffectClicks } from "../util/token-badge";
+import { scheduleRidingFit } from "./riding";
 
 /** One sync at a time per actor — transform fires updateActor + updateToken + two dnd5e hooks. */
 const inflight = new Map<string, Promise<void>>();
@@ -34,7 +36,12 @@ function actorKey(actor: any): string {
   return String(actor?.uuid ?? actor?.id ?? "");
 }
 
-export async function restoreOriginalForm(actor: any): Promise<boolean> {
+function actorOf(subject: any): any {
+  return subject?.actor ?? subject?.document?.actor ?? subject ?? null;
+}
+
+export async function restoreOriginalForm(subject: any): Promise<boolean> {
+  const actor = actorOf(subject);
   if (!actor) return false;
   if (!actor.isOwner) {
     notify("NOODLRHOOKS.General.TransformUndo.NoOwner");
@@ -49,7 +56,13 @@ export async function restoreOriginalForm(actor: any): Promise<boolean> {
     return false;
   }
   try {
-    await actor.revertOriginalForm({ renderSheet: false });
+    const result = await actor.revertOriginalForm({ renderSheet: false });
+    if (result == null && isPolymorphed(actor)) {
+      warn("transform: revertOriginalForm returned nothing and the actor is still transformed");
+      notify("NOODLRHOOKS.General.TransformUndo.NotTransformed");
+      return false;
+    }
+    scheduleRidingFit();
     return true;
   } catch (err) {
     warn("transform: revertOriginalForm failed:", err);
@@ -108,7 +121,9 @@ async function doSyncBadge(actor: any): Promise<void> {
   if (!isRollerFor(actor)) return;
   registerTransformStatus();
   try {
-    await actor.createEmbeddedDocuments("ActiveEffect", [transformBadgePayload(actor)], { keepId: true });
+    await actor.createEmbeddedDocuments("ActiveEffect", [transformBadgePayload(actor)], {
+      keepId: true,
+    });
   } catch (err) {
     if (existingAfterCreate(actor)) return;
     warn(`transform: could not present badge on ${String(actor.name)}:`, err);
@@ -122,7 +137,7 @@ function existingAfterCreate(actor: any): boolean {
 function wireToken(token: any): void {
   if (!token || !isTransformUndoEnabled()) return;
   wireEffectClicks(token, TRANSFORM_STATUS_IMG, (t) => {
-    void restoreOriginalForm(t?.actor);
+    void restoreOriginalForm(actorOf(t));
   });
 }
 
@@ -155,6 +170,10 @@ function addHudButton(root: HTMLElement, title: string, icon: string, onClick: (
 
 export function registerTransformWatch(): void {
   registerTransformStatus();
+  registerBadgeClick(TRANSFORM_STATUS_IMG, (token) => {
+    void restoreOriginalForm(actorOf(token));
+  });
+  rebindTokenBadgeClicks();
 
   Hooks.on("updateActor", (actor: any) => {
     void syncBadge(actor);
@@ -200,7 +219,10 @@ export function registerTransformWatch(): void {
   }
 
   Hooks.on("updateSetting", (_setting: any, _value: any, key?: string) => {
-    if (key === `${MODULE_ID}.${GENERAL_SETTINGS.transformUndo}` || key?.endsWith(`.${GENERAL_SETTINGS.transformUndo}`)) {
+    if (
+      key === `${MODULE_ID}.${GENERAL_SETTINGS.transformUndo}` ||
+      key?.endsWith(`.${GENERAL_SETTINGS.transformUndo}`)
+    ) {
       for (const token of tokensOnScene()) void syncBadge(token.actor ?? token.document?.actor);
     }
   });
@@ -210,7 +232,9 @@ export function registerTransformWatch(): void {
 
 export function surveyTransform(): unknown {
   const tokens = tokensOnScene();
-  const lines = [`transform: ${isTransformUndoEnabled() ? "on" : "off"} — ${tokens.length} token(s)`];
+  const lines = [
+    `transform: ${isTransformUndoEnabled() ? "on" : "off"} — ${tokens.length} token(s)`,
+  ];
   for (const token of tokens) {
     const actor = token.actor ?? token.document?.actor;
     if (!actor) continue;

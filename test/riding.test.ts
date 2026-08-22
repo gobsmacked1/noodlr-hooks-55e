@@ -15,6 +15,7 @@ import {
   footprintSquares,
   isOurRidingBadge,
   judgeMount,
+  judgeStayMounted,
   mountCostFeet,
   mountCostFromStamp,
   ridingBadgePayload,
@@ -149,7 +150,9 @@ test("seats are half the mount footprint; a horse holds two, a brontosaurus a pa
   assert.equal(seatsAllowMount(seatPlan({ mountRank: 3, riderRank: 2, seatsUsed: 1 })), true);
   assert.equal(seatsAllowMount(seatPlan({ mountRank: 3, riderRank: 2, seatsUsed: 2 })), false);
   assert.equal(
-    seatsAllowMount(seatPlan({ mountSquares: 16, riderSquares: 1, mountRank: 5, riderRank: 2, seatsUsed: 5 })),
+    seatsAllowMount(
+      seatPlan({ mountSquares: 16, riderSquares: 1, mountRank: 5, riderRank: 2, seatsUsed: 5 }),
+    ),
     true,
   );
   assert.deepEqual(seatCellCenter(0, 1), { fx: 0.5, fy: 0.5 });
@@ -177,7 +180,10 @@ test("mount cost stamp is turn-keyed and stale is zero", () => {
 
 test("judgeMount names each refusal", () => {
   assert.deepEqual(judgeMount(legal), { ok: true });
-  assert.deepEqual(judgeMount({ ...legal, rideableActive: true }), { ok: false, reason: "rideable" });
+  assert.deepEqual(judgeMount({ ...legal, rideableActive: true }), {
+    ok: false,
+    reason: "rideable",
+  });
   assert.deepEqual(judgeMount({ ...legal, mountId: "rider" }), { ok: false, reason: "same" });
   assert.deepEqual(judgeMount({ ...legal, riderAlreadyOn: "other" }), {
     ok: false,
@@ -216,4 +222,40 @@ test("judgeMount names each refusal", () => {
     reason: "speed",
   });
   assert.deepEqual(judgeMount({ ...legal, checkSpeed: true, speed: null }), { ok: true });
+});
+
+test("staying on a mount skips reach, Speed, and already-riding, but not size or seats", () => {
+  const on = {
+    rideableActive: false,
+    riderId: "rider",
+    mountId: "horse",
+    ridingOf: { rider: "horse" },
+    riderRank: 2,
+    mountRank: 3,
+    riderDisposition: DISP.FRIENDLY,
+    mountDisposition: DISP.FRIENDLY,
+    riderIsPlayer: true,
+    mountSquares: 4,
+    riderSquares: 1,
+    seatsUsed: 0,
+  };
+  assert.deepEqual(judgeStayMounted(on), { ok: true });
+  assert.deepEqual(judgeStayMounted({ ...on, mountRank: 2, mountSquares: 1 }), {
+    ok: false,
+    reason: "size",
+  });
+  assert.deepEqual(judgeStayMounted({ ...on, mountSquares: 1, seatsUsed: 1 }), {
+    ok: false,
+    reason: "occupied",
+  });
+  assert.deepEqual(
+    judgeMount({
+      ...legal,
+      riderAlreadyOn: "horse",
+      inReach: false,
+      checkSpeed: true,
+      speed: 0,
+    }),
+    { ok: false, reason: "already-riding" },
+  );
 });
