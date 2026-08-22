@@ -202,6 +202,8 @@ export function registerCombatSettings(): void {
   // Withdrawn in v0.7.28 — restore is the character sheet. Still registered so an older
   // world that stored the key does not throw on `get`, and presets can still write it.
   general(GENERAL_SETTINGS.transformUndo, "TransformUndo", Boolean, true);
+  general(GENERAL_SETTINGS.transformLoot, "TransformLoot", Boolean, true);
+  general(GENERAL_SETTINGS.transformFolder, "TransformFolder", String, "Wild Shape (temp)");
   general(GENERAL_SETTINGS.riding, "Riding", Boolean, true);
 
   game.settings.register(MODULE_ID, SETTINGS.compileCapabilities, {
@@ -786,6 +788,36 @@ export function isAurasEnabled(): boolean {
  */
 export function isRidingEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.riding));
+}
+
+/**
+ * Copy items and coin picked up while transformed onto the original Actor before the form is
+ * discarded?
+ *
+ * On by default. dnd5e never does this — revert writes HP and spell slots only — so a potion
+ * grabbed as an owl dies with a GM delete of "Drew Id (Giant Owl)". Off for a table that wants
+ * the leftover Actor to be the only copy.
+ */
+export function isTransformLootEnabled(): boolean {
+  try {
+    return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.transformLoot));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Sidebar folder for linked-transform copies. Empty means leave them in the original's folder.
+ *
+ * The form Actor still uses the original's ownership, so a player can open it from their token
+ * without extra folder rights. They already need Actor-create to Wild Shape at all.
+ */
+export function transformFolderName(): string {
+  try {
+    return String(game.settings.get(MODULE_ID, GENERAL_SETTINGS.transformFolder) ?? "").trim().slice(0, 64);
+  } catch {
+    return "Wild Shape (temp)";
+  }
 }
 
 export function getCombatAutomation(): CombatAutomationMode {

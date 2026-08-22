@@ -67,7 +67,7 @@ import { announceJump, registerJumpWatch, surveyJump } from "./rules/jump";
 import { registerProneWatch, surveyProne } from "./rules/prone";
 import { registerInteractReach, surveyInteract } from "./rules/interact";
 import { registerAuraWatch, surveyAuras } from "./rules/aura";
-import { registerTransformWatch, restoreOriginalForm, surveyTransform } from "./rules/transform";
+import { carryFormLoot, registerTransformWatch, restoreOriginalForm, surveyTransform } from "./rules/transform";
 import {
   dismountSelected,
   dropAllRidersOf,
@@ -167,6 +167,7 @@ export interface NoodlrHooksApi {
   surveyInteract(): unknown;
   surveyAuras(): unknown;
   surveyTransform(): unknown;
+  carryFormLoot(actor?: unknown): Promise<unknown>;
   surveyRiding(): unknown;
   mount(): Promise<unknown>;
   dismount(): Promise<unknown>;
@@ -310,8 +311,10 @@ const api: NoodlrHooksApi = {
   surveyInteract: () => surveyInteract(),
   /** Which creature auras are on the scene, who they reach, and which copies we wrote. */
   surveyAuras: () => surveyAuras(),
-  /** Which tokens are transformed, and whether a leftover restore badge is still on them. */
+  /** Which tokens are transformed, leftover form Actors, and whether loot still needs copying. */
   surveyTransform: () => surveyTransform(),
+  /** Copy items and coin picked up in a Wild Shape onto the original. Safe to call twice. */
+  carryFormLoot: (actor) => carryFormLoot(actor),
   /** Who is riding whom, and whether Rideable has the layer. */
   surveyRiding: () => surveyRiding(),
   /** Mount every selected token onto the current target. */
@@ -484,8 +487,8 @@ Hooks.once("ready", () => {
   registerInteractReach();
   // Creature auras. Every client hears movement; only the primary GM writes copies onto other sheets.
   registerAuraWatch();
-  // Wild Shape restore icon. Every client: a player who Wild Shapes must get the badge on their token
-  // without waiting for the GM, and they are the one who clicks it.
+  // Linked Wild Shape copies and loot carry. Every client: a player revert is the one that
+  // must copy before dnd5e strips the form, and the wrap lives on the prototype they call.
   registerTransformWatch();
   // Mount / follow / dismount. Every client: the rider's own drag is the one that must be refused,
   // and a player mounts from their own HUD.

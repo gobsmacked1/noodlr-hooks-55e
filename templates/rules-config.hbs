@@ -79,6 +79,9 @@
                         <option value="{{this.value}}" {{#if this.selected}}selected{{/if}}>{{this.label}}</option>
                       {{/each}}
                     </select>
+                  {{else if this.isString}}
+                    <input type="text" id="noodlr-{{this.domId}}" data-setting="{{this.setting}}"
+                           value="{{this.text}}" maxlength="64" />
                   {{else}}
                     {{!-- Live, but with nothing to configure: always on by design. --}}
                     <span class="noodlr-rule__always">{{localize "NOODLRHOOKS.Rules.AlwaysOn"}}</span>

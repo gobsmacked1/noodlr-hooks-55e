@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.29
+
+**Loot picked up in a Wild Shape comes back with you, and the leftover copies leave the
+Player Actors folder.** dnd5e creates a new Actor for a linked transform and on revert
+copies only hit points and spell slots, so a potion or coin grabbed as the owl stayed on
+`Drew Id (Giant Owl)` and vanished if a GM deleted it. The form is now stamped at create;
+Restore Transformation copies anything new onto the original, and a later delete of a
+leftover does the same if that step was skipped. Copies go in an Actors folder (default
+`Wild Shape (temp)`) instead of sitting beside the real character. Ownership is unchanged
+— players open the form from their token. Periodic GM clean-up of that folder is expected.
+
 ## 0.7.28
 
 **The Wild Shape restore icon is gone.** Revert from the character sheet — that path already

@@ -577,6 +577,19 @@ to A is three events.
  convenience that calls the same `revertOriginalForm`. Riding still dumps every rider
  when the form reverts. Paladin aura badges are a different AE (`auraHost`) and were
  never on this path.
+- **Linked Wild Shape creates a second world Actor** (`Drew Id (Giant Owl)`), same folder,
+ same ownership. The suffix is a label; `Actor.create` is the duplicate. A player revert
+ strips `isPolymorphed` and does **not** delete the copy (`game.user.isGM` only). Granting
+ Players "Delete Actor" does not change that branch. dnd5e revert writes HP / temp HP /
+ spell slots only — items and coin picked up in the form stay on the copy.
+ - We stamp starting item ids and purse on `dnd5e.transformActor` (`flags.<ns>.formLoot`)
+ and wrap `revertOriginalForm` so new loot is created on the original first. A leftover
+ delete (`preDeleteActor`) carries anything still pending, then deletes. `copied` makes
+ a second pass a no-op.
+ - Copies are diverted into an Actors folder (default `Wild Shape (temp)`), created by
+ the primary GM. Empty folder name leaves them beside the original. Ownership is
+ unchanged — players open the form from their token. Periodic GM clean-up of that
+ folder is expected. Unlinked tokens never create a sidebar Actor and are untouched.
 - **`src/util/token-badge.ts` is the saddle icon, not Wild Shape.** Core's
  `MouseInteractionManager` binds `clickLeft` to the Token, so a PIXI listener on an
  effect sprite is not a click. The wrap on `Token#_onClickLeft` hit-tests riding's

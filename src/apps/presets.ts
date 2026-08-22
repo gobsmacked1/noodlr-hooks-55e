@@ -48,6 +48,7 @@ const ALL_RULES = {
   [G.interactReach]: true,
   [G.auras]: true,
   [G.transformUndo]: true,
+  [G.transformLoot]: true,
   [G.riding]: true,
 };
 

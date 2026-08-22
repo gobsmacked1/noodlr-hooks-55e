@@ -174,6 +174,13 @@ export const GENERAL_SETTINGS = {
   auras: "general.auras",
   /** Whether a transformed token shows a restore icon (Wild Shape / Polymorph / Shapechange). */
   transformUndo: "general.transformUndo",
+  /** Copy items and coin acquired in a Wild Shape / Polymorph back onto the original on revert. */
+  transformLoot: "general.transformLoot",
+  /**
+   * Actors-directory folder for linked-transform copies. Empty keeps them beside the original.
+   * Default name is `Wild Shape (temp)`.
+   */
+  transformFolder: "general.transformFolder",
   /** Whether a creature may mount another token and follow it. */
   riding: "general.riding",
 } as const;

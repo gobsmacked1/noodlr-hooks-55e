@@ -79,7 +79,9 @@ interface ViewRow {
   isBool: boolean;
   isNumber: boolean;
   isSelect: boolean;
+  isString: boolean;
   isAlways: boolean;
+  text: string;
   stateLabel: string;
   value: unknown;
   checked: boolean;
@@ -149,7 +151,9 @@ function viewRow(row: Row, audience?: Audience): ViewRow {
     isBool: kind === "boolean",
     isNumber: kind === "number",
     isSelect: kind === "select",
+    isString: kind === "string",
     isAlways: kind === "",
+    text: kind === "string" ? String(value ?? "") : "",
     stateLabel: localize(`NOODLRHOOKS.Rules.State.${row.state}`),
     value,
     checked: value === true,

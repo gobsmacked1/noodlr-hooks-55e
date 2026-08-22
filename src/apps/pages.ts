@@ -48,7 +48,7 @@ export interface Row {
   state: RowState;
   /** World setting key, for `live` rows. */
   setting?: string;
-  kind?: "boolean" | "number" | "select";
+  kind?: "boolean" | "number" | "select" | "string";
   choices?: Record<string, string>;
   range?: { min: number; max: number; step: number };
   /** Rule area in `integration/ownership.ts`, when one covers this row. Drives the ownership badge. */
@@ -352,6 +352,22 @@ const MECHANICS: Page = {
           ownership: "riding",
         },
         {
+          id: "transformLoot",
+          label: "NOODLRHOOKS.General.TransformLoot.Name",
+          hint: "NOODLRHOOKS.General.TransformLoot.Hint",
+          state: "live",
+          setting: G.transformLoot,
+          kind: "boolean",
+        },
+        {
+          id: "transformFolder",
+          label: "NOODLRHOOKS.General.TransformFolder.Name",
+          hint: "NOODLRHOOKS.General.TransformFolder.Hint",
+          state: "live",
+          setting: G.transformFolder,
+          kind: "string",
+        },
+        {
           id: "blindAbility",
           label: "Ability checks rolled blind",
           hint:
@@ -469,7 +485,8 @@ const MECHANICS: Page = {
           hint:
             "Wild Shape, Polymorph and Shapechange restore from dnd5e's character-sheet header " +
             "(and the sidebar). This module does not draw a restore icon on the token or in an " +
-            "effects panel. Argon's Wild Shape button is not intercepted, so beast-to-beast still works.",
+            "effects panel. Argon's Wild Shape button is not intercepted, so beast-to-beast still works. " +
+            "Items and coin picked up in the form are copied back onto the original (Transform loot).",
           state: "system",
           today: "Character sheet → Restore Transformation.",
         },
