@@ -213,6 +213,28 @@ export function rebindTokenBadgeClicks(): void {
   }
 }
 
+/**
+ * Whether the sprite half of a badge is alive for this token, in words.
+ *
+ * "The icon does nothing" has two possible homes — the token sprite and an on-screen effect strip —
+ * and neither is visible from the source. Reports the wrap, the sprite count and whether the sprite
+ * took a pointer listener, so a report names which half to look at instead of both.
+ */
+export function describeBadgeWiring(token: any, img: string): string {
+  const proto = (globalThis as any).CONFIG?.Token?.objectClass?.prototype;
+  const wrapped = Boolean(proto?.noodlrBadgeClick);
+  const sprites = badgeSprites(token, img);
+  if (sprites.length === 0) {
+    const drawn = effectSprites(token).length;
+    return `sprite: none matched (${drawn} icon(s) drawn), wrap ${wrapped ? "on" : "MISSING"}`;
+  }
+  const listening = sprites.filter((s) => s.noodlrBadgeWired).length;
+  return (
+    `sprite: ${sprites.length} matched, ${listening} listening, ` +
+    `wrap ${wrapped ? "on" : "MISSING"}`
+  );
+}
+
 function makeClickable(sprite: any, onClick: () => void): void {
   if (!sprite || sprite.noodlrBadgeWired) return;
   sprite.noodlrBadgeWired = true;

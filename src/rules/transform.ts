@@ -3,13 +3,18 @@
 // dnd5e's restore is `Actor#revertOriginalForm`. It does not spend a Wild Shape use. Argon's Wild
 // Shape button *does* use the activity, so this never intercepts it: beast-to-beast stays legal,
 // and revert stays free. The badge is `hud: false` so Token HUD cannot toggle it off as a condition.
-// The sprite is the affordance; the click is Token#_onClickLeft (Foundry never delivers pointer
-// events to effect children). Token HUD is the backup.
+//
+// THREE SURFACES DRAW THIS ICON AND A PLAYER PRESSES WHICHEVER ONE THEY CAN SEE, so all three
+// answer: the token sprite (hit-tested inside Token#_onClickLeft, because Foundry never delivers
+// pointer events to effect children), the Token HUD, and any on-screen effect strip — Visual Active
+// Effects draws one in the top-right DOM overlay, which the sprite hit-test can never reach. Wiring
+// only the sprite is what made this read as "the icon does nothing at all".
 
 import { GENERAL_SETTINGS, MODULE_ID, debug, log, warn } from "../constants";
 import { isTransformUndoEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
+  TRANSFORM_STATUS_ID,
   TRANSFORM_STATUS_IMG,
   extrasToDrop,
   isPolymorphed,
@@ -18,7 +23,13 @@ import {
   transformBadgePayload,
 } from "../system/dnd5e-transform";
 import { isRollerFor } from "../util/gm";
-import { registerBadgeClick, rebindTokenBadgeClicks, wireEffectClicks } from "../util/token-badge";
+import {
+  describeBadgeWiring,
+  registerBadgeClick,
+  rebindTokenBadgeClicks,
+  wireEffectClicks,
+} from "../util/token-badge";
+import { describeEffectPanels, registerVaePanelAction, vaeActive } from "../util/vae-panel";
 import { scheduleDropAllRiders, scheduleRidingFit } from "./riding";
 
 /** One sync at a time per actor — transform fires updateActor + updateToken + two dnd5e hooks. */
@@ -189,6 +200,11 @@ export function registerTransformWatch(): void {
   registerBadgeClick(TRANSFORM_STATUS_IMG, (token) => {
     void restoreOriginalForm(actorOf(token));
   });
+  // The Visual Active Effects strip is a DOM overlay, not the token, so the sprite hit-test above
+  // cannot reach it. A player watching that strip is watching the icon they expect to press.
+  registerVaePanelAction(TRANSFORM_STATUS_ID, "NOODLRHOOKS.General.TransformUndo.Hud", (actor) => {
+    void restoreOriginalForm(actor);
+  });
   rebindTokenBadgeClicks();
 
   Hooks.on("updateActor", (actor: any) => {
@@ -264,7 +280,10 @@ export function surveyTransform(): unknown {
         (!form && badge ? " — STALE BADGE" : "") +
         (badges.length > 1 ? " — DUPLICATE ICON" : ""),
     );
+    if (badge) lines.push(`    ${describeBadgeWiring(token, TRANSFORM_STATUS_IMG)}`);
   }
+  lines.push(`on-screen effect strips (visual-active-effects ${vaeActive() ? "on" : "off"}):`);
+  lines.push(...describeEffectPanels());
   const block = lines.join("\n");
   log(block);
   return { text: block, tokens: tokens.length };

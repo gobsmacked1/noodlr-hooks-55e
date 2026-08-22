@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.27
+
+**The restore icon in the top-right effects panel is now the one that works.** Two releases were
+spent fixing clicks on the token-corner sprite, and that was never the icon being pressed: Visual
+Active Effects draws its own strip of effect icons in the screen's top-right, outside the canvas
+entirely, so nothing there was listening. A left-click on the Wild Shape row now restores the
+original form, and a click on the mounted row dismounts — plus a labelled button in each row's
+tooltip. VAE's own gestures are untouched (double-click still toggles, right-click still deletes).
+`noodlrHooks.surveyTransform()` now names every effect strip on screen and says which rows it
+answers, so an icon that does nothing reports where it is drawn instead of leaving you guessing.
+
 ## 0.7.26
 
 **The restore icon's click now lands, and reverting dumps every rider.** v0.7.25 hit-tested

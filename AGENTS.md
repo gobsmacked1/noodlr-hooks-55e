@@ -592,6 +592,35 @@ to A is three events.
  token. Prefer `origin` (then `destination`), `layer.toGlobal`, and the AE's own `img`
  when the texture 404s to `hazard.svg`. Returning `false` from the wrap stops select/drag.
  A revert still dumps every rider — see riding below.
+- **AND THE ICON BEING PRESSED WAS NEVER THE SPRITE (v0.7.27, 2026-08-21).** Two releases were
+ spent fixing hit-testing on the token corner, and both were correct and neither was the
+ affordance the player was looking at. "Top right screen corner" is **Visual Active Effects**,
+ which draws its own strip of effect rows in the DOM overlay, outside the PIXI canvas — so
+ `Token#_onClickLeft` can never see that press. **The user's own words named the surface and
+ were read as an approximation of the token corner.** Take a reported location literally
+ before deciding it means the thing you built.
+ - `src/util/vae-panel.ts` is the DOM half. Two routes per registered status, because the
+ tooltip alone is poor UX (VAE tooltips are `pointer-events: none` until middle-clicked to
+ lock): a labelled button via VAE's own `visual-active-effects.createEffectButtons` hook,
+ and a left-click on the row. **Left-click is free to take** — VAE registers `deleteEffect`
+ with `buttons: [2]` and ApplicationV2's dispatch only calls a handler when
+ `buttons.includes(event.button)`, its toggle is a `dblclick`, and its own document listener
+ matches `[data-action=customButton].vae-button`. Capture phase plus a 400 ms lock, since a
+ double-click is click, click, dblclick.
+ - **THE ANCESTOR IS DELIBERATELY NOT CHECKED.** Matching `#visual-active-effects` around the
+ row is a guess about one module's markup, and a wrong guess leaves the press dead with
+ nothing saying why — the failure this file exists to fix. `.effect-item[data-effect-uuid]`
+ carrying a status only this module writes is ours wherever it is drawn, so a VAE fork or
+ successor is answered for free.
+ - **VAE displays it because the badge sets `showIcon: ALWAYS`.** Its `_prepareContext` skips
+ `isSuppressed` and `NEVER`, honours `ALWAYS` unconditionally, and only then consults
+ `hidePassive` / `hideDisabled`. `hud: false` is about the Token HUD and does not reach it.
+ - **`describeEffectPanels()` reports EVERY strip on screen, including ones it does not
+ recognise.** Reporting only the rows already wired can say nothing but "all wired", which
+ is the reassuring answer that closes the question on the strip nobody looked at — which is
+ precisely how this bug survived two releases. `surveyTransform()` prints it beside
+ `describeBadgeWiring()`, so an icon that does nothing names which of the three surfaces
+ (sprite, Token HUD, DOM strip) drew it.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
 
@@ -4783,6 +4812,10 @@ why `move() === true` is not evidence of movement. A rider who tries to walk is 
 - **Controlled:** Neutral/Friendly default trained. Initiative matches the **first** rider only;
   a passenger does not steal the driver's init. Hostile is independent. Action limits (Dash /
   Disengage / Dodge only) and falling-off saves are **parked**.
+- **The saddle icon is drawn on three surfaces too**, and a left-click on the Visual Active
+  Effects row dismounts (v0.7.27, same `vae-panel.ts` registry as the Wild Shape badge). The
+  handler resolves the rider from the effect's own actor, because a status says nothing about
+  which token is up there.
 - Setting `general.riding`. `noodlrHooks.surveyRiding()` / `.mount()` / `.dismount()` /
   `.dumpRiders()`.
 - OA "you or the mount" and drag-onto-token automount stay parked.

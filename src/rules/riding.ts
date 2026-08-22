@@ -16,6 +16,7 @@ import { isRidingEnabled } from "../settings";
 import { interactReach } from "./interact";
 import {
   RIDING_FLAG,
+  RIDING_STATUS_ID,
   RIDING_STATUS_IMG,
   defaultControlled,
   encumbranceMaxOf,
@@ -42,6 +43,7 @@ import { isPolymorphed } from "../system/dnd5e-transform";
 import { FLAG_NAMESPACE, readFlag } from "../util/flags";
 import { isPrimaryGM } from "../util/gm";
 import { registerBadgeClick, wireEffectClicks } from "../util/token-badge";
+import { registerVaePanelAction } from "../util/vae-panel";
 
 /** Same cadence as auras and perception — a walk hook misses a mount that changed size in place. */
 export const RIDING_FIT_POLL_MS = 6000;
@@ -603,6 +605,13 @@ export function registerRidingWatch(): void {
   registerRidingStatus();
   registerBadgeClick(RIDING_STATUS_IMG, (token) => {
     void dismountToken(token?.document ?? token);
+  });
+  // Same reasoning as the transform badge: the Visual Active Effects strip is a DOM overlay, so a
+  // press there never reaches the sprite. The badge is on the ACTOR, and a linked actor can hold
+  // several tokens, so only a token that is actually riding is a candidate.
+  registerVaePanelAction(RIDING_STATUS_ID, "NOODLRHOOKS.General.Riding.HudDismount", (actor) => {
+    const rider = allTokenDocs().find((doc) => doc?.actor === actor && ridingOn(doc));
+    if (rider) void dismountToken(rider);
   });
 
   Hooks.on("preMoveToken", (doc: any, movement: any, operation: any) => {
