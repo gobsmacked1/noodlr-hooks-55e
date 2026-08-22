@@ -343,15 +343,6 @@ const MECHANICS: Page = {
           ownership: "auras",
         },
         {
-          id: "transformUndo",
-          label: "NOODLRHOOKS.General.TransformUndo.Name",
-          hint: "NOODLRHOOKS.General.TransformUndo.Hint",
-          state: "live",
-          setting: G.transformUndo,
-          kind: "boolean",
-          ownership: "transformUndo",
-        },
-        {
           id: "riding",
           label: "NOODLRHOOKS.General.Riding.Name",
           hint: "NOODLRHOOKS.General.Riding.Hint",
@@ -476,10 +467,11 @@ const MECHANICS: Page = {
           id: "transformUndoNote",
           label: "Undoing transformations",
           hint:
-            "Same restore as the sheet header, from the token. The live switch is on this page under " +
-            "Checks and saves, beside creature auras.",
+            "Wild Shape, Polymorph and Shapechange restore from dnd5e's character-sheet header " +
+            "(and the sidebar). This module does not draw a restore icon on the token or in an " +
+            "effects panel. Argon's Wild Shape button is not intercepted, so beast-to-beast still works.",
           state: "system",
-          today: "Token-corner Restore Transformation. Argon's Wild Shape button is not intercepted.",
+          today: "Character sheet → Restore Transformation.",
         },
       ],
     },

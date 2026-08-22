@@ -606,9 +606,9 @@ export function registerRidingWatch(): void {
   registerBadgeClick(RIDING_STATUS_IMG, (token) => {
     void dismountToken(token?.document ?? token);
   });
-  // Same reasoning as the transform badge: the Visual Active Effects strip is a DOM overlay, so a
-  // press there never reaches the sprite. The badge is on the ACTOR, and a linked actor can hold
-  // several tokens, so only a token that is actually riding is a candidate.
+  // The Visual Active Effects strip is a DOM overlay, so a press there never reaches the sprite.
+  // The badge is on the ACTOR, and a linked actor can hold several tokens, so only a token that
+  // is actually riding is a candidate.
   registerVaePanelAction(RIDING_STATUS_ID, "NOODLRHOOKS.General.Riding.HudDismount", (actor) => {
     const rider = allTokenDocs().find((doc) => doc?.actor === actor && ridingOn(doc));
     if (rider) void dismountToken(rider);

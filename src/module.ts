@@ -310,7 +310,7 @@ const api: NoodlrHooksApi = {
   surveyInteract: () => surveyInteract(),
   /** Which creature auras are on the scene, who they reach, and which copies we wrote. */
   surveyAuras: () => surveyAuras(),
-  /** Which tokens are transformed, and whether the restore badge is present. */
+  /** Which tokens are transformed, and whether a leftover restore badge is still on them. */
   surveyTransform: () => surveyTransform(),
   /** Who is riding whom, and whether Rideable has the layer. */
   surveyRiding: () => surveyRiding(),

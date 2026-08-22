@@ -199,6 +199,8 @@ export function registerCombatSettings(): void {
   general(GENERAL_SETTINGS.influence, "Influence", Boolean, true);
   general(GENERAL_SETTINGS.interactReach, "InteractReach", Boolean, true);
   general(GENERAL_SETTINGS.auras, "Auras", Boolean, true);
+  // Withdrawn in v0.7.28 — restore is the character sheet. Still registered so an older
+  // world that stored the key does not throw on `get`, and presets can still write it.
   general(GENERAL_SETTINGS.transformUndo, "TransformUndo", Boolean, true);
   general(GENERAL_SETTINGS.riding, "Riding", Boolean, true);
 
@@ -774,17 +776,6 @@ export function isInteractReachEnabled(): boolean {
  */
 export function isAurasEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.auras));
-}
-
-/**
- * Does a transformed token show a restore icon, like a Paladin's aura badge?
- *
- * On by default. dnd5e already restores from the sheet header; this is the same call
- * (`revertOriginalForm`) from the token corner so a player does not have to open the sheet.
- * It never spends a Wild Shape use. Off if the table only wants the system's own restore.
- */
-export function isTransformUndoEnabled(): boolean {
-  return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.transformUndo));
 }
 
 /**

@@ -569,58 +569,24 @@ to A is three events.
 - **Do not intercept the Argon Wild Shape button as revert.** Beast-to-beast must stay legal,
  and a revert must not spend a Wild Shape use. dnd5e already restores from the sheet header
  (`restoreTransformation`, visible when `isPolymorphed`) and the sidebar right-click.
- **The token-corner icon is the same restore**, shipped with riding in v0.7.23:
- `src/rules/transform.ts`. Status `noodlr-transformed`, `hud: false`, Wild Shape item art,
- click → `revertOriginalForm({ renderSheet: false })`. **`isOwner` must not be the write
- gate** — player and GM both own a PC, transform fires four hooks, and creating an AE does
- not `updateActor`, so a check-then-create raced two identical "Restore Transformation"
- icons (v0.7.23). Create is `isRollerFor` plus a keepId (`noodlrTransform0`) and an
- in-flight lock. Token HUD has a backup control. Setting `general.transformUndo`.
- `noodlrHooks.surveyTransform()` / `noodlrHooks.restoreTransformation()`.
-- **A PIXI listener on the effect sprite is not a click (2026-08-21).** Core's
- `MouseInteractionManager` binds `clickLeft` to the Token. The sprite can look like a
- button and still never fire. `src/util/token-badge.ts` hit-tests the icon inside
- `Token#_onClickLeft` (wrapped on `CONFIG.Token.objectClass` at `setup`, after the Speed
- subclass — MouseInteractionManager copies the method when the token is drawn, and
- canvas init finishes before `ready`). The PIXI `pointerdown` stays as a cursor hint
- and a second path, with a 400 ms lock so both cannot restore twice. Same wrap serves
- the saddle icon.
-- **`event.global` is screen space; the click lives on `interactionData.origin` (2026-08-21).**
- MIM's `#assignOriginData` stores `getLocalPosition(layer)` as `origin` and copies
- `event.global` as `screenOrigin`. Sprite `getBounds()` is world space. v0.7.25 compared
- global to bounds, so the wrap ran, the hit never landed, and the icon selected the
- token. Prefer `origin` (then `destination`), `layer.toGlobal`, and the AE's own `img`
- when the texture 404s to `hazard.svg`. Returning `false` from the wrap stops select/drag.
- A revert still dumps every rider — see riding below.
-- **AND THE ICON BEING PRESSED WAS NEVER THE SPRITE (v0.7.27, 2026-08-21).** Two releases were
- spent fixing hit-testing on the token corner, and both were correct and neither was the
- affordance the player was looking at. "Top right screen corner" is **Visual Active Effects**,
- which draws its own strip of effect rows in the DOM overlay, outside the PIXI canvas — so
- `Token#_onClickLeft` can never see that press. **The user's own words named the surface and
- were read as an approximation of the token corner.** Take a reported location literally
- before deciding it means the thing you built.
- - `src/util/vae-panel.ts` is the DOM half. Two routes per registered status, because the
- tooltip alone is poor UX (VAE tooltips are `pointer-events: none` until middle-clicked to
- lock): a labelled button via VAE's own `visual-active-effects.createEffectButtons` hook,
- and a left-click on the row. **Left-click is free to take** — VAE registers `deleteEffect`
- with `buttons: [2]` and ApplicationV2's dispatch only calls a handler when
- `buttons.includes(event.button)`, its toggle is a `dblclick`, and its own document listener
- matches `[data-action=customButton].vae-button`. Capture phase plus a 400 ms lock, since a
- double-click is click, click, dblclick.
- - **THE ANCESTOR IS DELIBERATELY NOT CHECKED.** Matching `#visual-active-effects` around the
- row is a guess about one module's markup, and a wrong guess leaves the press dead with
- nothing saying why — the failure this file exists to fix. `.effect-item[data-effect-uuid]`
- carrying a status only this module writes is ours wherever it is drawn, so a VAE fork or
- successor is answered for free.
- - **VAE displays it because the badge sets `showIcon: ALWAYS`.** Its `_prepareContext` skips
- `isSuppressed` and `NEVER`, honours `ALWAYS` unconditionally, and only then consults
- `hidePassive` / `hideDisabled`. `hud: false` is about the Token HUD and does not reach it.
- - **`describeEffectPanels()` reports EVERY strip on screen, including ones it does not
- recognise.** Reporting only the rows already wired can say nothing but "all wired", which
- is the reassuring answer that closes the question on the strip nobody looked at — which is
- precisely how this bug survived two releases. `surveyTransform()` prints it beside
- `describeBadgeWiring()`, so an icon that does nothing names which of the three surfaces
- (sprite, Token HUD, DOM strip) drew it.
+ **We do not draw a restore icon.** A token-corner / effects-panel badge was tried across
+ v0.7.23–v0.7.27 and never became a reliable click (the affordance players pressed was
+ Visual Active Effects' DOM strip, not the token sprite). Withdrawn in v0.7.28: leftover
+ `noodlr-transformed` Active Effects are deleted on load so the dead icon disappears.
+ Restore is the character sheet. `noodlrHooks.restoreTransformation()` remains a console
+ convenience that calls the same `revertOriginalForm`. Riding still dumps every rider
+ when the form reverts. Paladin aura badges are a different AE (`auraHost`) and were
+ never on this path.
+- **`src/util/token-badge.ts` is the saddle icon, not Wild Shape.** Core's
+ `MouseInteractionManager` binds `clickLeft` to the Token, so a PIXI listener on an
+ effect sprite is not a click. The wrap on `Token#_onClickLeft` hit-tests riding's
+ pawprint. Do not re-attach it to a transform badge.
+- **`src/util/vae-panel.ts` is optional enhancement for riding, not a dependency.**
+ `module.json` names only `dnd5e`. The hook never fires and the selector never matches
+ when Visual Active Effects is absent. Do not add VAE to `relationships`.
+- **Take a reported location literally before deciding it means the thing you built.**
+ "Top right screen corner" was Visual Active Effects' overlay, not the token-corner
+ sprite. Two releases of correct hit-testing fixed the wrong surface.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
 
@@ -4812,10 +4778,10 @@ why `move() === true` is not evidence of movement. A rider who tries to walk is 
 - **Controlled:** Neutral/Friendly default trained. Initiative matches the **first** rider only;
   a passenger does not steal the driver's init. Hostile is independent. Action limits (Dash /
   Disengage / Dodge only) and falling-off saves are **parked**.
-- **The saddle icon is drawn on three surfaces too**, and a left-click on the Visual Active
-  Effects row dismounts (v0.7.27, same `vae-panel.ts` registry as the Wild Shape badge). The
-  handler resolves the rider from the effect's own actor, because a status says nothing about
-  which token is up there.
+- **The saddle icon is drawn on the token, the Token HUD, and any on-screen effect strip**,
+  and a left-click on a Visual Active Effects row dismounts (v0.7.27). The handler
+  resolves the rider from the effect's own actor, because a status says nothing about
+  which token is up there. VAE is not a dependency — the hook is a no-op when it is absent.
 - Setting `general.riding`. `noodlrHooks.surveyRiding()` / `.mount()` / `.dismount()` /
   `.dumpRiders()`.
 - OA "you or the mount" and drag-onto-token automount stay parked.

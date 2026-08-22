@@ -372,7 +372,6 @@ const AREAS: Area[] = [
       return other ? { by: other.by, note: other.note } : null;
     },
   },
-  { id: "transformUndo", setting: GENERAL_SETTINGS.transformUndo },
   {
     id: "riding",
     setting: GENERAL_SETTINGS.riding,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.28
+
+**The Wild Shape restore icon is gone.** Revert from the character sheet — that path already
+worked. The token-corner / effects-panel badge never became a reliable click, so it is no
+longer created, leftover `noodlr-transformed` effects are deleted on load, and Paladin aura
+icons are untouched. Riders still fall off when the form reverts.
+
 ## 0.7.27
 
 **The restore icon in the top-right effects panel is now the one that works.** Two releases were
