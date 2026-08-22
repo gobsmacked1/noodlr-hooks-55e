@@ -19,7 +19,7 @@ import {
 } from "../system/dnd5e-transform";
 import { isRollerFor } from "../util/gm";
 import { registerBadgeClick, rebindTokenBadgeClicks, wireEffectClicks } from "../util/token-badge";
-import { scheduleRidingFit } from "./riding";
+import { scheduleDropAllRiders, scheduleRidingFit } from "./riding";
 
 /** One sync at a time per actor — transform fires updateActor + updateToken + two dnd5e hooks. */
 const inflight = new Map<string, Promise<void>>();
@@ -43,6 +43,7 @@ function actorOf(subject: any): any {
 export async function restoreOriginalForm(subject: any): Promise<boolean> {
   const actor = actorOf(subject);
   if (!actor) return false;
+  debug("transform: restore requested for", String(actor.name ?? actor.id ?? "?"));
   if (!actor.isOwner) {
     notify("NOODLRHOOKS.General.TransformUndo.NoOwner");
     return false;
@@ -56,12 +57,14 @@ export async function restoreOriginalForm(subject: any): Promise<boolean> {
     return false;
   }
   try {
+    const tokens = tokensOfActor(actor);
     const result = await actor.revertOriginalForm({ renderSheet: false });
     if (result == null && isPolymorphed(actor)) {
       warn("transform: revertOriginalForm returned nothing and the actor is still transformed");
       notify("NOODLRHOOKS.General.TransformUndo.NotTransformed");
       return false;
     }
+    for (const token of tokens) scheduleDropAllRiders(token);
     scheduleRidingFit();
     return true;
   } catch (err) {
@@ -139,6 +142,19 @@ function wireToken(token: any): void {
   wireEffectClicks(token, TRANSFORM_STATUS_IMG, (t) => {
     void restoreOriginalForm(actorOf(t));
   });
+}
+
+function tokensOfActor(actor: any): any[] {
+  try {
+    const placed = actor?.getActiveTokens?.(true, true);
+    if (Array.isArray(placed) && placed.length) return placed;
+  } catch {
+    /* sheet actor without a canvas */
+  }
+  const id = String(actor?.id ?? "");
+  return tokensOnScene()
+    .map((t) => t?.document ?? t)
+    .filter((d) => String(d?.actorId ?? d?.actor?.id ?? "") === id);
 }
 
 function tokensOnScene(): any[] {

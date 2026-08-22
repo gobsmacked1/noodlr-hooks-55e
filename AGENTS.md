@@ -585,6 +585,13 @@ to A is three events.
  canvas init finishes before `ready`). The PIXI `pointerdown` stays as a cursor hint
  and a second path, with a 400 ms lock so both cannot restore twice. Same wrap serves
  the saddle icon.
+- **`event.global` is screen space; the click lives on `interactionData.origin` (2026-08-21).**
+ MIM's `#assignOriginData` stores `getLocalPosition(layer)` as `origin` and copies
+ `event.global` as `screenOrigin`. Sprite `getBounds()` is world space. v0.7.25 compared
+ global to bounds, so the wrap ran, the hit never landed, and the icon selected the
+ token. Prefer `origin` (then `destination`), `layer.toGlobal`, and the AE's own `img`
+ when the texture 404s to `hazard.svg`. Returning `false` from the wrap stops select/drag.
+ A revert still dumps every rider — see riding below.
 - **`on_enter_area` is still unheard.** It needs `create_area` (Phase 4). Do not tack it onto this
  hook — a token update is not an area entry.
 
@@ -4762,16 +4769,22 @@ why `move() === true` is not evidence of movement. A rider who tries to walk is 
   they did not spend the movement. Gemini's "controlled mount gets a free Dash" is
   **false** — Dash is one of three actions, not an extra. Do not implement a free Dash.
 - **Riders re-check the mount every 6 seconds (2026-08-21).** A linked Wild Shape revert
-  keeps the token id and only shrinks it, so `deleteToken` never runs and three Medium
-  PCs stayed on a Medium Druid. `judgeStayMounted` is `judgeMount` with reach, Speed and
-  "already riding" skipped — those are doors for getting on, not for staying. Size,
-  seats, carrying and disposition still refuse. Immediate courtesy on `width` / `height`
-  / `actorId` and after our own restore; the poll is the backstop, same doctrine as
-  aura range. Primary GM writes. Announces a fall-off, not a chosen dismount.
+  keeps the token id and only shrinks it, so `deleteToken` never runs. `judgeStayMounted`
+  is `judgeMount` with reach, Speed and "already riding" skipped — those are doors for
+  getting on, not for staying. Size, seats, carrying and disposition still refuse for
+  ordinary shrinks. **A revert to original form dumps every rider** (`revertDumpsRiders`),
+  even those the humanoid could still carry: a Small rider on a Medium Druid is a legal
+  seat and is also the token stacked inside the footprint that nobody can click.
+  `isPolymorphed` going false or a linked `actorId` swap onto a non-polymorphed actor
+  is the signal — the sheet Restore button is covered, not only our icon. Immediate
+  courtesy on `width` / `height` / `actorId` and after our own restore; the poll is the
+  backstop. Primary GM writes. The mount's Token HUD can dump the pack. Announces a
+  fall-off, not a chosen dismount.
 - **Controlled:** Neutral/Friendly default trained. Initiative matches the **first** rider only;
   a passenger does not steal the driver's init. Hostile is independent. Action limits (Dash /
   Disengage / Dodge only) and falling-off saves are **parked**.
-- Setting `general.riding`. `noodlrHooks.surveyRiding()` / `.mount()` / `.dismount()`.
+- Setting `general.riding`. `noodlrHooks.surveyRiding()` / `.mount()` / `.dismount()` /
+  `.dumpRiders()`.
 - OA "you or the mount" and drag-onto-token automount stay parked.
 
 ## Open items carried over from noodlr

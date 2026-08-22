@@ -16,6 +16,7 @@ import {
   isOurRidingBadge,
   judgeMount,
   judgeStayMounted,
+  revertDumpsRiders,
   mountCostFeet,
   mountCostFromStamp,
   ridingBadgePayload,
@@ -222,6 +223,14 @@ test("judgeMount names each refusal", () => {
     reason: "speed",
   });
   assert.deepEqual(judgeMount({ ...legal, checkSpeed: true, speed: null }), { ok: true });
+});
+
+test("revert to original form dumps every rider; a mere shrink does not", () => {
+  assert.equal(revertDumpsRiders({ polymorphedBecameFalse: true }), true);
+  assert.equal(revertDumpsRiders({ actorIdChanged: true, nowPolymorphed: false }), true);
+  assert.equal(revertDumpsRiders({ actorIdChanged: true, nowPolymorphed: true }), false);
+  assert.equal(revertDumpsRiders({ actorIdChanged: false, nowPolymorphed: false }), false);
+  assert.equal(revertDumpsRiders({}), false);
 });
 
 test("staying on a mount skips reach, Speed, and already-riding, but not size or seats", () => {

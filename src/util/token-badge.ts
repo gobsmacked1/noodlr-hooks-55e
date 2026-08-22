@@ -5,9 +5,9 @@
 // HUD skips `hud: false`, so the sprite itself is the affordance.
 //
 // PIXI `pointerdown` on those sprites is not enough. Foundry's MouseInteractionManager binds
-// `clickLeft` to the Token as a whole, and that path never asks the effect children. The live
-// restore icon did nothing for that reason: the sprite looked clickable and the handler never
-// ran. Clicks are therefore also hit-tested inside Token#_onClickLeft.
+// `clickLeft` to the Token as a whole, and that path never asks the effect children. Hit-test
+// inside Token#_onClickLeft using `interactionData.origin` (layer space), not `event.global`
+// (screen space). The wrap must return false so MIM does not also select/drag.
 
 type BadgeHandler = (token: any) => void | Promise<void>;
 
@@ -35,8 +35,8 @@ export function wireEffectClicks(token: any, img: string, onClick: BadgeHandler)
   } catch {
     /* PIXI version without those fields */
   }
-  for (const child of effects.children) {
-    if (!matchesImg(spriteSrc(child), img)) continue;
+  for (const child of badgeSprites(token, img)) {
+    child.noodlrBadge = img;
     makeClickable(child, () => fireBadge(token, img, onClick));
   }
 }
@@ -57,13 +57,40 @@ function spriteSrc(child: any): string {
   return src ? String(src) : "";
 }
 
-function pointerGlobal(event: any): { x: number; y: number } | null {
-  const g = event?.global ?? event?.data?.global ?? event?.interactionData?.destination;
-  const x = Number(g?.x);
-  const y = Number(g?.y);
+function asPoint(value: any): { x: number; y: number } | null {
+  const x = Number(value?.x);
+  const y = Number(value?.y);
   if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
   return null;
 }
+
+/**
+ * Foundry's click is `interactionData.origin` in **layer** space (`getLocalPosition(layer)`).
+ * PIXI `event.global` is screen space (`screenOrigin` is copied from it). Sprite `getBounds()`
+ * is world space. Comparing global to bounds is why the restore icon looked clickable and
+ * never fired.
+ */
+export function pointerForHit(token: any, event: any): { x: number; y: number } | null {
+  const data = event?.interactionData;
+  const layerPt = asPoint(data?.origin) ?? asPoint(data?.destination);
+  const layer = token?.layer ?? (globalThis as any).canvas?.tokens;
+  if (layerPt) {
+    if (typeof layer?.toGlobal === "function") {
+      try {
+        const world = asPoint(layer.toGlobal(layerPt));
+        if (world) return world;
+      } catch {
+        /* canvas not up */
+      }
+    }
+    return layerPt;
+  }
+  return (
+    asPoint(event?.global) ?? asPoint(event?.data?.global) ?? asPoint(event?.interactionData?.destination)
+  );
+}
+
+const HIT_PAD = 6;
 
 function boundsContain(child: any, pt: { x: number; y: number }): boolean {
   try {
@@ -73,19 +100,55 @@ function boundsContain(child: any, pt: { x: number; y: number }): boolean {
   }
   const b = child.getBounds?.();
   if (!b) return false;
-  if (typeof b.contains === "function") return Boolean(b.contains(pt.x, pt.y));
+  const x = Number(b.x);
+  const y = Number(b.y);
   const w = Number(b.width);
   const h = Number(b.height);
-  return pt.x >= b.x && pt.x <= b.x + w && pt.y >= b.y && pt.y <= b.y + h;
+  if (![x, y, w, h].every(Number.isFinite)) return false;
+  if (typeof b.contains === "function" && b.contains(pt.x, pt.y)) return true;
+  return (
+    pt.x >= x - HIT_PAD && pt.x <= x + w + HIT_PAD && pt.y >= y - HIT_PAD && pt.y <= y + h + HIT_PAD
+  );
+}
+
+function effectSprites(token: any): any[] {
+  const children = token?.effects?.children;
+  if (!children?.length) return [];
+  const bg = token.effects.bg;
+  const overlay = token.effects.overlay;
+  return [...children].filter((c) => c && c !== bg && c !== overlay);
+}
+
+/** Prefer a tagged / textured match; fall back to the AE's own img (texture src can be the 404 fallback). */
+export function badgeSprites(token: any, img: string): any[] {
+  if (!token || !img) return [];
+  const icons = effectSprites(token);
+  const tagged = icons.filter(
+    (c) => c.noodlrBadge === img || matchesImg(spriteSrc(c), img),
+  );
+  if (tagged.length) return tagged;
+  const aes = token.actor?.temporaryEffects ?? [];
+  const out: any[] = [];
+  let i = 0;
+  for (const ae of aes) {
+    if (!ae?.img) continue;
+    try {
+      if (typeof ae.getFlag === "function" && ae.getFlag("core", "overlay")) continue;
+    } catch {
+      /* ignore */
+    }
+    const sprite = icons[i++];
+    if (sprite && matchesImg(String(ae.img), img)) out.push(sprite);
+  }
+  return out;
 }
 
 export function badgeHit(token: any, img: string, event: any): boolean {
   if (!token || !img) return false;
-  const children = token.effects?.children;
-  if (!children?.length) return false;
-  const pt = pointerGlobal(event);
-  for (const child of children) {
-    if (!matchesImg(spriteSrc(child), img)) continue;
+  const sprites = badgeSprites(token, img);
+  if (!sprites.length) return false;
+  const pt = pointerForHit(token, event);
+  for (const child of sprites) {
     if (pt && boundsContain(child, pt)) return true;
     const target = event?.target;
     if (target && (target === child || child.contains?.(target))) return true;
@@ -118,7 +181,8 @@ function patchTokenClicks(): void {
   proto._onClickLeft = function noodlrBadgeClickLeft(event: any) {
     if (consumeBadgeClick(this, event)) {
       event?.stopPropagation?.();
-      return;
+      event?.preventDefault?.();
+      return false;
     }
     return typeof orig === "function" ? orig.call(this, event) : undefined;
   };

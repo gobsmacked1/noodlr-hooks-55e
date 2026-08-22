@@ -309,8 +309,8 @@ export function judgeMount(
 
 /**
  * Already sitting on this mount. Reach, Speed, and "already riding" are doors for getting ON,
- * not for staying. Size, seats, carrying and disposition still apply — a Medium revert dumps
- * Medium riders, and a full seat plan dumps the overflow.
+ * not for staying. Size, seats, carrying and disposition still apply for ordinary shrinks.
+ * A Wild Shape / Polymorph **revert** dumps every rider — see `revertDumpsRiders`.
  */
 export function judgeStayMounted(
   input: Omit<MountJudgeInput, "inReach" | "checkSpeed" | "speed" | "riderAlreadyOn">,
@@ -320,6 +320,20 @@ export function judgeStayMounted(
     inReach: true,
     checkSpeed: false,
   });
+}
+
+/**
+ * Returning to the original form throws everyone, even riders the humanoid could still carry.
+ * Their tokens sit inside the smaller footprint and cannot be clicked to dismount. Ordinary
+ * size changes (enlarge, a second Wild Shape that stays Large) still use `judgeStayMounted`.
+ */
+export function revertDumpsRiders(opts: {
+  polymorphedBecameFalse?: boolean;
+  actorIdChanged?: boolean;
+  nowPolymorphed?: boolean;
+}): boolean {
+  if (opts.polymorphedBecameFalse === true) return true;
+  return opts.actorIdChanged === true && opts.nowPolymorphed === false;
 }
 
 export function sizeRankOf(actor: any): number | null {

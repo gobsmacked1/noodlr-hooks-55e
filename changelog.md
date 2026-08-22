@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.26
+
+**The restore icon's click now lands, and reverting dumps every rider.** v0.7.25 hit-tested
+screen coordinates against world-space sprite bounds, so the wrap ran and the click still
+selected the token. Clicks now use the interaction origin (canvas space) and match the
+Active Effect's own art when the texture 404s to a fallback. A revert to original form —
+sheet header, our icon, or a linked actor swap — ejects the whole pack, even riders the
+humanoid could still carry. Leftover tokens stacked inside a Medium footprint cannot be
+clicked to dismount. Ordinary shrinks still drop only who no longer fits. The mount's Token
+HUD has a dump-all control.
+
 ## 0.7.25
 
 **The Wild Shape restore icon actually restores, and riders fall off a mount that can no longer

@@ -68,7 +68,13 @@ import { registerProneWatch, surveyProne } from "./rules/prone";
 import { registerInteractReach, surveyInteract } from "./rules/interact";
 import { registerAuraWatch, surveyAuras } from "./rules/aura";
 import { registerTransformWatch, restoreOriginalForm, surveyTransform } from "./rules/transform";
-import { dismountSelected, mountSelected, registerRidingWatch, surveyRiding } from "./rules/riding";
+import {
+  dismountSelected,
+  dropAllRidersOf,
+  mountSelected,
+  registerRidingWatch,
+  surveyRiding,
+} from "./rules/riding";
 import {
   clearInfluenceLocks,
   influenceTargets,
@@ -164,6 +170,7 @@ export interface NoodlrHooksApi {
   surveyRiding(): unknown;
   mount(): Promise<unknown>;
   dismount(): Promise<unknown>;
+  dumpRiders(): Promise<unknown>;
   restoreTransformation(): Promise<unknown>;
   surveyFlee(): unknown;
   surveyRepeatSaves(): unknown;
@@ -311,6 +318,14 @@ const api: NoodlrHooksApi = {
   mount: () => mountSelected(),
   /** Dismount every selected rider. */
   dismount: () => dismountSelected(),
+  /** Throw every rider off the selected mount. Revert also does this. */
+  dumpRiders: async () => {
+    let n = 0;
+    for (const token of (canvas as any)?.tokens?.controlled ?? []) {
+      n += await dropAllRidersOf(token?.document ?? token, { requireGm: false });
+    }
+    return { dumped: n };
+  },
   /** Restore the selected token's original form. Does not spend a Wild Shape use. */
   restoreTransformation: async () => {
     let n = 0;

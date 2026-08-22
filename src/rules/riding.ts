@@ -24,6 +24,7 @@ import {
   isOurRidingBadge,
   judgeMount,
   judgeStayMounted,
+  revertDumpsRiders,
   type MountCostStamp,
   type MountRefuse,
   mountCostFeet,
@@ -37,6 +38,7 @@ import {
   sizeRankOf,
   walkSpeedOf,
 } from "../system/dnd5e-riding";
+import { isPolymorphed } from "../system/dnd5e-transform";
 import { FLAG_NAMESPACE, readFlag } from "../util/flags";
 import { isPrimaryGM } from "../util/gm";
 import { registerBadgeClick, wireEffectClicks } from "../util/token-badge";
@@ -400,7 +402,7 @@ export async function mountTokens(
 
 export async function dismountToken(
   rider: any,
-  opts?: { silent?: boolean; cost?: boolean; fell?: boolean },
+  opts?: { silent?: boolean; cost?: boolean; fell?: boolean; revert?: boolean },
 ): Promise<boolean> {
   const riderDoc = rider?.document ?? rider;
   const flag = ridingOn(riderDoc);
@@ -413,7 +415,7 @@ export async function dismountToken(
     if (mount) await reseatRiders(mount);
     if (!opts?.silent) {
       if (opts?.fell) {
-        info("NOODLRHOOKS.General.Riding.FellOff", {
+        info(opts.revert ? "NOODLRHOOKS.General.Riding.FellOffRevert" : "NOODLRHOOKS.General.Riding.FellOff", {
           rider: String(riderDoc.name ?? "?"),
           mount: String(mount?.name ?? "?"),
         });
@@ -472,6 +474,7 @@ let fitTimer: ReturnType<typeof setTimeout> | null = null;
 let fitPoll: ReturnType<typeof setInterval> | null = null;
 let fitRunning = false;
 let fitAgain = false;
+const pendingDumpAll = new Set<string>();
 
 /** Immediate courtesy after a revert or a size write; the 6s poll is the backstop. */
 export function scheduleRidingFit(): void {
@@ -482,6 +485,14 @@ export function scheduleRidingFit(): void {
   }, 150);
 }
 
+/** Revert to original form: throw every rider, even those the humanoid could still carry. */
+export function scheduleDropAllRiders(mount: any): void {
+  const doc = mount?.document ?? mount;
+  const id = String(doc?.id ?? "");
+  if (id) pendingDumpAll.add(id);
+  scheduleRidingFit();
+}
+
 async function runRidingFit(): Promise<void> {
   if (fitRunning) {
     fitAgain = true;
@@ -489,6 +500,11 @@ async function runRidingFit(): Promise<void> {
   }
   fitRunning = true;
   try {
+    const dump = [...pendingDumpAll];
+    pendingDumpAll.clear();
+    for (const id of dump) {
+      await dropAllRidersOf(tokenDoc(id) ?? { id });
+    }
     await dropUnfitRiders();
   } catch (err) {
     warn("riding: accommodation poll failed:", err);
@@ -522,6 +538,28 @@ export async function dropUnfitRiders(): Promise<number> {
     if (await dismountToken(rider, { cost: false, fell: true })) n += 1;
   }
   return n;
+}
+
+export async function dropAllRidersOf(
+  mount: any,
+  opts?: { requireGm?: boolean },
+): Promise<number> {
+  if (!isRidingEnabled() || rideableOwns()) return 0;
+  if (opts?.requireGm !== false && !isPrimaryGM()) return 0;
+  const mountDoc = mount?.document ?? mount;
+  const id = String(mountDoc?.id ?? "");
+  if (!id) return 0;
+  let n = 0;
+  for (const rider of ridersOf(id)) {
+    if (await dismountToken(rider, { cost: false, fell: true, revert: true })) n += 1;
+  }
+  return n;
+}
+
+function tokensOfActor(actor: any): any[] {
+  const id = String(actor?.id ?? "");
+  if (!id) return [];
+  return allTokenDocs().filter((d) => String(d.actorId ?? d.actor?.id ?? "") === id || d.actor === actor);
 }
 
 function mountShapeChanged(changed: Record<string, unknown> | undefined): boolean {
@@ -581,6 +619,14 @@ export function registerRidingWatch(): void {
   Hooks.on("updateToken", (doc: any, changed: any, operation: any) => {
     if (!isRidingEnabled() || rideableOwns()) return;
     if (operation?.noodlrRiding === "follow") return;
+    if (
+      revertDumpsRiders({
+        actorIdChanged: changed?.actorId !== undefined,
+        nowPolymorphed: isPolymorphed(doc?.actor),
+      })
+    ) {
+      scheduleDropAllRiders(doc);
+    }
     if (mountShapeChanged(changed as Record<string, unknown>)) scheduleRidingFit();
     if (!locChanged(changed)) return;
     for (const rider of ridersOf(String(doc.id))) {
@@ -588,7 +634,10 @@ export function registerRidingWatch(): void {
     }
   });
 
-  Hooks.on("updateActor", (_actor: any, changed: any) => {
+  Hooks.on("updateActor", (actor: any, changed: any) => {
+    if (changed?.flags?.dnd5e?.isPolymorphed === false) {
+      for (const doc of tokensOfActor(actor)) scheduleDropAllRiders(doc);
+    }
     const traits = changed?.system?.traits;
     if (traits?.size !== undefined || changed?.items) scheduleRidingFit();
   });
@@ -623,6 +672,17 @@ export function registerRidingWatch(): void {
     if (!doc) return;
     const root: HTMLElement | null = html instanceof HTMLElement ? html : (html?.[0] ?? null);
     if (!root) return;
+    if (ridersOf(String(doc.id)).length) {
+      addHudButton(
+        root,
+        "data-noodlr-dump-riders",
+        game.i18n.localize("NOODLRHOOKS.General.Riding.HudDump"),
+        "fa-solid fa-users-slash",
+        () => {
+          void dropAllRidersOf(doc, { requireGm: false });
+        },
+      );
+    }
     if (ridingOn(doc)) {
       addHudButton(
         root,
