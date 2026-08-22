@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.30
+
+**Wild Shape loot now lands on the original character, including gold.** v0.7.29 copied items onto
+the leftover owl in the Player folder when a second transform (or a leftover that still held
+`originalActor`) overwrote the destination. Gold never moved at all: a MappingField wrapper
+(`{value: 20}`) read as zero, so the currency half of the plan was empty. The stamp and the copy
+now walk leftover → character, a revert also carries every other leftover for that character, and
+coin is written as `system.currency.gp`. A form that landed beside the original is moved into
+`Wild Shape (temp)` after create; older leftovers already in the Player folder are left for the
+GM to delete.
+
 ## 0.7.29
 
 **Loot picked up in a Wild Shape comes back with you, and the leftover copies leave the

@@ -586,10 +586,22 @@ to A is three events.
  and wrap `revertOriginalForm` so new loot is created on the original first. A leftover
  delete (`preDeleteActor`) carries anything still pending, then deletes. `copied` makes
  a second pass a no-op.
+ - **The destination walks leftover → character (v0.7.30).** A player revert strips
+ `isPolymorphed` but leaves `flags.dnd5e.originalActor`. Wild Shaping that leftover
+ (or a token that never retargeted) then sets the new form's `originalActor` to the
+ leftover's id — `!this.isPolymorphed` is true, so dnd5e overwrites Drew. Items landed
+ on `Drew Id (Giant Owl)` in the player folder; gold on the live temp-folder owl never
+ followed. `originalIdForStamp` / `originalOf` walk past any form copy. Revert also
+ carries every other uncopied leftover that walks to the same character.
+ - **Coin is written as `system.currency.gp`, not a whole-object replace.** MappingField
+ wrappers (`{value: 20}`) and `_source` are read; `Number({})` is 0 and was why arrows
+ copied while gold stayed on the leftover.
  - Copies are diverted into an Actors folder (default `Wild Shape (temp)`), created by
  the primary GM. Empty folder name leaves them beside the original. Ownership is
  unchanged — players open the form from their token. Periodic GM clean-up of that
  folder is expected. Unlinked tokens never create a sidebar Actor and are untouched.
+ A `createActor` move parks a form that landed in the original folder (folder not
+ ready at the hook). It does not delete an older leftover already sitting there.
 - **`src/util/token-badge.ts` is the saddle icon, not Wild Shape.** Core's
  `MouseInteractionManager` binds `clickLeft` to the Token, so a PIXI listener on an
  effect sprite is not a click. The wrap on `Token#_onClickLeft` hit-tests riding's

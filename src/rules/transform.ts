@@ -14,6 +14,7 @@ import { isPrimaryGM } from "../util/gm";
 import { isTransformLootEnabled, transformFolderName } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
+  COIN_KEYS,
   FORM_LOOT_FLAG,
   addCurrency,
   currencyOf,
@@ -149,15 +150,49 @@ function formatCoin(bag: ReturnType<typeof currencyOf>): string {
   return parts.length ? parts.join(" ") : "no coin";
 }
 
-function originalOf(form: any): any {
-  const snap = readFormLoot(form);
-  const id = snap?.originalActor || form?.flags?.dnd5e?.originalActor;
+function actorById(id: string | undefined | null): any {
   if (!id) return null;
   try {
     return (game.actors as any)?.get?.(id) ?? null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Walk leftover → leftover → character. Player revert leaves `originalActor` on the
+ * leftover; a second Wild Shape then points the new form at that leftover, not Drew.
+ */
+function originalOf(form: any): any {
+  const seen = new Set<string>();
+  let id = String(readFormLoot(form)?.originalActor || form?.flags?.dnd5e?.originalActor || "");
+  let best: any = null;
+  while (id && !seen.has(id)) {
+    seen.add(id);
+    const actor = actorById(id);
+    if (!actor) break;
+    best = actor;
+    const next = readFormLoot(actor)?.originalActor || actor?.flags?.dnd5e?.originalActor;
+    if (!next || String(next) === id) break;
+    id = String(next);
+  }
+  return best;
+}
+
+function leftoversOf(originalId: string, exceptId?: string): any[] {
+  const out: any[] = [];
+  try {
+    for (const actor of game.actors ?? []) {
+      if (!actor || actor.id === exceptId || actor.id === originalId) continue;
+      const snap = readFormLoot(actor);
+      if (!snap || snap.copied) continue;
+      const root = originalOf(actor);
+      if (root?.id === originalId) out.push(actor);
+    }
+  } catch {
+    /* directory unread */
+  }
+  return out;
 }
 
 /**
@@ -176,15 +211,41 @@ export async function carryFormLoot(form: any): Promise<CarryResult | null> {
   return run;
 }
 
+/** Carry this form, then every other uncopied leftover that walks to the same original. */
+async function carryAllFormLoot(form: any): Promise<CarryResult | null> {
+  const result = await carryFormLoot(form);
+  const original = originalOf(form);
+  if (!original?.id) return result;
+  for (const other of leftoversOf(original.id, form?.id)) {
+    await carryFormLoot(other);
+  }
+  return result;
+}
+
+function currencyUpdate(current: ReturnType<typeof currencyOf>, extra: ReturnType<typeof currencyOf>): Record<string, number> {
+  const next = addCurrency(current, extra);
+  const update: Record<string, number> = {};
+  for (const key of COIN_KEYS) {
+    if ((extra[key] ?? 0) > 0) update[`system.currency.${key}`] = next[key];
+  }
+  return update;
+}
+
 async function doCarry(form: any): Promise<CarryResult | null> {
   let snap = readFormLoot(form);
-  const plan = planFormLoot({ items: form.items, currency: currencyOf(form), snapshot: snap });
+  const purse = currencyOf(form);
+  const plan = planFormLoot({ items: form.items, currency: purse, snapshot: snap });
   if (!plan || !snap) return null;
   const original = originalOf(form);
   const name = String(original?.name ?? form?.name ?? "?");
-  if (!original) {
+  if (!original || original.id === form.id) {
     warn("transform: form loot has no original Actor — nothing to copy onto");
     return { items: 0, coin: "no coin", name, skipped: "no-original" };
+  }
+  if (hasCoin(purse) && !hasCoin(plan.currency)) {
+    warn(
+      `transform: ${String(form.name)} holds ${formatCoin(purse)} but the stamp already had that purse — not adding again`,
+    );
   }
   if (!plan.items.length && !hasCoin(plan.currency)) {
     await markCopied(form, snap);
@@ -200,9 +261,9 @@ async function doCarry(form: any): Promise<CarryResult | null> {
       await markProgress(form, snap);
     }
     if (hasCoin(plan.currency)) {
-      const next = addCurrency(currencyOf(original), plan.currency);
-      await original.update({ "system.currency": next });
-      snap = { ...snap, currency: currencyOf(form) };
+      const update = currencyUpdate(currencyOf(original), plan.currency);
+      await original.update(update);
+      snap = { ...snap, currency: purse };
       await markProgress(form, snap);
     }
     await markCopied(form, snap);
@@ -228,7 +289,9 @@ async function doCarry(form: any): Promise<CarryResult | null> {
     } catch {
       /* courtesy */
     }
-    log(`transform: carried ${result.items} item(s) and ${result.coin} → ${name}`);
+    log(
+      `transform: carried ${result.items} item(s) and ${result.coin} → ${name} (${original.id}) from ${String(form.name)} (${form.id})`,
+    );
   }
   return result;
 }
@@ -254,7 +317,7 @@ function wrapRevertOriginalForm(): void {
   if (!proto?.revertOriginalForm || proto.revertOriginalForm[REVERT_WRAP]) return;
   const original = proto.revertOriginalForm;
   async function wrapped(this: any, options?: object) {
-    await carryFormLoot(this);
+    await carryAllFormLoot(this);
     return original.call(this, options);
   }
   (wrapped as any)[REVERT_WRAP] = true;
@@ -298,7 +361,7 @@ function deleteIsReplay(options: any): boolean {
 }
 
 async function replayDeleteAfterCarry(actor: any, options: any): Promise<void> {
-  const result = await carryFormLoot(actor);
+  const result = await carryAllFormLoot(actor);
   if (result?.skipped === "write-failed") return;
   const next = { ...(options && typeof options === "object" ? options : {}) };
   next[MODULE_ID] = { ...(next[MODULE_ID] ?? {}), [DELETE_REPLAY]: true };
@@ -309,11 +372,33 @@ async function replayDeleteAfterCarry(actor: any, options: any): Promise<void> {
   }
 }
 
+function folderIdOf(actor: any): string {
+  const folder = actor?.folder;
+  if (!folder) return "";
+  return String(folder.id ?? folder);
+}
+
+async function parkFormInFolder(actor: any): Promise<void> {
+  if (!readFormLoot(actor)) return;
+  const folderId = findFormFolderId();
+  if (!folderId || folderIdOf(actor) === folderId) return;
+  if (!actor.isOwner && !isPrimaryGM()) return;
+  try {
+    await actor.update({ folder: folderId });
+    debug("transform: moved leftover", String(actor.name), "into", transformFolderName());
+  } catch (err) {
+    warn("transform: could not move leftover into the temp folder:", err);
+  }
+}
+
 export function registerTransformWatch(): void {
   wrapRevertOriginalForm();
   void ensureFormFolder();
   Hooks.on("dnd5e.transformActor", divertCreateData);
   Hooks.on("dnd5e.transformActorV2", divertCreateData);
+  Hooks.on("createActor", (actor: any) => {
+    void parkFormInFolder(actor);
+  });
   Hooks.on("preDeleteActor", (actor: any, options: any) => {
     if (!isTransformLootEnabled() || deleteIsReplay(options)) return;
     const snap = readFormLoot(actor);
@@ -376,7 +461,8 @@ export function surveyTransform(): unknown {
       if (onScene) continue;
       lines.push(
         `  leftover ${String(actor.name)} folder=${String(actor.folder?.name ?? actor.folder ?? "—")}` +
-          ` stamped=${loot.itemIds.length} original=${loot.originalActor}`,
+          ` stamped=${loot.itemIds.length} purse=${formatCoin(currencyOf(actor))} original=${loot.originalActor}` +
+          ` root=${originalOf(actor)?.id ?? "?"}`,
       );
     }
   } catch {

@@ -73,14 +73,79 @@ export function emptyCurrency(): CurrencyBag {
   return { pp: 0, gp: 0, ep: 0, sp: 0, cp: 0 };
 }
 
-export function currencyOf(source: any): CurrencyBag {
-  const raw = source?.system?.currency ?? source?.currency ?? {};
-  const out = emptyCurrency();
+/** Coerce one denomination. MappingField / NumberField wrappers are objects, not numbers. */
+export function coinAmount(value: unknown): number {
+  if (value == null || value === "") return 0;
+  if (typeof value === "object") {
+    const inner = (value as { value?: unknown; amount?: unknown }).value ?? (value as { amount?: unknown }).amount;
+    if (typeof (value as { get?: (k: string) => unknown }).get === "function" && inner == null) {
+      return 0;
+    }
+    return coinAmount(inner);
+  }
+  const n = Math.floor(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function currencyRecord(raw: any): any {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.toObject === "function") {
+    try {
+      return raw.toObject();
+    } catch {
+      /* fall through */
+    }
+  }
+  return raw;
+}
+
+function takeCurrency(target: CurrencyBag, raw: any): void {
+  const rec = currencyRecord(raw);
+  if (!rec) return;
   for (const key of COIN_KEYS) {
-    const n = Math.floor(Number(raw?.[key]) || 0);
-    out[key] = Number.isFinite(n) && n > 0 ? n : 0;
+    const n =
+      coinAmount(rec[key]) ||
+      (typeof rec.get === "function" ? coinAmount(rec.get(key)) : 0);
+    if (n > target[key]) target[key] = n;
+  }
+}
+
+/**
+ * Purse on an actor or a create-payload. Reads prepared data, `_source`, and `toObject`
+ * so a MappingField wrapper cannot look like zero while the sheet shows gold.
+ */
+export function currencyOf(source: any): CurrencyBag {
+  const out = emptyCurrency();
+  if (!source) return out;
+  takeCurrency(out, source.system?.currency);
+  takeCurrency(out, source._source?.system?.currency);
+  takeCurrency(out, source.currency);
+  if (typeof source.toObject === "function") {
+    try {
+      takeCurrency(out, source.toObject()?.system?.currency);
+    } catch {
+      /* document without toObject support */
+    }
   }
   return out;
+}
+
+/**
+ * Who the leftover should copy onto. A player revert strips `isPolymorphed` but leaves
+ * `flags.dnd5e.originalActor`. Wild Shaping that leftover then overwrites the flag with
+ * the leftover's own id (`!this.isPolymorphed` is true). Walk past any form copy.
+ */
+export function originalIdForStamp(d: any, host: any): string {
+  const hostId = String(host?.id ?? "");
+  const hostSnap = host?.flags?.[MODULE_ID]?.[FORM_LOOT_FLAG];
+  if (isFormLootSnapshot(hostSnap) && hostSnap.originalActor && hostSnap.originalActor !== hostId) {
+    return hostSnap.originalActor;
+  }
+  const hostFlag = host?.flags?.dnd5e?.originalActor;
+  if (hostFlag && String(hostFlag) !== hostId) return String(hostFlag);
+  const flagged = d?.flags?.dnd5e?.originalActor;
+  if (flagged && String(flagged) !== hostId) return String(flagged);
+  return String(flagged || hostId || "");
 }
 
 export function addCurrency(base: CurrencyBag, extra: CurrencyBag): CurrencyBag {
@@ -172,7 +237,7 @@ export function itemPayloadForCarry(item: any): Record<string, unknown> {
 
 /** Write the stamp onto the create payload `d` that `dnd5e.transformActor` hands over. */
 export function stampFormLootOnCreateData(d: any, host: any): FormLootSnapshot {
-  const originalActor = String(d?.flags?.dnd5e?.originalActor ?? host?.id ?? "");
+  const originalActor = originalIdForStamp(d, host);
   const snap: FormLootSnapshot = {
     originalActor,
     itemIds: itemIdsOf(d?.items ?? []),

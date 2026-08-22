@@ -8,10 +8,12 @@ import {
   TRANSFORM_BADGE_ID,
   TRANSFORM_STATUS_ID,
   addCurrency,
+  coinAmount,
   currencyDelta,
   currencyOf,
   emptyCurrency,
   hasCoin,
+  originalIdForStamp,
   isFormLootSnapshot,
   isOurTransformBadge,
   isPolymorphed,
@@ -93,6 +95,30 @@ test("planFormLoot is null when already copied or there is no stamp", () => {
     }),
     null,
   );
+});
+
+test("currencyOf reads wrappers, _source, and MappingField-shaped get()", () => {
+  assert.equal(coinAmount(20), 20);
+  assert.equal(coinAmount("7"), 7);
+  assert.equal(coinAmount({ value: 20 }), 20);
+  assert.equal(coinAmount({}), 0);
+  assert.deepEqual(currencyOf({ system: { currency: { gp: { value: 20 } } } }).gp, 20);
+  assert.deepEqual(currencyOf({ system: { currency: {} }, _source: { system: { currency: { gp: 15 } } } }).gp, 15);
+  const mapping = { get: (k: string) => (k === "gp" ? 12 : 0) };
+  assert.deepEqual(currencyOf({ system: { currency: mapping } }).gp, 12);
+});
+
+test("originalIdForStamp walks past a leftover host to the character", () => {
+  const leftover = {
+    id: "owl-1",
+    flags: {
+      dnd5e: { originalActor: "drew" },
+      [MODULE_ID]: { [FORM_LOOT_FLAG]: { originalActor: "drew", itemIds: [], currency: emptyCurrency() } },
+    },
+  };
+  const d = { flags: { dnd5e: { originalActor: "owl-1" } } };
+  assert.equal(originalIdForStamp(d, leftover), "drew");
+  assert.equal(originalIdForStamp({ flags: { dnd5e: { originalActor: "drew" } } }, { id: "drew" }), "drew");
 });
 
 test("currencyDelta never subtracts and stampFormLoot writes our flag", () => {
