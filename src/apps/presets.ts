@@ -43,6 +43,7 @@ const ALL_RULES = {
   [C.surprise]: true,
   [C.invisBreak]: true,
   [C.autoEnd]: true,
+  [C.templateLifetime]: true,
   [G.jump]: true,
   [G.influence]: true,
   [G.interactReach]: true,

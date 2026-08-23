@@ -56,6 +56,14 @@ export const COMBAT_SETTINGS = {
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */
   autoSaves: "combat.autoSaves",
   /**
+   * Whether a placed MeasuredTemplate is deleted when its turn is over or its source is gone.
+   *
+   * Instantaneous leftovers (Fireball) and broken-concentration leftovers (a cone that was never a
+   * dependent) are the stains. Not split by audience: the canvas is one map, and a player's leftover
+   * is the same stain as an Archmage's.
+   */
+  templateLifetime: "combat.templateLifetime",
+  /**
    * Whether the Damage button waits for the attack to be resolved before it can be pressed.
    *
    * NOT split by audience, unlike applying the damage, and the reason is that the two settings are about

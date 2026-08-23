@@ -216,6 +216,7 @@ const AREAS: Area[] = [
             }
           : null,
   },
+  { id: "templateLifetime", setting: COMBAT_SETTINGS.templateLifetime },
   {
     id: "reactionPrompts",
     setting: COMBAT_SETTINGS.reactionPrompts,

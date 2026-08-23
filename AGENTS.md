@@ -3098,39 +3098,44 @@ What was locked:
 - **Grants and Speed cuts default to one turn** when the descriptor omitted a duration.
   A stated non-time duration is still a refusal.
 
-### Phase 4 remaining — template lifetime (user, 2026-08-19)
+### Phase 4 — template lifetime BUILT (2026-08-23); `create_area` still open
 
-`create_area` is already on this phase because `on_enter_area` cannot fire without a placeable.
-**Orphaned templates are a hard requirement of the same job, not a Phase 5 nicety.** An
-instantaneous Fireball already leaves its MeasuredTemplate on the canvas after the fire is gone
-(`dnd5e-hazards.ts` records that as why a creature fleeing yesterday's explosion looks broken).
-Concentration *can* cascade a dependent — Wall of Fire's template dies with the AE — and plenty
-of templates are not registered as dependents, so a broken concentration still leaves a cone
-painted on the map. The user's words: they are hugely distracting, and automatic clean-up is why
-these modules exist.
+`src/system/dnd5e-templates.ts` + `src/rules/template-lifetime.ts`. Setting
+`combat.templateLifetime`, default **on**. Stamp `flags.<ns>.lifetime` in
+`preCreateMeasuredTemplate` on the creating client; delete on the primary GM.
 
-Two lifetimes, both sides of the table (a player's leftover Fireball is the same stain as an
-Archmage's):
+- **Instant** (`inst` or empty units): due when settle has passed AND the placing
+  combat slot is over (`combatId` + `round` + `turn`). Still their turn → never
+  delete. Combat clock, not `worldTime`. Out of combat (no `combatId`):
+  `OOC_TTL_MS` (8 s).
+- **Lasting** (turn/round/minute/…): expire with the **stamped duration** or when
+  concentration we have actually seen then ends — whichever first. Clocks are
+  written once at place time from `durationOf` (activity `override: false` means
+  use the item — Wall of Fire's save activity is `inst` and is not a Fireball).
+  Metamagic is already in the live `duration.value`. Do not re-read the book later.
+  Same started combat → rounds (1 minute = 10). Everywhere else, including a wall
+  dropped to block a door before initiative, → `untilMs` / `untilWorld`. **Never
+  start a combat** to time a spell. `heldSeen` is required before a missing AE
+  counts as broken concentration — an empty live set after 4 s is not an ending.
+  When the duration runs out, delete the templates and `endConcentration` on the
+  matching parent so the AE does not outlive the wall.
+- **`keep`** (`perm` / `spec` / `until`) stays unless we saw its concentration
+  and that concentration ended.
+- **Unresolved source is `keep`, never guessed as instant.** A Wall of Fire whose
+  activity uuid would not resolve would otherwise vanish at end of turn.
+- **`SETTLE_MS` 4 s** is a minimum wait for instant leftovers and for a
+  concentration-break, not a lifetime. A lasting wall uses its duration.
+- Hand-drawn (no `flags.dnd5e.origin` / `.item`) is never stamped.
+- Catch-up on `canvasReady` (the v0.7.5 `ready`-misses-startup pairing) plus a
+  6 s poll. `updateCombat` only on turn/round. `deleteCombat` converts leftover
+  rounds to real time so a short fight does not leave a full minute and does
+  not wipe the wall.
+- Diagnostics: `noodlrHooks.surveyTemplates()`.
 
-- **Instantaneous** (Fireball, Lightning Bolt, Cone of Cold, a breath, a Banshee wail): in
-  combat the template must not outlive the six-second turn that placed it. Key off the combat
-  clock, not `worldTime` — Hold Person already showed that the world clock can run minutes
-  during one round. Out of combat, a short real-time TTL is the backstop.
-- **Valued duration** (Wall of Fire, Darkness, Fog Cloud, Moonbeam): delete when the source
-  expires **or** the caster's concentration breaks, whichever comes first. Do not trust the
-  dependent-effect cascade alone; walk templates that still name an origin whose AE or
-  concentration is gone.
-
-This is bookkeeping, not tactics. It is the sibling of `create_area` rather than a new
-vocabulary kind: dnd5e already places the MeasuredTemplate; we own when it leaves. Do not
-conflate it with "who the template caught" (the existing planned targeting row) or with
-placing one in the first place (Phase 5, below). A template that vanished before the saves
-resolved is worse than one that lingered, so cleanup waits on the application having settled.
-
-Still on this phase, unchanged: `request_save`, dice over `dnd5e-reroll.ts`, named counters,
-the small kinds (reduce-to-1-HP / initiative swap / flat bonus), and duration job B
-(DAE `specialDuration` → core expiry). Do not start B until Reckless and Ray of Frost have
-been seen working at the table.
+Still on this phase: `create_area` / `on_enter_area`, `request_save`, dice over
+`dnd5e-reroll.ts`, named counters, the small kinds, and duration job B
+(DAE `specialDuration` → core expiry). Do not start B until Reckless and Ray of
+Frost have been seen working at the table.
 
 ### Phase 5 — hostile NPCs place their own areas (user, 2026-08-19)
 

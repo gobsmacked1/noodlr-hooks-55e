@@ -170,6 +170,7 @@ export function registerCombatSettings(): void {
   // the party to click) is the wrong way round.
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
+  world(COMBAT_SETTINGS.templateLifetime, "TemplateLifetime", Boolean, true);
   world(COMBAT_SETTINGS.damageGate, "DamageGate", Boolean, true);
   split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.counterspell, "Counterspell", Boolean, { npc: true, pc: true });
@@ -505,6 +506,11 @@ export function isAutoDamageEnabled(subject: unknown): boolean {
  */
 export function isAutoSavesEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoSaves));
+}
+
+/** Instantaneous leftovers and broken-concentration cones leave when the effect does. */
+export function isTemplateLifetimeEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.templateLifetime));
 }
 
 /**

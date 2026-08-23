@@ -659,7 +659,7 @@ const SHARED_ROLLS: Section = {
       label: "Targeting: automatic from a template, manual, or with cover applied",
       hint:
         "Selecting who a template caught, and whether cover modifies them. The reading half. " +
-        "Placing the cone is the NPC-turn row (Phase 5). Cleaning it up is the next row (Phase 4).",
+        "Placing the cone is the NPC-turn row (Phase 5). Leftover templates are the next row.",
       state: "planned",
       today:
         "Midi QoL for who the template caught. Leftover single-targets (the last Ray of Frost) " +
@@ -667,14 +667,12 @@ const SHARED_ROLLS: Section = {
     },
     {
       id: "templateLifetime",
-      label: "Templates leave when the effect does",
-      hint:
-        "An instantaneous Fireball, breath or wail must not stay painted after the six-second turn " +
-        "that placed it. A Wall of Fire, Darkness or Moonbeam dies with its duration or when the " +
-        "caster's concentration breaks — including templates the system did not register as " +
-        "dependents. Players and hostiles alike. Phase 4, beside create_area.",
-      state: "planned",
-      today: "Nobody. Concentration sometimes cascades a dependent; leftover cones stay.",
+      label: "NOODLRHOOKS.Combat.TemplateLifetime.Name",
+      hint: "NOODLRHOOKS.Combat.TemplateLifetime.Hint",
+      state: "live",
+      setting: C.templateLifetime,
+      kind: "boolean",
+      ownership: "templateLifetime",
     },
     {
       id: "recharge",

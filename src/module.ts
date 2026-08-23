@@ -59,6 +59,7 @@ import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerDamageGate, surveyGate } from "./rules/gate";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
 import { registerTemplateTargets } from "./rules/template-targets";
+import { registerTemplateLifetime, surveyTemplates } from "./rules/template-lifetime";
 import { surveyLegendary } from "./rules/legendary";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
@@ -184,6 +185,7 @@ export interface NoodlrHooksApi {
   surveyFlee(): unknown;
   surveyRepeatSaves(): unknown;
   surveyRecharge(): unknown;
+  surveyTemplates(): unknown;
   repeatSave(clause: RepeatSave): Promise<void>;
   surveyInfluence(): unknown;
   influence(opts?: { approach?: string; stance?: Stance; force?: boolean }): Promise<unknown>;
@@ -352,6 +354,8 @@ const api: NoodlrHooksApi = {
   surveyRepeatSaves: () => surveyRepeatSaves(),
   /** Whether a spent Recharge 5–6 would roll itself, and what on the selected creature is spent. */
   surveyRecharge: () => surveyRecharge(),
+  /** Instantaneous leftovers and broken-concentration cones still on the scene, and which are due. */
+  surveyTemplates: () => surveyTemplates(),
   /**
    * Register a save-ends clause on every selected token, for an effect applied off a stat block.
    * `{status: "paralyzed", ability: "con", dc: 13, source: "Ghoul's Claw"}`.
@@ -474,6 +478,9 @@ Hooks.once("ready", () => {
   // Drop leftover single-targets on template spells. Same hook, never a veto, and it must
   // run on the using client — that is whose `game.user.targets` dnd5e snapshots onto the card.
   registerTemplateTargets();
+  // Stamp on the creating client so the flag travels with the document. Delete is primary-GM
+  // gated inside — a leftover Fireball arrives on every client.
+  registerTemplateLifetime();
   registerConditionHooks();
   // Drop-to-0 Unconscious/Dead and damage-at-0 death failures. Writes on the updating client.
   registerDyingHooks();

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.7.35
+
+**Templates leave when the effect does.** An instantaneous Fireball, breath or wail is removed
+once the placing turn is over and the saves have had a few seconds to land. A Wall of Fire
+requires concentration *and* has a maximum duration: a concentration break or that duration
+ending — whichever first — removes the parent effect and every child template. You cannot hold
+the same slot forever by concentrating. Extend Spell and other riders are read off the live
+activity when the template is placed. A missing concentration effect is not treated as a break
+(that is how a one-minute wall would have vanished after four seconds). A successful
+Counterspell vetoes the cast before any effect or template exists. Out of combat the clock is
+real time; placing a wall to block a door does not start a fight. In a fight already underway
+it is rounds (1 minute = 10). A hand-drawn ruler is left alone. Switch defaults on, Combat page,
+under saving throws. `noodlrHooks.surveyTemplates()`.
+
 ## 0.7.34
 
 **Innate flyers and burrowers now use height on purpose, and changing height spends Speed.**
