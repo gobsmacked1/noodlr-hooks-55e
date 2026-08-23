@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.32
+
+**Tokens animate at their sheet Speed, and fly / climb / jump / burrow can cross a wall at the
+matching height.** Foundry slides every token at the same 6 squares per second and treats every
+wall as an infinite slab, so a 30-foot walk finishes in about 2.5 seconds and a flyer at 10 feet
+still stops at a maze hedge. Sheet pace reads the live movement value for the selected action
+(Haste and Slow already write that) and takes the time a 6-second round implies. Mode-traverse
+treats untagged walls as 10 feet tall (0 at the base) unless a wall or the scene says otherwise;
+outdoors those four modes go over or under when the token's feet clear the slab, indoors the
+three over-modes cannot, and burrow still can if the floor is natural. Walk and swim never. A
+later taller wall still stops the path. Reads Wall Height's top/bottom when present and never
+writes that namespace. Both switches default on, under House rules.
+
 ## 0.7.31
 
 **Leftover Wild Shape Actors are deleted after the loot comes home.** A player revert never

@@ -205,6 +205,8 @@ export function registerCombatSettings(): void {
   general(GENERAL_SETTINGS.transformLoot, "TransformLoot", Boolean, true);
   general(GENERAL_SETTINGS.transformFolder, "TransformFolder", String, "Wild Shape (temp)");
   general(GENERAL_SETTINGS.riding, "Riding", Boolean, true);
+  general(GENERAL_SETTINGS.sheetPace, "SheetPace", Boolean, true);
+  general(GENERAL_SETTINGS.modeTraverse, "ModeTraverse", Boolean, true);
 
   game.settings.register(MODULE_ID, SETTINGS.compileCapabilities, {
     name: "NOODLRHOOKS.Capabilities.Name",
@@ -682,12 +684,13 @@ export function isAutoEngageEnabled(): boolean {
 }
 
 /**
- * Grid squares per second an automated creature slides across the canvas; 0 means "leave Foundry's".
+ * Grid squares per second an automated creature slides across the canvas; 0 means "use sheet pace".
  *
  * A creature that arrives instantly reads as a teleport, and players call foul on a Dire Wolf that
- * blinks 30 ft (user's report, 2026-08-04). The default is 0 rather than a number of my own choosing
- * because Foundry already has an animation pace and overriding it by default would be presumptuous;
- * this exists for tables that want the walk slowed down so it can be followed.
+ * blinks 30 ft (user's report, 2026-08-04). 0 is no longer "Foundry's 6 spaces/sec": when sheet pace
+ * is on (the default), automation inherits the same live Speed a dragged token uses. A positive
+ * number here still wins, so a table that wants every monster to slide at one readable rate can
+ * set one.
  */
 export function getMoveSpeed(): number {
   const raw = Number(game.settings.get(MODULE_ID, COMBAT_SETTINGS.moveSpeed));
@@ -788,6 +791,38 @@ export function isAurasEnabled(): boolean {
  */
 export function isRidingEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.riding));
+}
+
+/**
+ * Should a token's movement animation take the time its sheet Speed implies?
+ *
+ * On by default. Foundry animates every creature at 6 grid spaces per second, so a 30-foot walk
+ * finishes in about 2.5 seconds. This reads the live movement value for the selected action
+ * (Haste and Slow already write that number) and converts feet-per-round into spaces-per-second.
+ * Off restores Foundry's own pace, including climb/swim animating at half of that default.
+ */
+export function isSheetPaceEnabled(): boolean {
+  try {
+    return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.sheetPace));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * May fly, climb, jump or burrow ignore walls at the matching elevation?
+ *
+ * On by default. Core blocks every non-blink action with `walls: "move"` regardless of elevation,
+ * so a flyer at 10 feet still stops at a maze wall. This is a house-rule approximation: walls have
+ * no height unless another module adds one. Walk and swim never bypass. Off restores core's
+ * wall test for every mode.
+ */
+export function isModeTraverseEnabled(): boolean {
+  try {
+    return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.modeTraverse));
+  } catch {
+    return true;
+  }
 }
 
 /**

@@ -50,6 +50,8 @@ const ALL_RULES = {
   [G.transformUndo]: true,
   [G.transformLoot]: true,
   [G.riding]: true,
+  [G.sheetPace]: true,
+  [G.modeTraverse]: true,
 };
 
 const OFF = Object.fromEntries(Object.keys(ALL_RULES).map((k) => [k, false]));

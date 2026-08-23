@@ -34,11 +34,36 @@
 // reasons that are none of this module's business; not creatures Noodlr is playing, which budget their
 // own movement before they take a step; and not anybody outside their turn, where the question is whose
 // turn it is rather than how far they have come.
+//
+// The Token subclass below also owns sheet-paced animation and mode-traverse. Those are not the Speed
+// budget; they share the class because a second `objectClass` replacement would drop this one. See
+// `core/pace.ts`, `core/traverse.ts` and `core/wall-height.ts`.
 
-import { log } from "../../constants";
+import { debug, log } from "../../constants";
 import { speakerFor } from "../../util/speaker";
-import { isMovementCapEnabled } from "../../settings";
+import {
+  getMoveSpeed,
+  isModeTraverseEnabled,
+  isMovementCapEnabled,
+  isSheetPaceEnabled,
+} from "../../settings";
 import { pickNumber, systemPaths } from "../../system/profiles";
+import { JUMP_RUN_UP, jumpDistances } from "../../system/dnd5e-checks";
+import { animationDurationMs, gridDistanceOf, sheetSpacesPerSecondOf } from "../../core/pace";
+import {
+  horizontalSceneUnits,
+  pathClearsWalls,
+  segmentsOf,
+  type TraverseWaypoint,
+} from "../../core/traverse";
+import {
+  decidePath,
+  scenePolicyOf,
+  trimToCut,
+  type CrossingFacts,
+  type PathDecision,
+  type WallLike,
+} from "../../core/wall-height";
 import { check, dashesTaken, takeDash } from "./ledger";
 import { stoodThisTurn } from "../prone";
 import { isAutomating } from "./enforce";
@@ -168,10 +193,81 @@ function spentThisTurn(doc: any): number {
   return total;
 }
 
+function traverseFactsOf(doc: any): CrossingFacts {
+  const modes = doc?.actor?.system?.attributes?.movement ?? {};
+  let jumpLong: number | null = null;
+  let jumpHighRunning: number | null = null;
+  let jumpHighStanding: number | null = null;
+  try {
+    const distances = jumpDistances(doc?.actor);
+    if (!distances.unreadable) {
+      jumpLong = Math.max(distances.longRunning, distances.longStanding);
+      jumpHighRunning = distances.highRunning;
+      jumpHighStanding = distances.highStanding;
+    }
+  } catch {
+    jumpLong = null;
+  }
+  return {
+    hasFly: Number(modes.fly) > 0,
+    hasClimb: Number(modes.climb) > 0,
+    hasBurrow: Number(modes.burrow) > 0,
+    jumpLong,
+    jumpHighRunning,
+    jumpHighStanding,
+    defaultAction: String(doc?.movementAction ?? "walk"),
+  };
+}
+
+function wallsOf(doc: any): WallLike[] {
+  const col = doc?.parent?.walls ?? (globalThis as any).canvas?.scene?.walls;
+  if (!col) return [];
+  const out: WallLike[] = [];
+  for (const wall of col) {
+    const d = (wall as any).document ?? wall;
+    const src = d._source ?? d;
+    out.push({
+      c: d.c ?? src.c,
+      move: d.move ?? src.move,
+      door: d.door ?? src.door,
+      ds: d.ds ?? src.ds,
+      flags: d.flags ?? src.flags,
+    });
+  }
+  return out;
+}
+
+function pathDecisionOf(doc: any, waypoints: TraverseWaypoint[]): PathDecision {
+  if (!isModeTraverseEnabled()) return { kind: "core" };
+  const facts = traverseFactsOf(doc);
+  const measure = (from: TraverseWaypoint, to: TraverseWaypoint) => measureHorizontal(doc, from, to);
+  if (!pathClearsWalls(segmentsOf(waypoints, facts, measure))) return { kind: "core" };
+  return decidePath(waypoints, wallsOf(doc), facts, scenePolicyOf(doc?.parent), measure, JUMP_RUN_UP);
+}
+
+function measureHorizontal(doc: any, from: TraverseWaypoint, to: TraverseWaypoint): number {
+  const grid = doc?.parent?.grid;
+  if (typeof grid?.measurePath === "function") {
+    try {
+      const measured = grid.measurePath([
+        { x: from.x, y: from.y },
+        { x: to.x, y: to.y },
+      ]);
+      const distance = Number(measured?.distance);
+      if (Number.isFinite(distance)) return distance;
+    } catch {
+      // Fall through to the pixel conversion. A thrown measure must not block the move.
+    }
+  }
+  const size = Number((globalThis as any).canvas?.dimensions?.size) || 100;
+  return horizontalSceneUnits(from, to, size, gridDistanceOf(doc));
+}
+
 export function registerMovementCap(): void {
   // Truncation. Subclassed at `setup` rather than `init`, by which point dnd5e has already installed its
   // own Token class — extending whatever is there keeps its `ignoreTokens` handling instead of replacing
-  // it, and needs no wrapper library.
+  // it, and needs no wrapper library. Sheet pace and mode-traverse live on this same subclass: a second
+  // replacement of `objectClass` would drop the first.
   Hooks.once("setup", () => {
     const Base: any = (globalThis as any).CONFIG?.Token?.objectClass;
     if (!Base) return;
@@ -195,6 +291,67 @@ export function registerMovementCap(): void {
           log("could not work out a movement budget for this drag:", err);
         }
         return options;
+      }
+
+      _getAnimationMovementSpeed(options: any) {
+        try {
+          if (isSheetPaceEnabled() && getMoveSpeed() <= 0) {
+            const sps = sheetSpacesPerSecondOf(this.document);
+            if (sps !== null) return sps;
+          }
+        } catch (err) {
+          log("could not read a sheet pace:", err);
+        }
+        return super._getAnimationMovementSpeed(options);
+      }
+
+      _getAnimationDuration(from: any, to: any, options: any) {
+        try {
+          if (isSheetPaceEnabled() && getMoveSpeed() <= 0) {
+            const sps = sheetSpacesPerSecondOf(this.document);
+            const size = Number((globalThis as any).canvas?.dimensions?.size);
+            if (sps !== null && size > 0) {
+              const speed = this._modifyAnimationMovementSpeed(sps, options);
+              const ours = animationDurationMs(from, to, speed, size, gridDistanceOf(this.document));
+              // Super still owns rotation. Passing our speed also defeats climb/swim's
+              // `defaultSpeed / 2`, which would otherwise skip `_getAnimationMovementSpeed`.
+              const theirs = super._getAnimationDuration(from, to, { ...options, movementSpeed: speed });
+              return Math.max(ours, theirs);
+            }
+          }
+        } catch (err) {
+          log("could not pace a movement animation:", err);
+        }
+        return super._getAnimationDuration(from, to, options);
+      }
+
+      constrainMovementPath(waypoints: TraverseWaypoint[], options: any = {}) {
+        const next = { ...options };
+        try {
+          if (!next.ignoreWalls) {
+            const decision = pathDecisionOf(this.document, waypoints);
+            if (decision.kind === "ignore-all") {
+              next.ignoreWalls = true;
+              debug("mode-traverse: ignoring walls", {
+                name: String(this.document?.name ?? "?"),
+                action: String(this.document?.movementAction ?? ""),
+                elevation: this.document?._source?.elevation,
+              });
+            } else if (decision.kind === "cut" && decision.cut.skipped > 0) {
+              next.ignoreWalls = true;
+              debug("mode-traverse: cutting path at first blocking wall", {
+                name: String(this.document?.name ?? "?"),
+                skipped: decision.cut.skipped,
+                x: decision.cut.x,
+                y: decision.cut.y,
+              });
+              return super.constrainMovementPath(trimToCut(waypoints, decision.cut), next);
+            }
+          }
+        } catch (err) {
+          log("could not decide whether this path clears walls:", err);
+        }
+        return super.constrainMovementPath(waypoints, next);
       }
     };
   });
@@ -309,12 +466,45 @@ export function surveyMovement(): unknown {
   if (!token) return { error: "select a token" };
   const doc = token.document;
   const budget = budgetFor(doc);
-  return {
+  const modes = doc?.actor?.system?.attributes?.movement ?? {};
+  const action = String(doc?.movementAction ?? "walk");
+  const elevation = Number(doc?._source?.elevation ?? doc?.elevation ?? 0);
+  const gridDistance = gridDistanceOf(doc);
+  const sps = sheetSpacesPerSecondOf(doc);
+  const sample = [
+    { x: Number(doc._source?.x ?? 0), y: Number(doc._source?.y ?? 0), elevation, action },
+    {
+      x: Number(doc._source?.x ?? 0) + Number((canvas as any)?.dimensions?.size ?? 100),
+      y: Number(doc._source?.y ?? 0),
+      elevation,
+      action,
+    },
+  ];
+  const policy = scenePolicyOf(doc?.parent);
+  const report = {
     token: String(doc?.name ?? "?"),
     enabled: isMovementCapEnabled(),
     combatStarted: Boolean(game.combat?.started),
     isTheirTurn: String(doc?.combatant?.id ?? "") === String(game.combat?.combatant?.id ?? ""),
-    movementAction: String(doc?.movementAction ?? ""),
+    movementAction: action,
+    elevation,
+    sheet: {
+      walk: modes.walk ?? 0,
+      fly: modes.fly ?? 0,
+      climb: modes.climb ?? 0,
+      swim: modes.swim ?? 0,
+      burrow: modes.burrow ?? 0,
+    },
+    sheetPace: isSheetPaceEnabled(),
+    spacesPerSecond: sps,
+    secondsForOneSquare: sps ? round(gridDistance / (sps * gridDistance)) : "—",
+    secondsForSheetSpeed: sps ? ROUND_HINT(modes, action, gridDistance, sps) : "—",
+    modeTraverse: isModeTraverseEnabled(),
+    enclosure: policy.enclosure,
+    floor: policy.floor,
+    defaultWall: `${policy.defaultBottom}–${policy.defaultTop}`,
+    walls: wallsOf(doc).length,
+    oneSquareDecision: pathDecisionOf(doc, sample).kind,
     historyWaypoints: (doc?.movementHistory ?? []).length,
     spentThisTurn: spentThisTurn(doc),
     dashesTaken: doc?.combatant
@@ -331,4 +521,22 @@ export function surveyMovement(): unknown {
       : "not applicable — see the flags above for why",
     units: String((canvas as any)?.scene?.grid?.units ?? ""),
   };
+  const lines = [
+    `${report.token}: ${action} at ${elevation} ${report.units}`,
+    `sheet ${JSON.stringify(report.sheet)}`,
+    `pace ${report.sheetPace ? "on" : "off"} → ${sps ?? "Foundry default"} spaces/sec` +
+      (typeof report.secondsForSheetSpeed === "string" ? ` (${report.secondsForSheetSpeed})` : ""),
+    `traverse ${report.modeTraverse ? "on" : "off"} ${report.enclosure}/${report.floor} walls ${
+      report.defaultWall
+    } (${report.walls}) → one square ${report.oneSquareDecision}`,
+  ];
+  console.log(lines.join("\n"));
+  return report;
+}
+
+function ROUND_HINT(modes: any, action: string, gridDistance: number, sps: number): string {
+  const feet = Number(action === "jump" || action === "crawl" ? modes.walk : modes[action] ?? modes.walk);
+  if (!(feet > 0) || !(sps > 0)) return "—";
+  const seconds = feet / gridDistance / sps;
+  return `dragging ${feet} ${gridDistance ? "ft" : "units"} ≈ ${round(seconds)}s`;
 }

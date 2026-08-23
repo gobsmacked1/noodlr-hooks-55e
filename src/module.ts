@@ -105,6 +105,7 @@ import { openRulesConfig } from "./apps/rules-config";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
 import { registerEconomyHooks } from "./rules/economy/enforce";
 import { registerMovementCap, surveyMovement } from "./rules/economy/speed";
+import { registerWallHeightUi } from "./rules/wall-height-ui";
 import { installTokenBadgeClicks } from "./util/token-badge";
 import { surveyEconomy } from "./rules/economy/survey";
 import { registerEncounterTracking } from "./tactics/encounter";
@@ -442,6 +443,7 @@ Hooks.once("init", () => {
   // time `ready` runs, and it has to be on the PLAYERS' clients, since a player dragging their own
   // token is the only thing it constrains.
   registerMovementCap();
+  registerWallHeightUi();
   // After the Speed subclass: MouseInteractionManager copies `_onClickLeft` at draw, and canvas
   // init finishes before `ready`. A wrap registered here at `setup` is what makes the Wild Shape
   // restore icon actually fire.

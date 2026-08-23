@@ -372,6 +372,8 @@ const AREAS: Area[] = [
       return other ? { by: other.by, note: other.note } : null;
     },
   },
+  { id: "sheetPace", setting: GENERAL_SETTINGS.sheetPace },
+  { id: "modeTraverse", setting: GENERAL_SETTINGS.modeTraverse },
   {
     id: "riding",
     setting: GENERAL_SETTINGS.riding,

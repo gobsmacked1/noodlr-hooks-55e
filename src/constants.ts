@@ -183,6 +183,10 @@ export const GENERAL_SETTINGS = {
   transformFolder: "general.transformFolder",
   /** Whether a creature may mount another token and follow it. */
   riding: "general.riding",
+  /** Whether token animation pace is derived from the sheet's Speed. */
+  sheetPace: "general.sheetPace",
+  /** Whether fly / climb / jump / burrow may ignore walls at the matching elevation. */
+  modeTraverse: "general.modeTraverse",
 } as const;
 
 /** Settings that are this module's own rather than inherited. */

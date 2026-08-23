@@ -4818,6 +4818,41 @@ why `move() === true` is not evidence of movement. A rider who tries to walk is 
   `.dumpRiders()`.
 - OA "you or the mount" and drag-onto-token automount stay parked.
 
+## Sheet pace and mode-traverse (2026-08-22)
+
+Two house rules on the same Token subclass `registerMovementCap` already installs at `setup`.
+A second `CONFIG.Token.objectClass` replacement would drop the Speed cap.
+
+- **Sheet pace** (`general.sheetPace`, default on). Foundry animates at
+  `CONFIG.Token.movement.defaultSpeed` (6 spaces/sec), so a 30 ft drag finishes in ~2.5 s.
+  `_getAnimationMovementSpeed` / `_getAnimationDuration` read the live
+  `system.attributes.movement[action]` (Haste/Slow already write that) and convert
+  `(feet / grid.distance) / 6`. Elevation is included; core's helper ignores it.
+  Climb/swim `getAnimationOptions` set `movementSpeed: defaultSpeed / 2` and would skip our
+  override — duration therefore passes our speed into `super` as well. Blink / displace /
+  `noodlrForce` stay instant. `combat.moveSpeed > 0` still wins for automation.
+  Difficult terrain slows via `_modifyAnimationMovementSpeed`; it does not change the sheet.
+- **Mode-traverse** (`general.modeTraverse`, default on). Core walls have no height —
+  native Scene Levels are visibility floors, not wall tops (see
+  `_research/_audit/wall-height-2026-08-23.md`). Untagged walls are **10 ft / 0**.
+  A wall blocks when the token's **feet** overlap the slab (`elevation >= bottom &&
+  elevation < top`). Fly / climb / jump go over at `elevation >= top` outdoors, or
+  when a high jump reaches the top; burrow goes under at `elevation < bottom` on a
+  natural floor. Indoor scenes (`flags.<ns>.enclosure: "indoor"`) refuse the three
+  over-modes. Man-made floors refuse burrow. Walk and swim never. Long jump clears
+  a lip (`top <= elevation`), not a 10 ft maze wall. Mixed heights: pass crossable
+  walls, **cut** at the first blocker — `ignoreWalls` on the whole path is the
+  hedge-and-keep bug. Read `flags.wall-height.{top,bottom}` when present; never
+  write that namespace; do not stand aside when that module is active (their unset
+  is Infinity; ours is 10). No libWrapper. The player raises/lowers with **E / Q**.
+  Tiles are not walls. GM Unconstrained Movement already sets `ignoreWalls`.
+- **WASD is still one grid square.** Core forces `dx/dy` to −1|0|1 and `snapped` on a
+  gridded scene. Do not invent finer keyboard steps. That square now takes
+  `grid.distance / sheetSpeed * 6` seconds when sheet pace is on.
+- Diagnostics: `noodlrHooks.surveyMovement()` prints pace, enclosure/floor, and the
+  one-square path decision (`ignore-all` / `cut` / `core`).
+- Pure halves: `src/core/pace.ts`, `src/core/traverse.ts`, `src/core/wall-height.ts`.
+
 ## Open items carried over from noodlr
 
 - ~~**OPEN BUG — melee-only hostiles still move oddly (reported 2026-08-05).**~~ **DIAGNOSED and fixed in
