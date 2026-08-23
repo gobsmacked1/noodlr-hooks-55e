@@ -598,10 +598,17 @@ to A is three events.
  copied while gold stayed on the leftover.
  - Copies are diverted into an Actors folder (default `Wild Shape (temp)`), created by
  the primary GM. Empty folder name leaves them beside the original. Ownership is
- unchanged — players open the form from their token. Periodic GM clean-up of that
- folder is expected. Unlinked tokens never create a sidebar Actor and are untouched.
+ unchanged — players open the form from their token. Unlinked tokens never create a
+ sidebar Actor and are untouched.
  A `createActor` move parks a form that landed in the original folder (folder not
  ready at the hook). It does not delete an older leftover already sitting there.
+ - **Leftovers are deleted one Actor at a time after the copy (v0.7.31).** dnd5e's
+ revert only `deleteDocuments` when `game.user.isGM` — granting Players "Delete
+ Actor" does not change that branch. We try a local delete, then `askGm` with the
+ leftover ids. The handler re-validates: our stamp, walks to this character, not
+ still transformed, no token, loot already copied. **Never empty the temp folder**
+ — another player may still be in their form. Offline GM leaves the leftover; the
+ copy already landed. `noodlrHooks.discardFormLeftovers()`.
 - **`src/util/token-badge.ts` is the saddle icon, not Wild Shape.** Core's
  `MouseInteractionManager` binds `clickLeft` to the Token, so a PIXI listener on an
  effect sprite is not a click. The wrap on `Token#_onClickLeft` hit-tests riding's

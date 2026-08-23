@@ -67,7 +67,13 @@ import { announceJump, registerJumpWatch, surveyJump } from "./rules/jump";
 import { registerProneWatch, surveyProne } from "./rules/prone";
 import { registerInteractReach, surveyInteract } from "./rules/interact";
 import { registerAuraWatch, surveyAuras } from "./rules/aura";
-import { carryFormLoot, registerTransformWatch, restoreOriginalForm, surveyTransform } from "./rules/transform";
+import {
+  carryFormLoot,
+  discardFormLeftovers,
+  registerTransformWatch,
+  restoreOriginalForm,
+  surveyTransform,
+} from "./rules/transform";
 import {
   dismountSelected,
   dropAllRidersOf,
@@ -168,6 +174,7 @@ export interface NoodlrHooksApi {
   surveyAuras(): unknown;
   surveyTransform(): unknown;
   carryFormLoot(actor?: unknown): Promise<unknown>;
+  discardFormLeftovers(actor?: unknown): Promise<unknown>;
   surveyRiding(): unknown;
   mount(): Promise<unknown>;
   dismount(): Promise<unknown>;
@@ -315,6 +322,7 @@ const api: NoodlrHooksApi = {
   surveyTransform: () => surveyTransform(),
   /** Copy items and coin picked up in a Wild Shape onto the original. Safe to call twice. */
   carryFormLoot: (actor) => carryFormLoot(actor),
+  discardFormLeftovers: (actor) => discardFormLeftovers(actor),
   /** Who is riding whom, and whether Rideable has the layer. */
   surveyRiding: () => surveyRiding(),
   /** Mount every selected token onto the current target. */

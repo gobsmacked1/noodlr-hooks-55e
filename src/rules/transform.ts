@@ -7,12 +7,16 @@
 //
 // Linked transforms also create a world Actor. dnd5e never copies items or coin back on revert.
 // `carryFormLoot` stamps the form at create and writes new loot onto the original before the
-// form is deleted — including a leftover a player revert left behind.
+// form is deleted — including a leftover a player revert left behind. After that copy, each
+// leftover for that character is deleted one Actor at a time. A player revert never deletes
+// (`game.user.isGM` only in dnd5e), so the delete is retried locally and otherwise asked of
+// the GM. The temp folder is never emptied — another player may still be transformed.
 
 import { debug, log, MODULE_ID, warn } from "../constants";
 import { isPrimaryGM } from "../util/gm";
 import { isTransformLootEnabled, transformFolderName } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
+import { askGm, registerQuery } from "../util/queries";
 import {
   COIN_KEYS,
   FORM_LOOT_FLAG,
@@ -23,6 +27,7 @@ import {
   isTransformBadge,
   itemIdOf,
   itemPayloadForCarry,
+  leftoverKeepReason,
   planFormLoot,
   readFormLoot,
   stampFormLootOnCreateData,
@@ -31,7 +36,9 @@ import { scheduleDropAllRiders, scheduleRidingFit } from "./riding";
 
 const REVERT_WRAP = "_noodlrFormLoot";
 const DELETE_REPLAY = "formLootReplay";
+const DISCARD_QUERY = "transform.discardLeftovers";
 const carryInflight = new Map<string, Promise<CarryResult | null>>();
+const discardInflight = new Map<string, Promise<number>>();
 
 /** One strip at a time per actor — transform fires several hooks for one revert. */
 const inflight = new Map<string, Promise<void>>();
@@ -195,6 +202,143 @@ function leftoversOf(originalId: string, exceptId?: string): any[] {
   return out;
 }
 
+function leftoverHasToken(actor: any): boolean {
+  const id = String(actor?.id ?? "");
+  if (!id) return false;
+  try {
+    const placed = actor.getActiveTokens?.(true, true);
+    if (Array.isArray(placed) && placed.length) return true;
+  } catch {
+    /* sheet actor */
+  }
+  try {
+    for (const scene of (game as any).scenes ?? []) {
+      for (const token of scene.tokens ?? []) {
+        if (String(token.actorId ?? "") === id) return true;
+      }
+    }
+  } catch {
+    /* scenes unread */
+  }
+  return false;
+}
+
+function leftoverPendingLoot(actor: any, snap: ReturnType<typeof readFormLoot>): boolean {
+  if (!snap || snap.copied) return false;
+  const plan = planFormLoot({ items: actor?.items, currency: currencyOf(actor), snapshot: snap });
+  return Boolean(plan && (plan.items.length || hasCoin(plan.currency)));
+}
+
+function leftoversToDiscard(originalId: string): any[] {
+  const out: any[] = [];
+  if (!originalId) return out;
+  try {
+    for (const actor of game.actors ?? []) {
+      if (!actor) continue;
+      const snap = readFormLoot(actor);
+      const keep = leftoverKeepReason({
+        actorId: String(actor.id ?? ""),
+        originalId,
+        rootId: String(originalOf(actor)?.id ?? ""),
+        snapshot: snap,
+        polymorphed: isPolymorphed(actor),
+        hasToken: leftoverHasToken(actor),
+        pendingLoot: leftoverPendingLoot(actor, snap),
+      });
+      if (!keep) out.push(actor);
+    }
+  } catch {
+    /* directory unread */
+  }
+  return out;
+}
+
+function canDeleteLeftover(actor: any): boolean {
+  if (game.user?.isGM) return true;
+  try {
+    return Boolean(actor?.canUserModify?.(game.user, "delete"));
+  } catch {
+    return false;
+  }
+}
+
+async function deleteLeftover(actor: any): Promise<boolean> {
+  try {
+    await actor.delete({ [MODULE_ID]: { [DELETE_REPLAY]: true } });
+    return true;
+  } catch (err) {
+    warn(`transform: could not delete leftover ${String(actor?.name ?? actor?.id)}:`, err);
+    return false;
+  }
+}
+
+async function deleteLeftoversLocally(actors: any[]): Promise<string[]> {
+  const leftover: string[] = [];
+  for (const actor of actors) {
+    const id = String(actor?.id ?? "");
+    if (!id) continue;
+    if (!canDeleteLeftover(actor) || !(await deleteLeftover(actor))) leftover.push(id);
+  }
+  return leftover;
+}
+
+async function handleDiscardQuery(data: any): Promise<{ deleted: number }> {
+  if (!game.user?.isGM) return { deleted: 0 };
+  const originalId = String(data?.originalId ?? "");
+  const requested = new Set((Array.isArray(data?.ids) ? data.ids : []).map((id: unknown) => String(id)));
+  let deleted = 0;
+  for (const actor of leftoversToDiscard(originalId)) {
+    if (requested.size && !requested.has(String(actor.id))) continue;
+    if (await deleteLeftover(actor)) deleted += 1;
+  }
+  return { deleted };
+}
+
+/**
+ * Delete spent leftover forms for this character. One Actor at a time — never the folder.
+ * A player revert cannot delete (`game.user.isGM` in dnd5e), so leftovers the local client
+ * cannot remove are asked of the GM. Null from that ask keeps them; the copy already landed.
+ */
+export async function discardFormLeftovers(subject: any): Promise<number> {
+  if (!isDnd5e() || !isTransformLootEnabled()) return 0;
+  const actor = actorOf(subject);
+  const original = originalOf(actor) ?? (readFormLoot(actor) ? null : actor);
+  const originalId = String(original?.id ?? actor?.id ?? "");
+  if (!originalId) return 0;
+  const prev = discardInflight.get(originalId);
+  if (prev) return prev;
+  const run = doDiscardLeftovers(originalId).finally(() => {
+    if (discardInflight.get(originalId) === run) discardInflight.delete(originalId);
+  });
+  discardInflight.set(originalId, run);
+  return run;
+}
+
+async function doDiscardLeftovers(originalId: string): Promise<number> {
+  const actors = leftoversToDiscard(originalId);
+  if (!actors.length) return 0;
+  const names = actors.map((a) => String(a.name ?? a.id));
+  const remaining = await deleteLeftoversLocally(actors);
+  let deleted = actors.length - remaining.length;
+  if (remaining.length) {
+    const answer = await askGm<{ deleted: number }>(
+      DISCARD_QUERY,
+      { originalId, ids: remaining },
+      { timeout: 30000 },
+    );
+    if (answer == null) {
+      debug(
+        "transform: leftover form(s) kept — no GM to delete them:",
+        remaining.join(", "),
+      );
+    } else {
+      deleted += answer.deleted ?? 0;
+    }
+  }
+  if (deleted) log(`transform: deleted ${deleted} leftover form(s) for ${originalId}: ${names.join(", ")}`);
+  return deleted;
+}
+
 /**
  * Copy items and coin acquired on `form` onto its original Actor, then mark the snapshot copied.
  * Safe to call twice: a second pass sees `copied` and no-ops.
@@ -318,7 +462,10 @@ function wrapRevertOriginalForm(): void {
   const original = proto.revertOriginalForm;
   async function wrapped(this: any, options?: object) {
     await carryAllFormLoot(this);
-    return original.call(this, options);
+    const originalActor = originalOf(this);
+    const result = await original.call(this, options);
+    await discardFormLeftovers(originalActor ?? this);
+    return result;
   }
   (wrapped as any)[REVERT_WRAP] = true;
   proto.revertOriginalForm = wrapped;
@@ -393,6 +540,7 @@ async function parkFormInFolder(actor: any): Promise<void> {
 
 export function registerTransformWatch(): void {
   wrapRevertOriginalForm();
+  registerQuery(DISCARD_QUERY, handleDiscardQuery);
   void ensureFormFolder();
   Hooks.on("dnd5e.transformActor", divertCreateData);
   Hooks.on("dnd5e.transformActorV2", divertCreateData);
@@ -459,10 +607,20 @@ export function surveyTransform(): unknown {
       if (!loot || loot.copied) continue;
       const onScene = tokens.some((t) => (t.actor ?? t.document?.actor)?.id === actor.id);
       if (onScene) continue;
+      const keep = leftoverKeepReason({
+        actorId: String(actor.id ?? ""),
+        originalId: String(originalOf(actor)?.id ?? loot.originalActor),
+        rootId: String(originalOf(actor)?.id ?? ""),
+        snapshot: loot,
+        polymorphed: isPolymorphed(actor),
+        hasToken: leftoverHasToken(actor),
+        pendingLoot: leftoverPendingLoot(actor, loot),
+      });
       lines.push(
         `  leftover ${String(actor.name)} folder=${String(actor.folder?.name ?? actor.folder ?? "—")}` +
           ` stamped=${loot.itemIds.length} purse=${formatCoin(currencyOf(actor))} original=${loot.originalActor}` +
-          ` root=${originalOf(actor)?.id ?? "?"}`,
+          ` root=${originalOf(actor)?.id ?? "?"}` +
+          ` discard=${keep ?? "yes"}`,
       );
     }
   } catch {

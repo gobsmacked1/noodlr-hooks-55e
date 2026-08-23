@@ -1,6 +1,6 @@
 {
   "name": "noodlr-hooks-55e",
-  "version": "0.7.30",
+  "version": "0.7.31",
   "private": true,
   "type": "module",
   "description": "Noodlr Hooks 5.5e — rules automation for D&D 5e (2024) in Foundry VTT. Standalone; no dependencies.",

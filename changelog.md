@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.31
+
+**Leftover Wild Shape Actors are deleted after the loot comes home.** A player revert never
+removes the copy — dnd5e only deletes when the user is a GM, and granting Delete Actor does
+not change that. After items and coin are copied, that character's spent leftover is deleted
+(locally if this client can, otherwise by the GM). Other players' live forms in the same
+folder are left alone; the folder itself is never emptied. If no GM is connected the leftover
+stays — the copy already landed.
+
 ## 0.7.30
 
 **Wild Shape loot now lands on the original character, including gold.** v0.7.29 copied items onto

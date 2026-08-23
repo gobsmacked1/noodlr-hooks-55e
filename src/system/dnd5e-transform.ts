@@ -205,6 +205,37 @@ export function readFormLoot(actor: any): FormLootSnapshot | null {
  * What to copy onto the original. `null` means do not touch this form (no stamp, or already copied).
  * An empty plan still means "mark copied" — nothing new was acquired.
  */
+export type LeftoverKeepReason =
+  | "no-stamp"
+  | "is-original"
+  | "other-character"
+  | "still-transformed"
+  | "on-scene"
+  | "loot-pending";
+
+/**
+ * Whether a leftover Actor may be deleted after revert. Never the original, never a live
+ * form, never a form that still holds uncopied loot, never one that still has a token.
+ * The temp folder is not this question — delete one Actor, not the directory.
+ */
+export function leftoverKeepReason(args: {
+  actorId: string;
+  originalId: string;
+  rootId: string;
+  snapshot: FormLootSnapshot | null | undefined;
+  polymorphed: boolean;
+  hasToken: boolean;
+  pendingLoot: boolean;
+}): LeftoverKeepReason | null {
+  if (!isFormLootSnapshot(args.snapshot)) return "no-stamp";
+  if (!args.originalId || args.actorId === args.originalId) return "is-original";
+  if (!args.rootId || args.rootId !== args.originalId) return "other-character";
+  if (args.polymorphed) return "still-transformed";
+  if (args.hasToken) return "on-scene";
+  if (args.pendingLoot) return "loot-pending";
+  return null;
+}
+
 export function planFormLoot(args: {
   items: Iterable<any> | null | undefined;
   currency: CurrencyBag;

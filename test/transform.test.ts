@@ -14,6 +14,7 @@ import {
   emptyCurrency,
   hasCoin,
   originalIdForStamp,
+  leftoverKeepReason,
   isFormLootSnapshot,
   isOurTransformBadge,
   isPolymorphed,
@@ -139,6 +140,26 @@ test("currencyDelta never subtracts and stampFormLoot writes our flag", () => {
   assert.equal(d.flags[MODULE_ID][FORM_LOOT_FLAG], snap);
   assert.equal(isFormLootSnapshot(snap), true);
   assert.equal(newItemsFrom(d.items, snap.itemIds).length, 0);
+});
+
+test("leftoverKeepReason deletes only a spent copy of this character", () => {
+  const snap = { originalActor: "drew", itemIds: [], currency: emptyCurrency(), copied: true };
+  const ok = {
+    actorId: "owl-1",
+    originalId: "drew",
+    rootId: "drew",
+    snapshot: snap,
+    polymorphed: false,
+    hasToken: false,
+    pendingLoot: false,
+  };
+  assert.equal(leftoverKeepReason(ok), null);
+  assert.equal(leftoverKeepReason({ ...ok, snapshot: null }), "no-stamp");
+  assert.equal(leftoverKeepReason({ ...ok, actorId: "drew" }), "is-original");
+  assert.equal(leftoverKeepReason({ ...ok, rootId: "other-druid" }), "other-character");
+  assert.equal(leftoverKeepReason({ ...ok, polymorphed: true }), "still-transformed");
+  assert.equal(leftoverKeepReason({ ...ok, hasToken: true }), "on-scene");
+  assert.equal(leftoverKeepReason({ ...ok, pendingLoot: true }), "loot-pending");
 });
 
 test("itemPayloadForCarry drops the form id and a container link", () => {
