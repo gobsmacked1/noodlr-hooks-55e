@@ -203,27 +203,63 @@ export function centerFromTopLeft(
  * fallback for the plain-update path and for older cores; using it as the only dest while
  * the token is mid-animation is how a leave-reach step vanished.
  */
+export type RoutePoint = { x: number; y: number; elevation: number };
+
+export function elevationOf(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Inside a melee reach cylinder: horizontal distance AND |Δelevation| both ≤ reach.
+ *
+ * A flyer at +10 ft or a burrower at −10 ft is out of a 5 ft stick even when adjacent
+ * on the map. Taking off from adjacent (0 → 10) still leaves reach and still provokes.
+ * Applied to every movement action — a walk along a 15 ft ledge is the same geometry.
+ */
+export function inMeleeReach(xy: number, reach: number, moverElev: number, watcherElev: number): boolean {
+  return xy <= reach && Math.abs(moverElev - watcherElev) <= reach;
+}
+
 export function movementRoute(
   movement: {
-    origin?: { x: number; y: number };
-    destination?: { x: number; y: number };
-    passed?: { waypoints?: Array<{ x: number; y: number }> };
+    origin?: { x: number; y: number; elevation?: number };
+    destination?: { x: number; y: number; elevation?: number };
+    passed?: { waypoints?: Array<{ x: number; y: number; elevation?: number }> };
   } | null,
-  fallbackDest?: { x: number; y: number } | null,
-): Array<{ x: number; y: number }> {
-  const route: Array<{ x: number; y: number }> = [];
-  const push = (p: { x: number; y: number } | undefined | null) => {
+  fallbackDest?: { x: number; y: number; elevation?: number } | null,
+): RoutePoint[] {
+  const raw: Array<{ x: number; y: number; elevation: number | null }> = [];
+  const push = (p: { x: number; y: number; elevation?: number } | undefined | null) => {
     if (!p) return;
     const x = Number(p.x);
     const y = Number(p.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    const last = route[route.length - 1];
-    if (last && last.x === x && last.y === y) return;
-    route.push({ x, y });
+    const stated = p.elevation !== undefined && Number.isFinite(Number(p.elevation));
+    const elevation = stated ? Number(p.elevation) : null;
+    const last = raw[raw.length - 1];
+    if (last && last.x === x && last.y === y && last.elevation === elevation) return;
+    raw.push({ x, y, elevation });
   };
   push(movement?.origin);
   for (const point of movement?.passed?.waypoints ?? []) push(point);
   push(movement?.destination ?? fallbackDest ?? null);
+  // An omitted elevation is not "on the floor" — inventing a takeoff would provoke a flyer
+  // that was already at +10. Fill from the last stated value (usually the committed dest).
+  let fill = 0;
+  for (let i = raw.length - 1; i >= 0; i--) {
+    if (raw[i].elevation !== null) {
+      fill = raw[i].elevation as number;
+      break;
+    }
+  }
+  const route: RoutePoint[] = [];
+  for (const point of raw) {
+    const elevation = point.elevation ?? fill;
+    const last = route[route.length - 1];
+    if (last && last.x === point.x && last.y === point.y && last.elevation === elevation) continue;
+    route.push({ x: point.x, y: point.y, elevation });
+  }
   return route;
 }
 
@@ -236,16 +272,22 @@ export function movementRoute(
  */
 export function leftReachAlong(
   watcherCenter: Point,
-  route: Array<{ x: number; y: number }>,
+  route: Array<{ x: number; y: number; elevation?: number }>,
   mover: { width?: number; height?: number },
   reach: number,
   gridSize: number,
   measure: (a: Point, b: Point) => number = measureBetween,
+  watcherElevation = 0,
 ): boolean {
   let wasInside = false;
   for (const point of route) {
     const at = centerFromTopLeft(point, mover, gridSize);
-    const inside = measure(watcherCenter, at) <= reach;
+    const inside = inMeleeReach(
+      measure(watcherCenter, at),
+      reach,
+      elevationOf(point.elevation),
+      watcherElevation,
+    );
     if (wasInside && !inside) return true;
     wasInside = inside;
   }
@@ -345,6 +387,7 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
   const route = movementRoute(movement, {
     x: Number(moverDoc?._source?.x ?? moverDoc?.x ?? mover?.x),
     y: Number(moverDoc?._source?.y ?? moverDoc?.y ?? mover?.y),
+    elevation: elevationOf(moverDoc?._source?.elevation ?? moverDoc?.elevation),
   });
   if (route.length < 2) {
     log(`reaction: ${who} moved but the route had fewer than two points — no opportunity attacks`);
@@ -450,12 +493,22 @@ function flew(moverDoc: any, waypoints: any[]): boolean {
  * Walked step by step rather than compared end to end, because leaving reach provokes even when the
  * creature finishes its move back inside it — a rogue circling an ogre to flank still gets snapped at.
  */
-function leftReach(watcher: Watcher, route: Array<{ x: number; y: number }>, mover: any): boolean {
+function tokenElevation(token: any): number {
+  return elevationOf(
+    token?.document?._source?.elevation ?? token?.document?.elevation ?? token?.elevation,
+  );
+}
+
+function leftReach(
+  watcher: Watcher,
+  route: Array<{ x: number; y: number; elevation?: number }>,
+  mover: any,
+): boolean {
   const from = tokenCenter(watcher.token);
   if (!from) return false;
   const grid = Number((canvas as any)?.grid?.size ?? (canvas as any)?.dimensions?.size ?? 100) || 100;
   const doc = mover?.document ?? mover;
-  return leftReachAlong(from, route, doc, watcher.reach, grid);
+  return leftReachAlong(from, route, doc, watcher.reach, grid, measureBetween, tokenElevation(watcher.token));
 }
 
 /**

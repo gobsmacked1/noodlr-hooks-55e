@@ -69,7 +69,8 @@ import { stoodThisTurn } from "../prone";
 import { isAutomating } from "./enforce";
 import { bonusDashSource } from "../../system/dnd5e-dash";
 import { JUMP_ACTION, jumpVeto } from "../jump";
-import { mountCostThisTurn } from "../riding";
+import { paintMotionFx, restoreMotionFx } from "../../core/motion-fx";
+import { mountCostThisTurn, syncRiderVisuals } from "../riding";
 
 /**
  * What a creature may cross this turn, and what it has crossed already.
@@ -323,6 +324,28 @@ export function registerMovementCap(): void {
           log("could not pace a movement animation:", err);
         }
         return super._getAnimationDuration(from, to, options);
+      }
+
+      _onAnimationUpdate(changed: any, context: any) {
+        super._onAnimationUpdate(changed, context);
+        try {
+          paintMotionFx(this, context);
+          syncRiderVisuals(this);
+        } catch (err) {
+          log("could not paint movement polish:", err);
+        }
+      }
+
+      async animate(to: any, options: any = {}) {
+        try {
+          return await super.animate(to, options);
+        } finally {
+          try {
+            if (!this.animationContexts?.size) restoreMotionFx(this);
+          } catch (err) {
+            log("could not restore movement polish:", err);
+          }
+        }
       }
 
       constrainMovementPath(waypoints: TraverseWaypoint[], options: any = {}) {

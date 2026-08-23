@@ -85,5 +85,9 @@ export function animationDurationMs(
   const de = ((Number.isFinite(fromE) ? fromE : 0) - (Number.isFinite(toE) ? toE : 0)) *
     (gridSize / gridDistance);
   const spaces = Math.hypot(dx, dy, de) / gridSize;
-  return (spaces / spacesPerSec) * 1000;
+  // Whole milliseconds for the ticker. Rounding spaces/sec to a tenth is the wrong fix for
+  // a jerky walk: Foundry restarts the animation at every grid square, and a rider used to
+  // play a second walk on top of the mount. Those seams are visible at 1 space/sec and
+  // invisible at Foundry's default 6. See motion-fx.ts and riding follow (`animate: false`).
+  return Math.round((spaces / spacesPerSec) * 1000);
 }

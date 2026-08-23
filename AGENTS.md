@@ -4774,6 +4774,8 @@ an argument.
 why `move() === true` is not evidence of movement. A rider who tries to walk is refused
 (`preMoveToken` returns false). Follow uses `options.noodlrRiding === "follow"`, which
 `isForcedMovement` treats as displacement so it does not provoke a second OA.
+`syncRiderVisuals` sticks riders to the mount's interpolated seat; `followMount`
+writes with `animate: false`. A second animated walk was the Wild Shape hitch.
 
 - **Who can mount:** same disposition or Neutral; player characters also mount Friendly. Mount at
   least one size larger (`sizeRank`). Unreadable size refuses. No riding loop.
@@ -4849,9 +4851,32 @@ A second `CONFIG.Token.objectClass` replacement would drop the Speed cap.
 - **WASD is still one grid square.** Core forces `dx/dy` to −1|0|1 and `snapped` on a
   gridded scene. Do not invent finer keyboard steps. That square now takes
   `grid.distance / sheetSpeed * 6` seconds when sheet pace is on.
+- **Jerk is per-square restart, not unrounded floats (2026-08-23).** Foundry
+  terminates or chains a new animation at every waypoint. At 6 spaces/sec that
+  handoff is ~167 ms and reads as a slide; at sheet pace (1 space/sec for a 30 ft
+  walk) it is a full second of start/stop. Rounding spaces/sec to a tenth would
+  make 25/35/40 ft Speeds wrong and would not hide the seam. Duration is whole
+  milliseconds for the ticker. The Wild Shape + riders hitch was a **second**
+  walk: `updateToken` → `followMount` → `rider.update` animated on its own.
+  `syncRiderVisuals` copies the mount's interpolated seat each frame; follow
+  writes `_source` with `animate: false`.
+- **Burrow vanish is mesh `alpha`, never `hidden`.** Invisible for the chained
+  move, restored when `animationContexts` is empty. A hung animation that left
+  the token invisible is worse than no vanish. `src/core/motion-fx.ts`.
+- **Fly polish is a few pixels of hover.** Foundry has no per-token wind: scene
+  weather is global, `icons/svg/wing.svg` is the action icon, and the `wind`
+  token transition is a texture-swap easing (Wild Shape), not a trail. Do not
+  depend on Sequencer / Automated Animations.
+- **OA reach is a cylinder (2026-08-23).** `inMeleeReach`: horizontal
+  `measureBetween` AND `|Δelevation| ≤ reach`. A flyer at +10 or a burrower at
+  −10 does not provoke a 5 ft stick by walking past; taking off from adjacent
+  (0 → 10) still leaves reach and still does. Applied to every action — a walk
+  on a 15 ft ledge is the same geometry. An omitted origin elevation is filled
+  from the destination, not assumed to be 0 (that invented takeoffs).
 - Diagnostics: `noodlrHooks.surveyMovement()` prints pace, enclosure/floor, and the
   one-square path decision (`ignore-all` / `cut` / `core`).
-- Pure halves: `src/core/pace.ts`, `src/core/traverse.ts`, `src/core/wall-height.ts`.
+- Pure halves: `src/core/pace.ts`, `src/core/traverse.ts`, `src/core/wall-height.ts`,
+  `src/core/motion-fx.ts`.
 
 ## Open items carried over from noodlr
 

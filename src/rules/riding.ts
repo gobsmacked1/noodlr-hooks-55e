@@ -8,7 +8,9 @@
 // Rideable deletes `x`/`y` in `preUpdateToken`. We never do that. A rider who tries to walk is
 // refused (`preMoveToken` returns false) and told to click the saddle. Follow uses
 // `options.noodlrRiding === "follow"`, which `isForcedMovement` treats as displacement so it does
-// not provoke a second OA.
+// not provoke a second OA. Follow writes with `animate: false` and `syncRiderVisuals` sticks the
+// mesh to the mount during its animation — a second walk on every `updateToken` was the
+// Wild Shape + riders hitch.
 
 import { GENERAL_SETTINGS, MODULE_ID, debug, log, warn } from "../constants";
 import { centerOf, measureBetween, type Point } from "../core/positioning";
@@ -170,10 +172,15 @@ export function withinMountReach(
   return measure(from, to) <= reach + 0.05;
 }
 
-function seatOf(mount: any, rider: any): { x: number; y: number; elevation: number } | null {
+function seatOf(
+  mount: any,
+  rider: any,
+  live = false,
+): { x: number; y: number; elevation: number } | null {
   const gs = Number((canvas as any)?.grid?.size) || 100;
-  const mx = Number(mount?._source?.x ?? mount?.x);
-  const my = Number(mount?._source?.y ?? mount?.y);
+  const loc = live ? (mount?.object?.document ?? mount?.document ?? mount) : mount;
+  const mx = Number(live ? (loc?.x ?? mount?.x) : (mount?._source?.x ?? mount?.x));
+  const my = Number(live ? (loc?.y ?? mount?.y) : (mount?._source?.y ?? mount?.y));
   if (!Number.isFinite(mx) || !Number.isFinite(my)) return null;
   const mw = (Number(mount.width) || 1) * gs;
   const mh = (Number(mount.height) || 1) * gs;
@@ -192,8 +199,38 @@ function seatOf(mount: any, rider: any): { x: number; y: number; elevation: numb
   return {
     x: mx + fx * mw - rw / 2,
     y: my + fy * mh - rh / 2,
-    elevation: Number(mount._source?.elevation ?? mount.elevation ?? 0),
+    elevation: Number(
+      live
+        ? (loc?.elevation ?? mount?.elevation ?? 0)
+        : (mount._source?.elevation ?? mount.elevation ?? 0),
+    ),
   };
+}
+
+/**
+ * Stick riders to the mount's interpolated position for this frame.
+ *
+ * `updateToken` only fires when the document commits, so a follow that animated on its
+ * own was a second walk — the Wild Shape + riders hitch. Visual only; `followMount`
+ * still writes `_source` with `animate: false` when the mount lands.
+ */
+export function syncRiderVisuals(mountToken: any): void {
+  const doc = mountToken?.document ?? mountToken;
+  const id = String(doc?.id ?? "");
+  if (!id || rideableOwns() || !isRidingEnabled()) return;
+  for (const rider of ridersOf(id)) {
+    const seat = seatOf(doc, rider, true);
+    const obj = rider?.object;
+    if (!seat || !obj) continue;
+    try {
+      obj.document.x = seat.x;
+      obj.document.y = seat.y;
+      obj.document.elevation = seat.elevation;
+      obj.refresh?.();
+    } catch {
+      /* a destroyed placeable is not a follow failure */
+    }
+  }
 }
 
 function combatStamp(actor: any): MountCostStamp | null {
@@ -337,7 +374,7 @@ async function followMount(rider: any, mount: any): Promise<void> {
   try {
     await rider.update(
       { x: Math.round(seat.x), y: Math.round(seat.y), elevation: seat.elevation },
-      { noodlrRiding: "follow" },
+      { noodlrRiding: "follow", animate: false },
     );
   } catch (err) {
     warn(`riding: follow failed for ${String(rider.name)}:`, err);

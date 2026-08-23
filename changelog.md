@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.33
+
+**Movement polish: riders stop hitching, burrowers vanish, and fly / burrow out of
+vertical reach no longer provoke.** The jerky Wild Shape + riders walk was a second
+animation on every `updateToken` — Foundry already restarts at each grid square, and
+a rider playing its own walk on top of that made it obvious. Riders now stick to the
+mount's interpolated position and snap with `animate: false` when it lands. A burrower
+is invisible for the move and reappears at the destination (mesh alpha, not the Hidden
+flag). Opportunity attacks use a reach cylinder: if the elevation difference exceeds
+the watcher's melee reach, walking by at +10 or −10 does not provoke; taking off from
+adjacent still does. Flyers get a few pixels of hover; Foundry has no stock per-token
+wind effect (scene weather is global, and the `wind` transition is a texture swap).
+
 ## 0.7.32
 
 **Tokens animate at their sheet Speed, and fly / climb / jump / burrow can cross a wall at the
