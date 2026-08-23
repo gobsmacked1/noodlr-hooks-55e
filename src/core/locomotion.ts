@@ -34,15 +34,14 @@ export interface Locomotion {
 /**
  * Which mode a creature travels by when nothing special is going on.
  *
- * Flight wins over walking when it is faster, because that is simply what such a creature does — a
- * dragon crossing a battlefield does not jog. Swimming, burrowing and climbing are last resorts for
- * creatures that have nothing else: with no terrain data we cannot tell whether the water or the earth
- * they need is even there, and picking one speculatively would be inventing a rule.
+ * Flight wins over walking when it is at least as fast. Equal was the hole: an adult dragon's 80/80
+ * walked every turn because the old test was strict `>`. Swimming, burrowing and climbing stay last
+ * resorts — with no terrain data we cannot tell whether the water or the earth they need is even there.
  */
 function choosePrimary(modes: Partial<Record<Mode, number>>): Mode {
   const walk = modes.walk ?? 0;
   const fly = modes.fly ?? 0;
-  if (fly > walk) return "fly";
+  if (fly > 0 && fly >= walk) return "fly";
   if (walk > 0) return "walk";
 
   let best: Mode = "walk";
@@ -91,7 +90,13 @@ export function actionFor(loco: Locomotion, verticalChange: boolean): string | u
   const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
   if (!actions) return undefined;
 
-  const wanted = verticalChange && (loco.modes.fly ?? 0) > 0 ? "fly" : loco.primary;
+  let wanted = loco.primary;
+  if (verticalChange) {
+    if ((loco.modes.fly ?? 0) > 0) wanted = "fly";
+    else if ((loco.modes.climb ?? 0) > 0) wanted = "climb";
+    else if ((loco.modes.burrow ?? 0) > 0) wanted = "burrow";
+    else if ((loco.modes.swim ?? 0) > 0) wanted = "swim";
+  }
   if (actions[wanted]) return wanted;
   return actions.walk ? "walk" : undefined;
 }

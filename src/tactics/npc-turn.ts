@@ -113,6 +113,17 @@ function describeIntentBody(plan: TurnPlan): string {
     // declaration itself is whispered to GMs.
     case "ready":
       return `${me} holds ${o.itemName ?? "its ground"} and waits.`;
+    case "hover":
+      return `${me} rises to ${Math.round(o.elevation ?? 0)} ${units} and uses ${o.itemName} on ${target}.`;
+    case "flyby":
+      return `${me} flies past ${target} and attacks with ${o.itemName}.`;
+    case "emerge":
+      if ((o.elevation ?? 0) < -1) {
+        return `${me} ${o.moveAction === "swim" ? "dives" : "tunnels"} out of reach.`;
+      }
+      return o.itemName
+        ? `${me} emerges and attacks ${target} with ${o.itemName}.`
+        : `${me} emerges.`;
     default:
       return `${me} hesitates.`;
   }
@@ -149,6 +160,26 @@ function amend(text: string, plan: TurnPlan, performed: Performed): string {
     return performed.moved > 0
       ? `${prefix}closes ${Math.round(performed.moved)} ${units} on ${target}, still too far to strike.`
       : `${prefix}tries to close on ${target}, and covers no ground at all.`;
+  }
+  if (
+    (plan.chosen.kind === "hover" ||
+      plan.chosen.kind === "flyby" ||
+      plan.chosen.kind === "emerge") &&
+    plan.chosen.itemName &&
+    !performed.used
+  ) {
+    const me = plan.board.self.name;
+    const units = plan.board.units;
+    const prefix = performed.stood ? `${me} stands, then ` : `${me} `;
+    const verb =
+      plan.chosen.kind === "hover"
+        ? "rises"
+        : plan.chosen.kind === "flyby"
+          ? "flies past"
+          : "emerges";
+    return performed.moved > 0
+      ? `${prefix}${verb} ${Math.round(performed.moved)} ${units}, still too far to strike.`
+      : `${prefix}tries to ${verb} and covers no ground at all.`;
   }
 
   if (!TRAVEL_ONLY.has(plan.chosen.kind)) return text;

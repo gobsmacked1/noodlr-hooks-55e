@@ -28,6 +28,7 @@ import { findWayOut, hazardsUnder } from "../core/hazards";
 import { turnRandom } from "../core/random";
 import { can, mentalScore, tierForScore, tierProfile, type TierProfile } from "./tiers";
 import { readyOptions } from "./ready-plan";
+import { canReachVertical, emergeOptions, flybyOptions, hoverOptions } from "./altitude";
 import type { WatchDescriptor } from "../integration/watch";
 import { isProne, shouldStand, standCost } from "../system/dnd5e-prone";
 
@@ -51,7 +52,10 @@ export type PlanKind =
   | "surrender"
   | "mercy"
   | "escape"
-  | "ready";
+  | "ready"
+  | "hover"
+  | "flyby"
+  | "emerge";
 
 export interface PlanOption {
   kind: PlanKind;
@@ -90,6 +94,10 @@ export interface PlanOption {
    * and store another.
    */
   ready?: { prose: string; watch: WatchDescriptor };
+  /** Destination height for hover / fly-by / emerge. Omitted means stay at the current height. */
+  elevation?: number;
+  /** Foundry movement action for that vertical step (`fly`, `burrow`, `swim`, `climb`). */
+  moveAction?: string;
   score: number;
   /** Why this scored what it did — surfaced to the GM, and the reason the tuning is debuggable. */
   reasons: string[];
@@ -202,7 +210,7 @@ function attackOptions(
       const gap = separation - usable.range;
       const inReach = gap <= 0;
       if (!inReach && (board.speed === null || gap > board.speed)) continue;
-      if (!inReach && Math.abs(rise) > 1 && !canChangeHeight(board)) {
+      if (!inReach && Math.abs(rise) > 1 && !canReachVertical(board.locomotion, rise)) {
         continue;
       }
 
@@ -279,18 +287,13 @@ function attackOptions(
  * intelligence whatsoever, so it sits at tier 1 alongside attacking, and is only offered when nothing
  * better exists: it scores below any real attack and above the floor.
  */
-/** Can this creature gain or lose height under its own power? */
-function canChangeHeight(board: Board): boolean {
-  const modes = board.locomotion.modes;
-  return (modes.fly ?? 0) > 0 || (modes.climb ?? 0) > 0;
-}
-
 function advanceOptions(board: Board, kit: Usable[], hasBetter: boolean): PlanOption[] {
   if (hasBetter) return [];
   const target = board.enemies[0];
   if (!target || board.speed === null || board.speed <= 0) return [];
   // Walking hopefully toward something in the air achieves nothing but a wasted turn.
-  if (Math.abs(target.elevation - board.self.elevation) > 1 && !canChangeHeight(board)) return [];
+  const rise = target.elevation - board.self.elevation;
+  if (Math.abs(rise) > 1 && !canReachVertical(board.locomotion, rise)) return [];
 
   const attacks = kit.filter(isAttack);
   if (attacks.length === 0) return [];
@@ -706,7 +709,10 @@ function coverIntent(
     chosen.kind === "flee" ||
     chosen.kind === "kite" ||
     chosen.kind === "hide" ||
-    chosen.kind === "escape"
+    chosen.kind === "escape" ||
+    chosen.kind === "hover" ||
+    chosen.kind === "flyby" ||
+    chosen.kind === "emerge"
   ) {
     return undefined;
   }
@@ -772,6 +778,9 @@ export function planTurn(combatant: any): TurnPlan | null {
     ...helpOptions(board, profile, threat),
     ...yieldOptions(board, profile, actor),
     ...hazardOptions(board, profile),
+    ...hoverOptions(board, kit, (e) => threat(e).meleeReach),
+    ...flybyOptions(board, kit, (e) => threat(e).meleeReach),
+    ...emergeOptions(board, kit, (e) => threat(e).meleeReach),
   ];
   const options = [...real, ...survivalOptions(board, profile, real.length > 0)];
   if (options.length === 0) return null;
@@ -791,6 +800,9 @@ export function planTurn(combatant: any): TurnPlan | null {
     chosen.kind === "escape" ||
     chosen.kind === "hide" ||
     chosen.kind === "kite" ||
+    chosen.kind === "hover" ||
+    chosen.kind === "flyby" ||
+    chosen.kind === "emerge" ||
     (chosen.approach ?? 0) > 0;
   const stand = shouldStand({
     prone: isProne(actor),
@@ -800,6 +812,7 @@ export function planTurn(combatant: any): TurnPlan | null {
     travels,
     meleeAttack:
       chosen.kind === "close" ||
+      chosen.kind === "flyby" ||
       (chosen.kind === "attack" &&
         chosen.attackMode !== "ranged" &&
         chosen.attackMode !== "thrown"),

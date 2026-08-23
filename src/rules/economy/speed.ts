@@ -32,8 +32,11 @@
 //
 // WHO IS HELD. Players, on their own turn, in a started combat. Not the GM, who moves tokens for staging
 // reasons that are none of this module's business; not creatures Noodlr is playing, which budget their
-// own movement before they take a step; and not anybody outside their turn, where the question is whose
-// turn it is rather than how far they have come.
+// own movement before they take a step (elevation included, in `core/movement.ts`); and not anybody
+// outside their turn, where the question is whose turn it is rather than how far they have come.
+//
+// ELEVATION SPENDS SPEED TOO. Fly / climb / swim / burrow / jump add |Δz|, and a size tax when the
+// token leaves or meets the zero plane. A level flight is still just XY. See `core/elevation-cost.ts`.
 //
 // The Token subclass below also owns sheet-paced animation and mode-traverse. Those are not the Speed
 // budget; they share the class because a second `objectClass` replacement would drop this one. See
@@ -71,6 +74,12 @@ import { bonusDashSource } from "../../system/dnd5e-dash";
 import { JUMP_ACTION, jumpVeto } from "../jump";
 import { paintMotionFx, restoreMotionFx } from "../../core/motion-fx";
 import { mountCostThisTurn, syncRiderVisuals } from "../riding";
+import {
+  elevationTaxOf,
+  historyTravelCost,
+  pathTravelCost,
+  type TravelSpend,
+} from "../../core/elevation-cost";
 
 /**
  * What a creature may cross this turn, and what it has crossed already.
@@ -181,17 +190,29 @@ function walkSpeed(modes: any, actor: any): number | null {
 /**
  * How far this creature has already come this turn.
  *
- * Core's own record, not a tally of ours. It resets at the start of each turn, survives undo, and
- * already has terrain multipliers baked into each waypoint's cost — a parallel counter would drift from
- * it within a round. Costs are stored as `null` where core means infinity.
+ * Core's own record, not a tally of ours, plus the elevation surcharge in `elevation-cost.ts`. History
+ * resets at the start of each turn and already has terrain multipliers baked into each waypoint's cost.
+ * Costs are stored as `null` where core means infinity.
  */
 function spentThisTurn(doc: any): number {
-  let total = 0;
-  for (const waypoint of doc?.movementHistory ?? []) {
-    const cost = Number(waypoint?.cost);
-    if (Number.isFinite(cost)) total += cost;
+  return travelThisTurn(doc).total;
+}
+
+function travelThisTurn(doc: any): TravelSpend {
+  return historyTravelCost(doc?.movementHistory ?? [], elevationTaxOf(doc?.actor), (from, to) =>
+    measureHorizontal(doc, from, to),
+  );
+}
+
+/** This move's passed + pending path, priced as XY + our vertical, from `movement.origin`. */
+function proposedTravel(doc: any, movement: any): number {
+  const tax = elevationTaxOf(doc?.actor);
+  const origin = movement?.origin;
+  const dests = [...(movement?.passed?.waypoints ?? []), ...(movement?.pending?.waypoints ?? [])];
+  if (origin && dests.length) {
+    return pathTravelCost(origin, dests, tax, (from, to) => measureHorizontal(doc, from, to)).total;
   }
-  return total;
+  return Number(movement?.passed?.cost ?? 0) + Number(movement?.pending?.cost ?? 0);
 }
 
 function traverseFactsOf(doc: any): CrossingFacts {
@@ -398,8 +419,7 @@ export function registerMovementCap(): void {
       const budget = budgetFor(doc);
       if (!budget) return true;
 
-      const proposed =
-        Number(movement?.passed?.cost ?? 0) + Number(movement?.pending?.cost ?? 0) + budget.spent;
+      const proposed = proposedTravel(doc, movement) + budget.spent;
       const ceiling = budget.allowance + (budget.dash ? budget.speed : 0);
       // Rounded because grid arithmetic produces 30.000000000000004 and refusing a legal move over a
       // rounding error is worse than letting a fifteenth of a foot through.
@@ -504,6 +524,9 @@ export function surveyMovement(): unknown {
     },
   ];
   const policy = scenePolicyOf(doc?.parent);
+  const travel = travelThisTurn(doc);
+  const size = String(doc?.actor?.system?.traits?.size ?? "");
+  const tax = elevationTaxOf(doc?.actor);
   const report = {
     token: String(doc?.name ?? "?"),
     enabled: isMovementCapEnabled(),
@@ -511,6 +534,8 @@ export function surveyMovement(): unknown {
     isTheirTurn: String(doc?.combatant?.id ?? "") === String(game.combat?.combatant?.id ?? ""),
     movementAction: action,
     elevation,
+    size: size || "—",
+    elevationTax: tax,
     sheet: {
       walk: modes.walk ?? 0,
       fly: modes.fly ?? 0,
@@ -529,7 +554,9 @@ export function surveyMovement(): unknown {
     walls: wallsOf(doc).length,
     oneSquareDecision: pathDecisionOf(doc, sample).kind,
     historyWaypoints: (doc?.movementHistory ?? []).length,
-    spentThisTurn: spentThisTurn(doc),
+    spentThisTurn: travel.total,
+    spentCore: travel.core,
+    spentElevationSurcharge: travel.surcharge,
     dashesTaken: doc?.combatant
       ? dashesTaken(doc.actor, game.combat, doc.combatant)
       : "not in combat",
@@ -545,7 +572,8 @@ export function surveyMovement(): unknown {
     units: String((canvas as any)?.scene?.grid?.units ?? ""),
   };
   const lines = [
-    `${report.token}: ${action} at ${elevation} ${report.units}`,
+    `${report.token}: ${action} at ${elevation} ${report.units} (${report.size}, tax ${tax})`,
+    `spent ${round(travel.total)} (core ${round(travel.core)} + Z ${round(travel.surcharge)})`,
     `sheet ${JSON.stringify(report.sheet)}`,
     `pace ${report.sheetPace ? "on" : "off"} → ${sps ?? "Foundry default"} spaces/sec` +
       (typeof report.secondsForSheetSpeed === "string" ? ` (${report.secondsForSheetSpeed})` : ""),

@@ -1948,9 +1948,10 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     Defeated combatants are excluded from the check so a corpse cannot deadlock the fight.
   - **Movement is not just walking (2026-08-04).** `combat/auto/locomotion.ts` reads every mode on the
     sheet and is the only place allowed to decide which one a creature uses. Two rules encoded there,
-    both deliberate: flight wins over walking whenever it is faster (a dragon does not jog), while swim,
-    burrow and climb are last resorts for creatures with nothing else, because Foundry models no terrain
-    types and choosing "swim" for a land creature crossing a dungeon floor would be inventing a rule.
+    both deliberate: flight wins over walking when it is at least as fast (equal used to walk — an
+    adult dragon's 80/80 jogged), while swim, burrow and climb are last resorts for creatures with
+    nothing else, because Foundry models no terrain types and choosing "swim" for a land creature
+    crossing a dungeon floor would be inventing a rule.
     The chosen mode sets the movement BUDGET as well as the action passed to `move()` — reading walk
     speed alone gave a wyvern 20 ft instead of 80 and gave aquatic monsters 0.
   - **Let core do the cost accounting.** `moveTo` passes `maxCost: budget` rather than `ignoreCost: true`.
@@ -1961,6 +1962,11 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     `hypot(horizontal, rise)`. A creature that can neither fly nor climb is not offered a melee option
     against something above it, which is what stopped ground troops from walking hopefully at a hovering
     caster and burning the turn. Horizontal-only measurement remains elsewhere (kiting, cover) on purpose.
+  - **Innate altitude (Layer A, 2026-08-23).** `tactics/altitude.ts` is the one place that *asks* for a
+    height. Hover rises to melee-reach + one square (tax is a cost, not a destination — Huge pays 30
+    to sit at +10). Fly-by closes, strikes, and keeps going at the height the 3D reach still allows.
+    Burrow/swim dive when engaged or emerge from below; same-turn down-and-up is two taxes and is not
+    one plan. No ceiling, no inferred dirt. Spell Fly / Levitate is Layer B, parked.
   - `api.testMove()` (`combat/auto/diagnose.ts`) is the ground truth when this recurs: it really moves the
     selected token one square, escalating walls-enforced → walls-ignored → `displace` → `noHook`, reports
     core's answer at each stage, and restores the position. Whichever attempt first succeeds names the
@@ -2169,6 +2175,13 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     decides whether a second drag in one turn starts from zero. Passing the whole-turn allowance is correct
     under the "history counts" reading and merely lets the backstop do the work under the other; passing
     the remainder would silently halve the budget under the first. Do not "simplify" this without testing.
+  - **Elevation spends Speed (user, 2026-08-23).** Fly / climb / swim / burrow / jump add `|Δz|` as well
+    as XY. A level flight or swim is still just XY. Leaving or meeting elevation 0 also pays a size tax
+    (Tiny 5, Small/Medium 10, Large 20, Huge 30, Gargantuan 40) so a Large bulette cannot burrow 5 ft
+    under the party for 5 ft of Speed. Walk / crawl / displace do not get our Z line — stairs stay
+    core's. Do **not** infer indoor / outdoor / ceiling / water; trust the GM's placement.
+    `src/core/elevation-cost.ts` is the arithmetic. Players are held in `preMoveToken`; automated NPCs
+    reserve the vertical in `moveToward` before they walk. Unreadable size is taxed 0.
   - **Dash is charged, not asked.** A creature with something left to spend may drag past its Speed; the
     moment it does, `moveToken` charges the Dash and posts it to chat. The dash count lives in the action
     ledger's `Tally`, not beside the movement code, so it resets on the same lazy turn stamp as the slot

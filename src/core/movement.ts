@@ -17,6 +17,11 @@ import { log } from "../constants";
 import { getMoveSpeed } from "../settings";
 import { actionFor, readLocomotion } from "./locomotion";
 import {
+  affordableElevation,
+  elevationTaxOf,
+  verticalCost,
+} from "./elevation-cost";
+import {
   blocked,
   centerOf,
   insideScene,
@@ -195,8 +200,20 @@ export async function moveTo(token: any, point: Point, intent: MoveIntent = {}):
   const before = sourcePosition(doc);
 
   const from = elevationOf(doc);
-  const to = Number.isFinite(intent.elevation as number) ? (intent.elevation as number) : from;
-  const climbing = Math.abs(to - from) > VERTICAL_TOLERANCE;
+  const wantedElev = Number.isFinite(intent.elevation as number) ? (intent.elevation as number) : from;
+  const climbing = Math.abs(wantedElev - from) > VERTICAL_TOLERANCE;
+  const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
+  const wanted = intent.action && actions?.[intent.action] ? intent.action : movementAction(token, climbing);
+  const budget = Number(intent.budget);
+  const to =
+    Number.isFinite(budget) && budget >= 0
+      ? affordableElevation(from, wantedElev, budget, wanted ?? "walk", elevationTaxOf(doc?.actor))
+      : wantedElev;
+  if (to !== wantedElev) {
+    log(
+      `movement: ${describe(doc)} can only change elevation ${from} → ${to} (wanted ${wantedElev}) on a ${budget} budget`,
+    );
+  }
 
   const waypoint: Record<string, unknown> = {
     // Top-left pixel coordinates, as integers. Not centres, not grid offsets.
@@ -207,8 +224,6 @@ export async function moveTo(token: any, point: Point, intent: MoveIntent = {}):
     explicit: true,
     checkpoint: true,
   };
-  const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
-  const wanted = intent.action && actions?.[intent.action] ? intent.action : movementAction(token, climbing);
   if (wanted) waypoint.action = wanted;
   const ignoreWalls = unconstrained();
   const speed = getMoveSpeed();
@@ -459,7 +474,7 @@ export async function moveToward(
   target: any,
   budget: number,
   desired: number,
-  extra: Pick<MoveIntent, "action"> = {},
+  extra: Pick<MoveIntent, "action" | "elevation"> = {},
 ): Promise<number> {
   const goal = centerOf(target);
   if (!goal) {
@@ -470,7 +485,7 @@ export async function moveToward(
   }
   return moveTowardPoint(token, goal, budget, desired, {
     label: describe(target?.document ?? target),
-    elevation: reachableElevation(token, target),
+    elevation: extra.elevation ?? reachableElevation(token, target),
     action: extra.action,
   });
 }
@@ -503,12 +518,30 @@ export async function moveTowardPoint(
     return 0;
   }
 
+  const doc = token?.document ?? token;
+  const from = elevationOf(doc);
+  const wantedElev = Number.isFinite(intent.elevation as number) ? (intent.elevation as number) : from;
+  const climbing = Math.abs(wantedElev - from) > VERTICAL_TOLERANCE;
+  const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
+  const action =
+    intent.action && actions?.[intent.action] ? intent.action : movementAction(token, climbing);
+  const tax = elevationTaxOf(doc?.actor);
+  const destElev = affordableElevation(from, wantedElev, budget, action ?? "walk", tax);
+  const reserved = verticalCost(from, destElev, action ?? "walk", tax);
+  const leftover = Math.max(0, budget - reserved);
+
   // Measured the way the planner measured it when it decided this creature was out of reach. These
   // used to be two different answers — see `measureBetween`.
   const separation = measureBetween(origin, goal);
-  // How far we would LIKE to travel: enough to be in range, no further.
-  const wanted = Math.min(budget, Math.max(0, separation - Math.max(desired, 0)));
-  if (wanted <= 0) return 0;
+  // How far we would LIKE to travel: enough to be in range, no further. Elevation is reserved first
+  // so a landing dragon does not also spend those feet walking.
+  const wanted = Math.min(leftover, Math.max(0, separation - Math.max(desired, 0)));
+  if (wanted <= 0) {
+    if (Math.abs(destElev - from) > VERTICAL_TOLERANCE) {
+      return moveTo(token, origin, { budget, elevation: destElev, action });
+    }
+    return 0;
+  }
 
   // A gap smaller than one square has nowhere to stand in the middle of it, so every candidate would
   // snap back to the square the creature already holds and be refused. Saying so once is honest;
@@ -529,8 +562,8 @@ export async function moveTowardPoint(
 
   return stepTo(token, origin, approaches(origin, bearing, wantedPixels), `toward ${label}`, {
     budget,
-    elevation: intent.elevation,
-    action: intent.action,
+    elevation: destElev,
+    action: intent.action ?? action,
   });
 }
 
@@ -674,7 +707,7 @@ export async function moveAwayFrom(
   target: any,
   budget: number,
   desired: number,
-  extra: Pick<MoveIntent, "action"> = {},
+  extra: Pick<MoveIntent, "action" | "elevation"> = {},
 ): Promise<number> {
   const who = describe(token?.document ?? token);
   const origin = centerOf(token);
@@ -709,7 +742,7 @@ export async function moveAwayFrom(
       },
     })),
     `away from ${describe(target?.document ?? target)}`,
-    { budget, action: extra.action },
+    { budget, action: extra.action, elevation: extra.elevation },
   );
 }
 

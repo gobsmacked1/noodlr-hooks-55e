@@ -16,6 +16,8 @@
 
 import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
+import { centerOf } from "../core/positioning";
+import { gap3d } from "./altitude";
 import { duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
 import { standUp } from "../rules/prone";
@@ -308,6 +310,9 @@ const MOVING_PLANS = new Set([
   "help",
   "flee",
   "escape",
+  "hover",
+  "flyby",
+  "emerge",
 ]);
 
 /** One grid square in scene units. */
@@ -326,6 +331,11 @@ function speedOf(plan: TurnPlan, stood: boolean): number {
 function gaitOf(actor: any): { action?: string } {
   const action = isProne(actor) ? crawlAction() : undefined;
   return action ? { action } : {};
+}
+
+function liveElevation(token: any, fallback: number): number {
+  const n = Number(token?.document?.elevation ?? token?.elevation);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 /** Reach of the chosen option, defaulting to a single square when the option carries no range. */
@@ -400,6 +410,83 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
           break;
         }
         result.used = await at(option.target);
+        break;
+      }
+
+      case "hover": {
+        const dest = Number(option.elevation);
+        const here = centerOf(selfToken);
+        if (here && Number.isFinite(dest)) {
+          result.moved = await moveTo(selfToken, here, {
+            budget,
+            elevation: dest,
+            action: option.moveAction ?? gait.action,
+          });
+        }
+        const reach = reachOf(option);
+        const now = liveElevation(selfToken, dest);
+        const gap = option.target?.token
+          ? gap3d(separation(selfToken, option.target.token), now, option.target.elevation)
+          : Number.POSITIVE_INFINITY;
+        if (!meleeReached(gap, reach)) {
+          result.problem =
+            result.moved === 0
+              ? "could not take off — the attack from height was not made"
+              : `rose ${Math.round(result.moved)} ${plan.board.units} but ${option.itemName ?? "the attack"} is still out of range`;
+          break;
+        }
+        if (option.item) result.used = await at(option.target);
+        break;
+      }
+
+      case "flyby": {
+        const reach = reachOf(option);
+        const gaitOr = { action: option.moveAction ?? gait.action, elevation: option.elevation };
+        result.moved = await moveToward(selfToken, option.target?.token, budget, reach, gaitOr);
+        const now = liveElevation(selfToken, plan.board.self.elevation);
+        const gap = option.target?.token
+          ? gap3d(separation(selfToken, option.target.token), now, option.target.elevation)
+          : Number.POSITIVE_INFINITY;
+        if (meleeReached(gap, reach) && option.item) {
+          result.used = await at(option.target);
+        } else if (option.item) {
+          result.problem =
+            result.moved === 0
+              ? "the token would not move — still out of reach, so the attack was not made"
+              : `flew ${Math.round(result.moved)} ${plan.board.units} but still ${Math.round(gap)} ${plan.board.units} away`;
+        }
+        const leftover = Math.max(0, budget - result.moved);
+        if (leftover > 0 && option.target?.token) {
+          result.moved += await moveAwayFrom(selfToken, option.target.token, leftover, leftover, gaitOr);
+        }
+        break;
+      }
+
+      case "emerge": {
+        const dest = Number(option.elevation);
+        const here = centerOf(selfToken);
+        const gaitOr = { action: option.moveAction ?? gait.action, elevation: dest };
+        if (Number.isFinite(dest) && dest < plan.board.self.elevation - 1) {
+          if (here) result.moved = await moveTo(selfToken, here, { budget, ...gaitOr });
+          break;
+        }
+        const reach = option.item ? reachOf(option) : 0;
+        if (option.target?.token) {
+          result.moved = await moveToward(selfToken, option.target.token, budget, reach, gaitOr);
+        } else if (here && Number.isFinite(dest)) {
+          result.moved = await moveTo(selfToken, here, { budget, ...gaitOr });
+        }
+        if (option.item && option.target?.token) {
+          const now = liveElevation(selfToken, dest);
+          const gap = gap3d(separation(selfToken, option.target.token), now, option.target.elevation);
+          if (meleeReached(gap, reachOf(option))) result.used = await at(option.target);
+          else {
+            result.problem =
+              result.moved === 0
+                ? "could not emerge — the attack was not made"
+                : `emerged ${Math.round(result.moved)} ${plan.board.units} but still out of reach`;
+          }
+        }
         break;
       }
 

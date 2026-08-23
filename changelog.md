@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+## 0.7.34
+
+**Innate flyers and burrowers now use height on purpose, and changing height spends Speed.**
+Automated dragons no longer fight on the floor: they rise out of melee (hover), pass and strike
+(fly-by), or a bulette dives and comes up next turn. Hover height is one reach plus one square —
+the size tax is what takeoff *costs*, not how high they go, so a Huge dragon pays 30 feet of Speed
+to sit at +10. Fly equal to walk is now flight (an 80/80 adult dragon was jogging). Players pay
+the same vertical + size tax on fly / climb / swim / burrow / high jump; walk, crawl and the GM's
+own dragging do not. We still do not guess indoor / water / dirt. Spell Fly and Levitate are not
+in this release.
+
 ## 0.7.33
 
 **Movement polish: riders stop hitching, burrowers vanish, and fly / burrow out of
