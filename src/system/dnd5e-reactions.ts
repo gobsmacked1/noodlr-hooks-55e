@@ -252,3 +252,47 @@ export function grantsExemptMovement(item: any, activity: any): boolean {
   if (!owner) return false;
   return GRANTED.includes(identifierOf(owner));
 }
+
+/**
+ * 2024 Polearm Master (and the 2014 wording that is the same trigger): a Reaction when
+ * a creature ENTERS your reach, not when it leaves. The leave is an ordinary Opportunity
+ * Attack. The sheet's Reactive Strike activity is `type: utility`, so `readActions`
+ * never sees it — the feat itself is the signal, and the swing is a held Quarterstaff,
+ * Spear, or Heavy+Reach weapon.
+ *
+ * `flags.<ns>.enterReach` is the hatch for a homebrew that uses the same trigger.
+ */
+const POLEARM_IDS = ["quarterstaff", "spear", "glaive", "halberd", "pike"];
+const POLEARM_NAME = /^\s*(quarterstaff|spear|glaive|halberd|pike)\s*$/i;
+const POLEARM_MASTER = /^\s*polearm\s+master\s*$/i;
+const REACTIVE_STRIKE = /^\s*reactive\s+strike\s*$/i;
+
+export function isPolearmWeapon(item: any): boolean {
+  if (!item || String(item.type ?? "") !== "weapon") return false;
+  const identifier = identifierOf(item);
+  if (POLEARM_IDS.includes(identifier)) return true;
+  const raw = item?.system?.properties;
+  const props = raw instanceof Set ? raw : new Set(Array.isArray(raw) ? raw : []);
+  if (props.has("rch") && props.has("hvy")) return true;
+  return !identifier && POLEARM_NAME.test(String(item?.name ?? ""));
+}
+
+export function isPolearmMaster(item: any): boolean {
+  if (!item) return false;
+  const identifier = identifierOf(item);
+  if (identifier === "polearm-master") return true;
+  if (REACTIVE_STRIKE.test(String(item?.name ?? ""))) return true;
+  if (!identifier && POLEARM_MASTER.test(String(item?.name ?? ""))) return true;
+  for (const activity of item?.system?.activities?.contents ??
+    Object.values(item?.system?.activities ?? {})) {
+    if (REACTIVE_STRIKE.test(String((activity as any)?.name ?? ""))) return true;
+  }
+  return false;
+}
+
+export function canTakeEnterReach(actor: any): boolean {
+  if (!isDnd5e() || !actor) return false;
+  if (readFlag(actor, "enterReach")) return true;
+  for (const item of actor?.items ?? []) if (isPolearmMaster(item)) return true;
+  return false;
+}

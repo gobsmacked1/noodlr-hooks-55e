@@ -421,6 +421,7 @@
   "NOODLRHOOKS.Reaction.Offer.Hurt": "{target} has just hurt {name}. Its reaction is still available.",
   "NOODLRHOOKS.Reaction.Offer.Incoming": "{target} has hit {name} — narrowly. Its reaction is still available.",
   "NOODLRHOOKS.Reaction.Offer.Leaving": "{target} is stepping out of {name}'s reach. Its reaction is still available.",
+  "NOODLRHOOKS.Reaction.Offer.Entering": "{target} is stepping into {name}'s reach. Its reaction is still available.",
   "NOODLRHOOKS.Reaction.Offer.Success": "{target} has just rolled well on {spell}, in sight of {name}. Its reaction is still available.",
   "NOODLRHOOKS.Reaction.Offer.Title": "{name} can react"
 }

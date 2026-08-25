@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.7.36
+
+**A Large creature next to you is in your melee reach, and Polearm Master's Reactive Strike
+fires when they step in.** Opportunity attacks measured centre-to-centre, so a Large Beholder
+adjacent to a Medium monk read as ~8 ft away and never left a 5 ft Quarterstaff. Distance is
+now the closest occupied squares — adjacent is 5 ft for any size. Reactive Strike was never
+listened for: we only watched leaving reach, and the feat's own activity is a utility the
+action reader skips. Entering the polearm's reach now offers that weapon's melee attack
+(Quarterstaff, Spear, or Heavy+Reach). Disengage and Flyby still cancel opportunity attacks
+only. A Quarterstaff stays 5 ft — 2024 Polearm Master does not extend it.
+
 ## 0.7.35
 
 **Templates leave when the effect does.** An instantaneous Fireball, breath or wail is removed

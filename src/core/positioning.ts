@@ -139,6 +139,64 @@ export function measureBetween(a: Point, b: Point): number {
   return (Math.hypot(b.x - a.x, b.y - a.y) / size) * perSquare;
 }
 
+/**
+ * Token space as the grid counts it: top-left in pixels, width/height in squares.
+ *
+ * Melee reach is a question about SPACES, not centres. A Large Beholder adjacent to a Medium
+ * monk is 5 ft away in 5e (closest squares touch) and ~8 ft centre-to-centre — and using the
+ * second as "in reach?" is why a 5 ft Quarterstaff never saw the Beholder leave.
+ */
+export interface Footprint {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Centre of each occupied grid square. Empty when `gridSize` cannot place a cell. */
+export function cellCenters(fp: Footprint, gridSize: number): Point[] {
+  const size = Number(gridSize);
+  if (!Number.isFinite(size) || size <= 0) return [];
+  const w = Math.max(1, Math.round(Number(fp.width) || 1));
+  const h = Math.max(1, Math.round(Number(fp.height) || 1));
+  const x0 = Number(fp.x);
+  const y0 = Number(fp.y);
+  if (!Number.isFinite(x0) || !Number.isFinite(y0)) return [];
+  const out: Point[] = [];
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < h; j++) {
+      out.push({ x: x0 + size * i + size / 2, y: y0 + size * j + size / 2 });
+    }
+  }
+  return out;
+}
+
+/**
+ * 5e melee range between two token footprints: the closest pair of occupied squares.
+ *
+ * Adjacent creatures of any size measure one square (usually 5 ft). Centre-to-centre
+ * does not — a Medium next to a Large is a square and a half. Callers that already
+ * treat coordinates as scene units (tests) pass the same `measure` they always did.
+ */
+export function reachBetween(
+  a: Footprint,
+  b: Footprint,
+  gridSize: number,
+  measure: (p: Point, q: Point) => number = measureBetween,
+): number {
+  const cellsA = cellCenters(a, gridSize);
+  const cellsB = cellCenters(b, gridSize);
+  if (!cellsA.length || !cellsB.length) return measure({ x: a.x, y: a.y }, { x: b.x, y: b.y });
+  let best = Number.POSITIVE_INFINITY;
+  for (const p of cellsA) {
+    for (const q of cellsB) {
+      const d = measure(p, q);
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+
 export function insideScene(point: Point): boolean {
   const rect: any = (canvas as any)?.dimensions?.sceneRect;
   if (!rect) return true;

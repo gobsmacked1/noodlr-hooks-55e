@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { acBoostOf } from "../src/system/dnd5e-reactions";
+import { acBoostOf, canTakeEnterReach, isPolearmWeapon } from "../src/system/dnd5e-reactions";
 import { readHits } from "../src/rules/cards";
 import { timeoutChoice } from "../src/rules/offer";
 
@@ -79,6 +79,11 @@ test("being hurt off-turn follows the same rule as a departure", () => {
   assert.equal(timeoutChoice([option("Shield", true), free], "hurt"), free);
 });
 
+test("entering reach follows the same clock rule as a departure", () => {
+  const free = option("Quarterstaff", false);
+  assert.equal(timeoutChoice([option("Hellish Rebuke", true), free], "enter"), free);
+});
+
 /* -------------------------------------------- */
 /*  Which reactions raise AC                     */
 /* -------------------------------------------- */
@@ -150,4 +155,29 @@ test("a +5 is worth offering against a hit by four and not against a hit by five
   const shield = acBoostOf(item("Shield", "shield"), null)!;
   assert.equal(shield.bonus > 4, true);
   assert.equal(shield.bonus > 5, false);
+});
+
+test("Polearm Master weapons are the printed list, not every melee item", () => {
+  const staff = { type: "weapon", name: "Quarterstaff", system: { identifier: "quarterstaff" } };
+  const spear = { type: "weapon", name: "Spear", system: { identifier: "spear" } };
+  const glaive = {
+    type: "weapon",
+    name: "Glaive",
+    system: { identifier: "glaive", properties: ["rch", "hvy"] },
+  };
+  const dagger = { type: "weapon", name: "Dagger", system: { identifier: "dagger" } };
+  const unarmed = { type: "weapon", name: "Unarmed Strike", system: { identifier: "unarmed-strike" } };
+  assert.equal(isPolearmWeapon(staff), true);
+  assert.equal(isPolearmWeapon(spear), true);
+  assert.equal(isPolearmWeapon(glaive), true);
+  assert.equal(isPolearmWeapon(dagger), false);
+  assert.equal(isPolearmWeapon(unarmed), false);
+});
+
+test("Reactive Strike is recognised from the feat, not from a utility activity", () => {
+  const monk = {
+    items: [{ name: "Polearm Master", type: "feat", system: { identifier: "polearm-master" } }],
+  };
+  assert.equal(canTakeEnterReach(monk), true);
+  assert.equal(canTakeEnterReach({ items: [] }), false);
 });

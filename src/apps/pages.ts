@@ -600,9 +600,10 @@ const SHARED_STATE: Section = {
       id: "opportunity",
       label: "Opportunity attacks",
       hint:
-        "Reacting when someone leaves your reach, and when you are hurt off-turn. Always on: it is " +
-        "the reaction trigger everything else hangs off. Defers to Gambit's Premades when that is " +
-        "installed with its own opportunity attacks on.",
+        "Reacting when someone leaves your reach, when a creature with Polearm Master sees someone " +
+        "enter theirs, and when you are hurt off-turn. Always on: it is the reaction trigger " +
+        "everything else hangs off. Defers to Gambit's Premades when that is installed with its " +
+        "own opportunity attacks on.",
       state: "live",
       ownership: "opportunity",
     },

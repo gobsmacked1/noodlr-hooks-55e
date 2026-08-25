@@ -38,7 +38,7 @@ import { readActions, type CreatureAction } from "../tactics/actions";
 import { useActionAt } from "../tactics/execute";
 import { hasReaction, spend } from "./economy/ledger";
 import { isReactionPromptEnabled } from "../settings";
-import { acBoostOf, midiPromptsReactions } from "../system/dnd5e-reactions";
+import { acBoostOf, isPolearmWeapon, midiPromptsReactions } from "../system/dnd5e-reactions";
 import { counterspellReady, isCounterspell, isCounterspellAction } from "../system/dnd5e-counterspell";
 import { isSilveryBarbs } from "../system/dnd5e-barbs";
 import { readHp } from "../core/tracker";
@@ -46,7 +46,7 @@ import { readHp } from "../core/tracker";
 const QUERY = "reaction";
 
 /** Why the creature is being asked. Each one filters the options and words the sentence differently. */
-export type ReactionTrigger = "opportunity" | "hurt" | "incoming" | "casting" | "success";
+export type ReactionTrigger = "opportunity" | "enter" | "hurt" | "incoming" | "casting" | "success";
 
 export interface OfferRequest {
   actorUuid: string;
@@ -105,10 +105,12 @@ export function registerReactionOffers(): void {
 export function offerable(actor: any, trigger: ReactionTrigger = "opportunity"): boolean {
   if (!isReactionPromptEnabled(actor)) return false;
   // Midi prompts for "I was hit" and "I was damaged" at its stock settings, and for nothing else — not a
-  // departure, not a cast, not somebody else's good roll. Two dialogs for one hit is the double-ask this
-  // whole layer exists to avoid, so those two halves are its; the triggers it never dispatches stay ours.
+  // departure, not an enter-reach, not a cast, not somebody else's good roll. Two dialogs for one hit is
+  // the double-ask this whole layer exists to avoid, so those two halves are its; the triggers it never
+  // dispatches stay ours.
   if (
     trigger !== "opportunity" &&
+    trigger !== "enter" &&
     trigger !== "casting" &&
     trigger !== "success" &&
     midiPromptsReactions()
@@ -250,17 +252,34 @@ function optionsFor(actor: any, request: OfferRequest, target: any): CreatureAct
       reaches(action, gap),
   );
 
-  if (request.trigger === "opportunity") {
-    // An opportunity attack is not a sheet entry in any system: it is an ordinary melee attack spent as a
-    // reaction. So the best melee swing is offered alongside anything the sheet calls a reaction, and it
-    // goes first, because it is what the trigger is named after.
-    const swings = all
+  if (request.trigger === "enter") {
+    // Reactive Strike is "make one melee attack with that weapon" — the Quarterstaff, Spear, or
+    // Heavy+Reach item, not Unarmed Strike and not the utility activity the feat ships as.
+    // Range is not re-tested here: the route walk already decided they entered, and a second
+    // centre-to-centre read is the 8-ft-vs-5-ft lie that hid the staff from a Large mover.
+    return all
       .filter(
         (action) =>
           action.kind === "attack" &&
           action.melee &&
           (action.economy === "action" || action.economy === "free") &&
-          reaches(action, gap),
+          isPolearmWeapon(action.item),
+      )
+      .sort((a, b) => b.range - a.range)
+      .slice(0, MAX_OPTIONS);
+  }
+
+  if (request.trigger === "opportunity") {
+    // An opportunity attack is not a sheet entry in any system: it is an ordinary melee attack spent as a
+    // reaction. So the best melee swing is offered alongside anything the sheet calls a reaction, and it
+    // goes first, because it is what the trigger is named after. The swing itself is not range-filtered:
+    // they have already left, so a 5 ft weapon would fail a live gap check by construction.
+    const swings = all
+      .filter(
+        (action) =>
+          action.kind === "attack" &&
+          action.melee &&
+          (action.economy === "action" || action.economy === "free"),
       )
       .sort((a, b) => b.range - a.range)
       .slice(0, 1);
@@ -317,9 +336,11 @@ function sentence(request: OfferRequest, token: any): string {
   const key =
     request.trigger === "opportunity"
       ? "NOODLRHOOKS.Reaction.Offer.Leaving"
-      : request.trigger === "incoming"
-        ? "NOODLRHOOKS.Reaction.Offer.Incoming"
-        : request.trigger === "casting"
+      : request.trigger === "enter"
+        ? "NOODLRHOOKS.Reaction.Offer.Entering"
+        : request.trigger === "incoming"
+          ? "NOODLRHOOKS.Reaction.Offer.Incoming"
+          : request.trigger === "casting"
           ? "NOODLRHOOKS.Reaction.Offer.Casting"
           : request.trigger === "success"
             ? "NOODLRHOOKS.Reaction.Offer.Success"

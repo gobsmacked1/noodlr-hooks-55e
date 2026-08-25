@@ -6,7 +6,7 @@
 // updated is a table Noodlr has failed. Where midi IS present, the existing item-use path already routes
 // through it, so reactions resolve with its fidelity — but nothing here depends on it existing.
 //
-// The two triggers implemented here were chosen because both can be detected with certainty from core:
+// The triggers implemented here were chosen because they can be detected with certainty from core:
 //
 //   1. SOMEONE LEFT MY REACH — `moveToken`, which hands over the whole route: where the move began, the
 //      waypoints it passed through, and the action each one used. The route is walked rather than
@@ -40,7 +40,7 @@ import { isPrimaryGM } from "../util/gm";
 import { narrator } from "../util/speaker";
 import { readActions, type CreatureAction } from "../tactics/actions";
 import { readHp } from "../core/tracker";
-import { centerOf, measureBetween, type Point } from "../core/positioning";
+import { centerOf, measureBetween, reachBetween, type Footprint, type Point } from "../core/positioning";
 import { pickNumber, systemPaths } from "../system/profiles";
 import { shouldAutomate } from "../tactics/registry";
 import { useActionAt } from "../tactics/execute";
@@ -48,9 +48,10 @@ import { can, mentalScore, tierForScore, tierProfile } from "../tactics/tiers";
 import { turnRandom } from "../core/random";
 import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
-import { standingExemption } from "../system/dnd5e-reactions";
+import { canTakeEnterReach, isPolearmWeapon, standingExemption } from "../system/dnd5e-reactions";
 import { isCounterspellAction } from "../system/dnd5e-counterspell";
 import { alive, canReact, notifyMidi, offerReaction, offerable, opportunityTaken } from "./offer";
+import type { ReactionTrigger } from "./offer";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -66,6 +67,9 @@ interface Watcher {
   token: any;
   action: CreatureAction;
   reach: number;
+  /** Polearm Master's Reactive Strike — a second reach, only when the feat is on the sheet. */
+  enterAction?: CreatureAction;
+  enterReach?: number;
   /** False when nobody is playing this creature for us, so it is asked instead of swung. */
   automated: boolean;
 }
@@ -264,6 +268,81 @@ export function movementRoute(
 }
 
 /**
+ * Enter / leave crossings along `route`, walked step by step.
+ *
+ * Leaving reach provokes even when the creature finishes back inside it. Entering is
+ * Polearm Master's Reactive Strike, which is a different reaction on the same walk.
+ * Exported so a test can pin a Large-next-to-Medium 5 ft leave without a canvas.
+ *
+ * When `watcher` is a footprint and `gridSize` can place cells, range is the closest
+ * occupied squares — 5e melee — not centre-to-centre.
+ */
+export function reachCrossingsAlong(
+  watcherCenter: Point,
+  route: Array<{ x: number; y: number; elevation?: number }>,
+  mover: { width?: number; height?: number },
+  reach: number,
+  gridSize: number,
+  measure: (a: Point, b: Point) => number = measureBetween,
+  watcherElevation = 0,
+  watcher?: Footprint,
+): Array<{ index: number; kind: "enter" | "leave" }> {
+  const events: Array<{ index: number; kind: "enter" | "leave" }> = [];
+  let wasInside: boolean | null = null;
+  let index = 0;
+  const moverFp = {
+    width: Number(mover?.width) || 0,
+    height: Number(mover?.height) || 0,
+  };
+  const useSpaces = Boolean(watcher && gridSize > 0 && (moverFp.width >= 1 || moverFp.height >= 1));
+  for (const point of route) {
+    const gap = useSpaces
+      ? reachBetween(
+          watcher as Footprint,
+          {
+            x: point.x,
+            y: point.y,
+            width: Math.max(1, moverFp.width),
+            height: Math.max(1, moverFp.height),
+          },
+          gridSize,
+          measure,
+        )
+      : measure(watcherCenter, centerFromTopLeft(point, mover, gridSize));
+    const inside = inMeleeReach(gap, reach, elevationOf(point.elevation), watcherElevation);
+    if (wasInside !== null) {
+      if (!wasInside && inside) events.push({ index, kind: "enter" });
+      if (wasInside && !inside) events.push({ index, kind: "leave" });
+      index++;
+    }
+    wasInside = inside;
+  }
+  return events;
+}
+
+export function reachEventsAlong(
+  watcherCenter: Point,
+  route: Array<{ x: number; y: number; elevation?: number }>,
+  mover: { width?: number; height?: number },
+  reach: number,
+  gridSize: number,
+  measure: (a: Point, b: Point) => number = measureBetween,
+  watcherElevation = 0,
+  watcher?: Footprint,
+): Array<"enter" | "leave"> {
+  return reachCrossingsAlong(
+    watcherCenter,
+    route,
+    mover,
+    reach,
+    gridSize,
+    measure,
+    watcherElevation,
+    watcher,
+  ).map((event) => event.kind);
+}
+
+/**
  * Did the mover cross out of `reach` anywhere along `route`?
  *
  * Walked step by step rather than compared end to end, because leaving reach provokes even when
@@ -278,20 +357,18 @@ export function leftReachAlong(
   gridSize: number,
   measure: (a: Point, b: Point) => number = measureBetween,
   watcherElevation = 0,
+  watcher?: Footprint,
 ): boolean {
-  let wasInside = false;
-  for (const point of route) {
-    const at = centerFromTopLeft(point, mover, gridSize);
-    const inside = inMeleeReach(
-      measure(watcherCenter, at),
-      reach,
-      elevationOf(point.elevation),
-      watcherElevation,
-    );
-    if (wasInside && !inside) return true;
-    wasInside = inside;
-  }
-  return false;
+  return reachEventsAlong(
+    watcherCenter,
+    route,
+    mover,
+    reach,
+    gridSize,
+    measure,
+    watcherElevation,
+    watcher,
+  ).includes("leave");
 }
 
 function profileFor(actor: any): ReturnType<typeof tierProfile> {
@@ -344,15 +421,28 @@ function watchersOf(moverDoc: any): Watcher[] {
     // they are an ordinary melee attack spent as a reaction — so this looks for the attack, not a
     // reaction-flagged item.
     let best: CreatureAction | undefined;
+    let enterAction: CreatureAction | undefined;
+    const polearmMaster = canTakeEnterReach(combatant.actor);
     for (const action of readActions(combatant.actor)) {
       if (!action.available || !action.melee || action.kind !== "attack") continue;
       if (action.economy !== "action" && action.economy !== "free") continue;
       if (!best || action.range > best.range) best = action;
+      if (polearmMaster && isPolearmWeapon(action.item)) {
+        if (!enterAction || action.range > enterAction.range) enterAction = action;
+      }
     }
     if (!best) continue;
     // No proximity check here: whether the mover was ever inside this reach is decided by walking the
     // route, and by the time this runs the token has already arrived somewhere else.
-    out.push({ combatant, token, action: best, reach: best.range, automated });
+    out.push({
+      combatant,
+      token,
+      action: best,
+      reach: best.range,
+      enterAction,
+      enterReach: enterAction?.range,
+      automated,
+    });
   }
   return out;
 }
@@ -407,30 +497,49 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
   const disengaged = hasDisengaged(moverDoc?.actor);
 
   let left = 0;
+  let entered = 0;
   for (const watcher of watchers) {
-    if (!leftReach(watcher, route, moverDoc)) continue;
-    left++;
+    const events = moveEvents(watcher, route, moverDoc);
+    if (events.includes("leave")) left++;
+    if (events.includes("enter")) entered++;
 
-    if (exempt) {
-      log(
-        `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
-      );
-      continue;
-    }
-    if (disengaged) {
-      log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
-      continue;
-    }
+    for (const event of events) {
+      if (event === "leave") {
+        if (exempt) {
+          log(
+            `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
+          );
+          continue;
+        }
+        if (disengaged) {
+          log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
+          continue;
+        }
+        if (!watcher.automated) {
+          const taken = await ask(watcher.combatant, watcher.token, mover, "opportunity");
+          if (taken) break;
+          continue;
+        }
+        if (withholds(watcher.combatant)) continue;
+        await strike(watcher, mover, "as it slips away");
+        break;
+      }
 
-    if (!watcher.automated) {
-      await ask(watcher.combatant, watcher.token, mover, "opportunity");
-      continue;
+      // Polearm Master's Reactive Strike is not an Opportunity Attack. Disengage and Flyby name
+      // OAs; they do not shut this off. The printed trigger is entering the polearm's reach.
+      if (event === "enter" && watcher.enterAction) {
+        if (!watcher.automated) {
+          const taken = await ask(watcher.combatant, watcher.token, mover, "enter");
+          if (taken) break;
+          continue;
+        }
+        if (withholds(watcher.combatant)) continue;
+        await strike(watcher, mover, "as it steps in", watcher.enterAction);
+        break;
+      }
     }
-    if (withholds(watcher.combatant)) continue;
-
-    await strike(watcher, mover, "as it slips away");
   }
-  if (left === 0) {
+  if (left === 0 && entered === 0) {
     log(
       `reaction: ${who} moved past ${watchers.length} watcher(s) and left nobody's reach` +
         ` (${watchers.map((w) => `${w.combatant?.name}@${w.reach}`).join(", ")})`,
@@ -450,11 +559,11 @@ async function ask(
   combatant: any,
   token: any,
   target: any,
-  trigger: "opportunity" | "hurt",
-): Promise<void> {
+  trigger: Extract<ReactionTrigger, "opportunity" | "hurt" | "enter">,
+): Promise<boolean> {
   const actor = combatant?.actor;
   const tokenUuid = String(token?.document?.uuid ?? token?.uuid ?? "");
-  if (!actor || !tokenUuid) return;
+  if (!actor || !tokenUuid) return false;
 
   const answer = await offerReaction(actor, {
     actorUuid: String(actor.uuid ?? ""),
@@ -466,6 +575,7 @@ async function ask(
   if (answer.taken) {
     log(`reaction: ${combatant?.name} answered with ${answer.label}`);
   }
+  return answer.taken;
 }
 
 /**
@@ -499,16 +609,61 @@ function tokenElevation(token: any): number {
   );
 }
 
-function leftReach(
+function footprintOf(token: any): Footprint | null {
+  const doc = token?.document ?? token;
+  const x = Number(doc?._source?.x ?? doc?.x);
+  const y = Number(doc?._source?.y ?? doc?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x,
+    y,
+    width: Math.max(1, Number(doc?.width) || 1),
+    height: Math.max(1, Number(doc?.height) || 1),
+  };
+}
+
+function crossingsAt(
   watcher: Watcher,
   route: Array<{ x: number; y: number; elevation?: number }>,
   mover: any,
-): boolean {
+  reach: number,
+): Array<{ index: number; kind: "enter" | "leave" }> {
   const from = tokenCenter(watcher.token);
-  if (!from) return false;
+  if (!from) return [];
   const grid = Number((canvas as any)?.grid?.size ?? (canvas as any)?.dimensions?.size ?? 100) || 100;
   const doc = mover?.document ?? mover;
-  return leftReachAlong(from, route, doc, watcher.reach, grid, measureBetween, tokenElevation(watcher.token));
+  return reachCrossingsAlong(
+    from,
+    route,
+    doc,
+    reach,
+    grid,
+    measureBetween,
+    tokenElevation(watcher.token),
+    footprintOf(watcher.token) ?? undefined,
+  );
+}
+
+/**
+ * Leave events at the Opportunity Attack reach, enter events at the polearm's reach.
+ *
+ * Those two numbers are usually the same (a Quarterstaff is 5 ft for both). They are not when the
+ * best melee swing is a Reach weapon that is not a polearm — then OA is 10 ft and Reactive Strike
+ * is still the staff's 5. Walked in route order so a pass-through spends at most one Reaction.
+ */
+function moveEvents(
+  watcher: Watcher,
+  route: Array<{ x: number; y: number; elevation?: number }>,
+  mover: any,
+): Array<"enter" | "leave"> {
+  const leave = crossingsAt(watcher, route, mover, watcher.reach).filter((e) => e.kind === "leave");
+  const enter =
+    watcher.enterReach != null
+      ? crossingsAt(watcher, route, mover, watcher.enterReach).filter((e) => e.kind === "enter")
+      : [];
+  return [...leave, ...enter]
+    .sort((a, b) => a.index - b.index || (a.kind === "enter" ? -1 : 1))
+    .map((e) => e.kind);
 }
 
 /**
@@ -588,7 +743,12 @@ async function retaliate(actor: any, amount: number): Promise<void> {
 }
 
 /** Announce it, spend the reaction, and let the system roll. */
-async function strike(watcher: Watcher, target: any, phrasing: string): Promise<void> {
+async function strike(
+  watcher: Watcher,
+  target: any,
+  phrasing: string,
+  action: CreatureAction = watcher.action,
+): Promise<void> {
   spendReaction(watcher.combatant);
   const name = String(watcher.combatant?.name ?? "Something");
   const targetName = String(target?.name ?? "its attacker");
@@ -597,15 +757,15 @@ async function strike(watcher: Watcher, target: any, phrasing: string): Promise<
   await ChatMessage.create({
     content:
       `<p><em>Reaction:</em> ${foundry.utils.escapeHTML(name)} strikes at ` +
-      `${foundry.utils.escapeHTML(targetName)} with ${foundry.utils.escapeHTML(watcher.action.name)} ` +
+      `${foundry.utils.escapeHTML(targetName)} with ${foundry.utils.escapeHTML(action.name)} ` +
       `${foundry.utils.escapeHTML(phrasing)}.</p>`,
     speaker: { alias: name },
   });
 
   try {
-    await useActionAt(watcher.action, target, { asReaction: true });
+    await useActionAt(action, target, { asReaction: true });
   } catch (err) {
-    log(`reaction: ${name} could not use ${watcher.action.name}:`, err);
+    log(`reaction: ${name} could not use ${action.name}:`, err);
     await ChatMessage.create({
       content: `<p><em>${foundry.utils.escapeHTML(name)}'s reaction did not resolve — roll it by hand.</em></p>`,
       speaker: narrator(),

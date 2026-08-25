@@ -4785,6 +4785,19 @@ an argument.
   no melee within 5 feet, and the plan does not travel. `core/` still names no D&D status
   — crawl is `intent.action` from execute.
 
+## Melee reach is closest squares, and Polearm Master is enter (2026-08-25)
+
+- **A Large token adjacent to a Medium one is 5 ft away.** `measureBetween` is centre-to-centre;
+  a 2×2 next to a 1×1 is ~8 ft. That is why the Beholder walking past the Monk logged
+  `left nobody's reach (…@5)` while standing in the next square. `reachBetween` in
+  `core/positioning.ts` is the one answer: closest occupied grid squares, then the scene's
+  diagonal rule. OA and Reactive Strike both use it. Do not "fix" this by giving a
+  Quarterstaff 10 ft — 2024 PAM does not extend the staff's reach.
+- **Reactive Strike is enter-reach, not a second leave.** `reactions.ts` only watched leaving.
+  The feat's own activity is `type: utility`, so `readActions` never offers it. The signal is
+  the feat (`polearm-master` / Reactive Strike); the swing is a held Quarterstaff, Spear, or
+  Heavy+Reach weapon. Disengage and Flyby name Opportunity Attacks and do not shut this off.
+
 ## Mount riding (v0.7.23, initial slice)
 
 `src/system/dnd5e-riding.ts` + `src/rules/riding.ts`. No Rideable dependency. Stands aside when
