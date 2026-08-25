@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.7.37
+
+**A Large creature already next to you stops trying to close, and Polearm Master
+fires once.** v0.7.36 fixed reaction distance and left the planner measuring
+centres, so a Beholder adjacent to a Medium monk still "needed to close 3 ft",
+found no nearer square, and never Bit. Token-to-token distance is now the same
+closest-squares reading everywhere a swing or a step uses it. The same walk
+then offered Reactive Strike twice: Foundry fires `moveToken` per square, and
+both offers started before the reaction was spent. Entering a given enemy's
+reach is now claimed once until your next turn, waypoint hooks run one at a
+time, and a second dialog for the same creature is refused. You still have one
+reaction, however many combatants walked past. Declining Reactive Strike does
+not eat the Opportunity Attack if that same creature then leaves.
+
 ## 0.7.36
 
 **A Large creature next to you is in your melee reach, and Polearm Master's Reactive Strike

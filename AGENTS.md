@@ -4793,10 +4793,27 @@ an argument.
   `core/positioning.ts` is the one answer: closest occupied grid squares, then the scene's
   diagonal rule. OA and Reactive Strike both use it. Do not "fix" this by giving a
   Quarterstaff 10 ft — 2024 PAM does not extend the staff's reach.
+- **v0.7.36 only switched the reaction layer.** The 17:17 smoke test still had
+  `Beholder flies 3 ft … must close 3 ft` then `is 8 from Monkey … close only 2.5 —
+  less than one square` and no Bite. `board.ts`, `moveToward`, and `execute.ts`
+  `meleeReached` still used centres. `tokenDistance` is now the one token-to-token
+  wrapper; `sight.ts` `separation` stays centre-based (eyes, not spaces). An
+  already-in-reach `moveToward` returns 0 on purpose — do not overwrite a successful
+  swing with "the token would not move".
 - **Reactive Strike is enter-reach, not a second leave.** `reactions.ts` only watched leaving.
   The feat's own activity is `type: utility`, so `readActions` never offers it. The signal is
   the feat (`polearm-master` / Reactive Strike); the swing is a held Quarterstaff, Spear, or
   Heavy+Reach weapon. Disengage and Flyby name Opportunity Attacks and do not shut this off.
+- **Once per enemy combatant, one reaction until the watcher's next turn (2026-08-25).**
+  The 17:21 Beholder walk posted `answered with Quarterstaff (Attack)` twice ~300 ms
+  apart. `moveToken` fires per waypoint; each remaining-path event still contains the
+  enter; `hasReaction` stays true until the player answers. Three guards, all needed:
+  `provoke` is queued so waypoints run one at a time; `claimProvoke(watcher, mover, kind)`
+  in `reaction-once.ts` is claimed *before* the ask so a second enter is a no-op until
+  that watcher's turn starts; `claimOffer` in `offer.ts` refuses a second dialog on the
+  same actor. Enter and leave are separate keys — declining PAM must not eat the OA.
+  The one-reaction cap is the ledger. Do not "fix" this by ignoring later `moveToken`
+  (the first square of a long walk is often still out of reach).
 
 ## Mount riding (v0.7.23, initial slice)
 

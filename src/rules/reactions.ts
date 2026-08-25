@@ -52,6 +52,7 @@ import { canTakeEnterReach, isPolearmWeapon, standingExemption } from "../system
 import { isCounterspellAction } from "../system/dnd5e-counterspell";
 import { alive, canReact, notifyMidi, offerReaction, offerable, opportunityTaken } from "./offer";
 import type { ReactionTrigger } from "./offer";
+import { claimProvoke, clearAllProvokes, forgetProvokesFor, resetOfferLock } from "./reaction-once";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -61,6 +62,12 @@ const handled = new Set<string>();
 
 /** Actor id -> damage taken, carried from before the hit-point change to after it has landed. */
 const wounded = new Map<string, number>();
+
+/** One `provoke` at a time so per-waypoint `moveToken` cannot stack dialogs. */
+let provokeQueue: Promise<void> = Promise.resolve();
+
+/** Combatant whose turn last began — their reach-reaction claims refresh with their reaction. */
+let lastTurnCombatant = "";
 
 interface Watcher {
   combatant: any;
@@ -78,6 +85,17 @@ export function registerReactionHooks(): void {
   Hooks.on("deleteCombat", () => {
     departing.clear();
     wounded.clear();
+    clearAllProvokes();
+    resetOfferLock();
+    lastTurnCombatant = "";
+  });
+
+  Hooks.on("updateCombat", (combat: any) => {
+    const id = String(combat?.combatant?.id ?? "");
+    if (id && id !== lastTurnCombatant) {
+      forgetProvokesFor(id);
+      lastTurnCombatant = id;
+    }
   });
 
   // `moveToken` carries the whole route: `movement.origin`, `movement.passed.waypoints`, and the action
@@ -85,9 +103,13 @@ export function registerReactionHooks(): void {
   // of reach and back again inside one move still provokes, which a simple before-and-after comparison
   // misses entirely. And a teleport provokes nothing, which is only knowable from the waypoint's action.
   // Neither hook is awaited by core, so nothing here may block it.
+  //
+  // Core fires this PER WAYPOINT. Two overlapping `provoke()` both see an enter and both pass
+  // `hasReaction` until the player answers. Queue them, and claim the (watcher, mover, kind)
+  // pair before asking — see `reaction-once.ts`.
   Hooks.on("moveToken", (doc: any, movement: any, operation: any) => {
     if (!active()) return;
-    void provoke(doc, movement, operation).catch((err) => log("opportunity attack failed:", err));
+    enqueueProvoke(doc, movement, operation);
   });
 
   // Fallback for a move that arrives as a plain document update, with no movement operation attached.
@@ -105,7 +127,7 @@ export function registerReactionHooks(): void {
     if (!before) return;
     departing.delete(String(doc?.id ?? ""));
     if (!active() || handled.has(String(doc?.id ?? ""))) return;
-    void provoke(doc, { origin: before }).catch((err) => log("opportunity attack failed:", err));
+    enqueueProvoke(doc, { origin: before });
   });
 
   // Hit points falling on someone else's turn is the one damage signal every system gives us. The old
@@ -447,6 +469,12 @@ function watchersOf(moverDoc: any): Watcher[] {
   return out;
 }
 
+function enqueueProvoke(doc: any, movement: any, operation?: any): void {
+  provokeQueue = provokeQueue
+    .then(() => provoke(doc, movement, operation))
+    .catch((err) => log("opportunity attack failed:", err));
+}
+
 async function provoke(moverDoc: any, movement: any, operation?: any): Promise<void> {
   const mover = moverDoc?.object ?? moverDoc;
   const who = String(moverDoc?.name ?? mover?.name ?? "?");
@@ -498,12 +526,20 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
 
   let left = 0;
   let entered = 0;
+  const moverId = String(moverDoc?.id ?? "");
   for (const watcher of watchers) {
     const events = moveEvents(watcher, route, moverDoc);
     if (events.includes("leave")) left++;
     if (events.includes("enter")) entered++;
 
+    const watcherId = String(watcher.combatant?.id ?? "");
     for (const event of events) {
+      // One reaction until this creature's next turn, no matter how many combatants walked past.
+      if (!hasReaction(watcher.combatant)) {
+        log(`reaction: ${watcher.combatant?.name} has already spent its reaction`);
+        break;
+      }
+
       if (event === "leave") {
         if (exempt) {
           log(
@@ -515,25 +551,35 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
           log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
           continue;
         }
+        if (watcher.automated && withholds(watcher.combatant)) continue;
+        if (!claimProvoke(watcherId, moverId, "leave")) {
+          log(`reaction: ${watcher.combatant?.name} already had its chance at ${who} leaving`);
+          continue;
+        }
         if (!watcher.automated) {
           const taken = await ask(watcher.combatant, watcher.token, mover, "opportunity");
           if (taken) break;
           continue;
         }
-        if (withholds(watcher.combatant)) continue;
         await strike(watcher, mover, "as it slips away");
         break;
       }
 
       // Polearm Master's Reactive Strike is not an Opportunity Attack. Disengage and Flyby name
       // OAs; they do not shut this off. The printed trigger is entering the polearm's reach.
+      // Once per enemy combatant until the watcher's next turn — a Large walk fires
+      // `moveToken` per square, and each remaining-path event still contains the enter.
       if (event === "enter" && watcher.enterAction) {
+        if (watcher.automated && withholds(watcher.combatant)) continue;
+        if (!claimProvoke(watcherId, moverId, "enter")) {
+          log(`reaction: ${watcher.combatant?.name} already had its Reactive Strike at ${who}`);
+          continue;
+        }
         if (!watcher.automated) {
           const taken = await ask(watcher.combatant, watcher.token, mover, "enter");
           if (taken) break;
           continue;
         }
-        if (withholds(watcher.combatant)) continue;
         await strike(watcher, mover, "as it steps in", watcher.enterAction);
         break;
       }

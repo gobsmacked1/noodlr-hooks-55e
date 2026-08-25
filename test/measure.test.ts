@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { afterEach, test } from "node:test";
 
-import { measureBetween } from "../src/core/positioning";
+import { centerOf, measureBetween, tokenDistance } from "../src/core/positioning";
 
 const GRID = 100;
 const PER_SQUARE = 5;
@@ -70,6 +70,26 @@ test("an unreadable grid API falls back to straight-line pixels rather than thro
     },
   };
   assert.equal(measureBetween({ x: 0, y: 0 }, { x: GRID * 2, y: 0 }), PER_SQUARE * 2);
+});
+
+test("a Large token adjacent to a Medium one is 5 ft, not ~8", () => {
+  equidistant();
+  // THE BUG after v0.7.36, in one assertion. Beholder 2×2 at (100,0), Monk 1×1 at (0,0):
+  // spaces touch, so melee is one square. Centres are 150×50 px → 7.5 ft, and the planner
+  // then tried to close 2.5 ft into a gap with no square in it.
+  const monk = { x: 0, y: 0, width: 1, height: 1 };
+  const beholder = { x: GRID, y: 0, width: 2, height: 2 };
+  assert.equal(tokenDistance(monk, beholder), PER_SQUARE);
+  const centres = measureBetween(centerOf(monk)!, centerOf(beholder)!);
+  assert.ok(centres > 7 && centres < 8);
+});
+
+test("two Mediums in adjacent squares are still one square apart", () => {
+  equidistant();
+  assert.equal(
+    tokenDistance({ x: 0, y: 0, width: 1, height: 1 }, { x: GRID, y: 0, width: 1, height: 1 }),
+    PER_SQUARE,
+  );
 });
 
 // Deliberately NOT tested: `measureBetween` with no `canvas` global at all throws a ReferenceError,

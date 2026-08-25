@@ -27,6 +27,7 @@ import {
   insideScene,
   measureBetween,
   occupied,
+  tokenDistance,
   type Point,
 } from "./positioning";
 
@@ -487,6 +488,9 @@ export async function moveToward(
     label: describe(target?.document ?? target),
     elevation: extra.elevation ?? reachableElevation(token, target),
     action: extra.action,
+    // Spaces, not centres: a Large next to a Medium is already at 5 ft. Walking toward
+    // the centre still aims the step; `apart` is what decides whether one is needed.
+    apart: tokenDistance(token, target),
   });
 }
 
@@ -504,7 +508,7 @@ export async function moveTowardPoint(
   goal: Point,
   budget: number,
   desired: number,
-  intent: { label?: string; elevation?: number; action?: string } = {},
+  intent: { label?: string; elevation?: number; action?: string; apart?: number } = {},
 ): Promise<number> {
   const who = describe(token?.document ?? token);
   const origin = centerOf(token);
@@ -530,9 +534,11 @@ export async function moveTowardPoint(
   const reserved = verticalCost(from, destElev, action ?? "walk", tax);
   const leftover = Math.max(0, budget - reserved);
 
-  // Measured the way the planner measured it when it decided this creature was out of reach. These
-  // used to be two different answers — see `measureBetween`.
-  const separation = measureBetween(origin, goal);
+  // Measured the way the planner measured it when it decided this creature was out of reach.
+  // Token-to-token walks pass closest-square `apart`; a remembered floor point still uses centres.
+  const separation = Number.isFinite(intent.apart)
+    ? (intent.apart as number)
+    : measureBetween(origin, goal);
   // How far we would LIKE to travel: enough to be in range, no further. Elevation is reserved first
   // so a landing dragon does not also spend those feet walking.
   const wanted = Math.min(leftover, Math.max(0, separation - Math.max(desired, 0)));

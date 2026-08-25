@@ -16,7 +16,7 @@
 
 import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
-import { centerOf } from "../core/positioning";
+import { centerOf, tokenDistance } from "../core/positioning";
 import { gap3d } from "./altitude";
 import { duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
@@ -24,7 +24,6 @@ import { standUp } from "../rules/prone";
 import { declareReadied } from "../rules/ready";
 import { placesTemplate } from "../rules/template-targets";
 import { crawlAction, isProne, standCost } from "../system/dnd5e-prone";
-import { separation } from "../rules/sight";
 import { placeAimedTemplate, stampCatch } from "./place-template";
 import type { PlanOption, TurnPlan } from "./planner";
 
@@ -357,6 +356,12 @@ export function meleeReached(distance: number, reach: number): boolean {
   return distance <= reach + 0.01;
 }
 
+/** Closest-square horizontal, then elevation. Same geometry the planner now uses. */
+function meleeGap(selfToken: any, targetToken: any, selfElev: number, targetElev: number): number {
+  if (!targetToken) return Number.POSITIVE_INFINITY;
+  return gap3d(tokenDistance(selfToken, targetToken), selfElev, targetElev);
+}
+
 /**
  * Perform a plan. Returns what actually happened, for the announcement to reflect.
  *
@@ -401,7 +406,13 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
       case "close": {
         const reach = reachOf(option);
         result.moved = await moveToward(selfToken, option.target?.token, budget, reach, gait);
-        const gap = option.target?.token ? separation(selfToken, option.target.token) : Number.POSITIVE_INFINITY;
+        const now = liveElevation(selfToken, plan.board.self.elevation);
+        const gap = meleeGap(
+          selfToken,
+          option.target?.token,
+          now,
+          option.target?.elevation ?? 0,
+        );
         if (!meleeReached(gap, reach)) {
           result.problem =
             result.moved === 0
@@ -425,9 +436,7 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         }
         const reach = reachOf(option);
         const now = liveElevation(selfToken, dest);
-        const gap = option.target?.token
-          ? gap3d(separation(selfToken, option.target.token), now, option.target.elevation)
-          : Number.POSITIVE_INFINITY;
+        const gap = meleeGap(selfToken, option.target?.token, now, option.target?.elevation ?? 0);
         if (!meleeReached(gap, reach)) {
           result.problem =
             result.moved === 0
@@ -444,9 +453,7 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         const gaitOr = { action: option.moveAction ?? gait.action, elevation: option.elevation };
         result.moved = await moveToward(selfToken, option.target?.token, budget, reach, gaitOr);
         const now = liveElevation(selfToken, plan.board.self.elevation);
-        const gap = option.target?.token
-          ? gap3d(separation(selfToken, option.target.token), now, option.target.elevation)
-          : Number.POSITIVE_INFINITY;
+        const gap = meleeGap(selfToken, option.target?.token, now, option.target?.elevation ?? 0);
         if (meleeReached(gap, reach) && option.item) {
           result.used = await at(option.target);
         } else if (option.item) {
@@ -478,7 +485,7 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
         }
         if (option.item && option.target?.token) {
           const now = liveElevation(selfToken, dest);
-          const gap = gap3d(separation(selfToken, option.target.token), now, option.target.elevation);
+          const gap = meleeGap(selfToken, option.target.token, now, option.target.elevation);
           if (meleeReached(gap, reachOf(option))) result.used = await at(option.target);
           else {
             result.problem =
@@ -586,7 +593,16 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
     // legitimately travels nowhere, so it is not a refusal to report. Every other zero is.
     const meantToTravel =
       option.kind === "search" ? (option.lost?.distance ?? 0) > oneSquare() : true;
-    if (MOVING_PLANS.has(option.kind) && meantToTravel && result.moved === 0) {
+    // Already in reach returns 0 from moveToward on purpose — that is a successful Bite,
+    // not a refusal. A more specific problem from the switch must not be overwritten
+    // (the 17:17 card said "see the console" after "still out of reach" had already been set).
+    if (
+      !result.problem &&
+      !result.used &&
+      MOVING_PLANS.has(option.kind) &&
+      meantToTravel &&
+      result.moved === 0
+    ) {
       result.problem = "the token would not move — see the console for which call was refused";
     }
   } catch (err) {

@@ -197,6 +197,42 @@ export function reachBetween(
   return best;
 }
 
+/** Top-left and size in squares, from a Token, TokenDocument, or a bare `{x,y,width,height}`. */
+export function footprintOf(token: any): Footprint | null {
+  const doc = token?.document ?? token;
+  const x = Number(doc?.x);
+  const y = Number(doc?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x,
+    y,
+    width: Math.max(1, Number(doc?.width) || 1),
+    height: Math.max(1, Number(doc?.height) || 1),
+  };
+}
+
+/**
+ * How far apart two tokens are for 5e spaces: closest occupied squares, then the scene's
+ * diagonal rule. THE one answer the planner, the closer, and the melee swing gate share.
+ *
+ * Centre-to-centre is the wrong question for reach. A Large Beholder adjacent to a Medium
+ * monk is 5 ft (spaces touch) and ~8 ft between centres — the 17:17 smoke test after
+ * v0.7.36: "must close 3 ft", then "close only 2.5 — less than one square", then no Bite.
+ * `sight.ts` `separation` stays centre-based: vision and Hide ask about eyes, not spaces.
+ */
+export function tokenDistance(a: any, b: any): number {
+  const fa = footprintOf(a);
+  const fb = footprintOf(b);
+  if (!fa || !fb) {
+    const p1 = centerOf(a);
+    const p2 = centerOf(b);
+    if (!p1 || !p2) return Number.POSITIVE_INFINITY;
+    return measureBetween(p1, p2);
+  }
+  const size = Number((globalThis as any).canvas?.grid?.size) || 100;
+  return reachBetween(fa, fb, size);
+}
+
 export function insideScene(point: Point): boolean {
   const rect: any = (canvas as any)?.dimensions?.sceneRect;
   if (!rect) return true;

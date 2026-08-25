@@ -12,7 +12,7 @@
 import { readHp } from "./tracker";
 import { pickNumber, systemPaths } from "../system/profiles";
 import { readLocomotion, type Locomotion } from "./locomotion";
-import { measureBetween } from "./positioning";
+import { tokenDistance } from "./positioning";
 
 export interface BoardActor {
   combatantId: string;
@@ -31,7 +31,7 @@ export interface BoardActor {
   footprint: number;
   /** Height above the scene floor, in the scene's units. Flyers and ledges make this matter. */
   elevation: number;
-  /** Horizontal distance from the acting creature, in the scene's own units. */
+  /** Closest occupied squares to the acting creature, in the scene's own units. */
   distance: number;
   defeated: boolean;
   /** How many spell-like items the creature carries: the proxy for "that one is artillery". */
@@ -79,23 +79,9 @@ function tokenOf(combatant: any): any {
   return combatant?.token?.object ?? combatant?.token ?? null;
 }
 
-function centerOf(token: any): { x: number; y: number } | null {
-  const doc = token?.document ?? token;
-  const x = Number(doc?.x);
-  const y = Number(doc?.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  const grid = Number((canvas as any)?.grid?.size) || 0;
-  const w = Number(doc?.width) || 1;
-  const h = Number(doc?.height) || 1;
-  return { x: x + (grid * w) / 2, y: y + (grid * h) / 2 };
-}
-
-/** Distance between two tokens in scene units, through the one shared measurement. */
+/** Closest occupied squares — 5e melee — not centres. See `tokenDistance`. */
 function measure(a: any, b: any): number {
-  const p1 = centerOf(a);
-  const p2 = centerOf(b);
-  if (!p1 || !p2) return Number.POSITIVE_INFINITY;
-  return measureBetween(p1, p2);
+  return tokenDistance(a, b);
 }
 
 /** Hostility is read from the token's disposition, which is what the GM actually set. */

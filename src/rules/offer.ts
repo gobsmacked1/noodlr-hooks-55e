@@ -37,6 +37,7 @@ import { askUser, registerQuery } from "../util/queries";
 import { readActions, type CreatureAction } from "../tactics/actions";
 import { useActionAt } from "../tactics/execute";
 import { hasReaction, spend } from "./economy/ledger";
+import { claimOffer, releaseOffer } from "./reaction-once";
 import { isReactionPromptEnabled } from "../settings";
 import { acBoostOf, isPolearmWeapon, midiPromptsReactions } from "../system/dnd5e-reactions";
 import { counterspellReady, isCounterspell, isCounterspellAction } from "../system/dnd5e-counterspell";
@@ -143,6 +144,18 @@ export async function offerReaction(actor: any, request: OfferRequest): Promise<
 
 /** Everything from here down runs on the client that owns the creature. */
 async function resolveHere(request: OfferRequest): Promise<OfferAnswer> {
+  const lock = String(request.actorUuid ?? "");
+  // Before any await: two concurrent queries both pass `hasReaction` until the first spend.
+  if (!claimOffer(lock)) return { taken: false };
+
+  try {
+    return await settleOffer(request);
+  } finally {
+    releaseOffer(lock);
+  }
+}
+
+async function settleOffer(request: OfferRequest): Promise<OfferAnswer> {
   const actor: any = await resolve(request.actorUuid);
   if (!actor) return { taken: false };
 
