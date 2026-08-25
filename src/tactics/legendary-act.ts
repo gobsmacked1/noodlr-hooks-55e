@@ -257,8 +257,10 @@ function usedRaysFor(combat: any, combatant: any): Set<number> {
 /**
  * Legal legendary options against the enemies this creature can currently perceive.
  *
- * Melee that cannot reach is dropped — a legendary action does not walk. Heal only when bloodied.
- * Lair activations never appear: `isLegendaryAction` refuses them.
+ * `spendOne` runs `applyAwareness` first, so a target behind a closed door is not here — Eye Rays
+ * need a creature the Beholder can see, not one the tracker still lists. Melee that cannot reach
+ * is dropped — a legendary action does not walk. Heal only when bloodied. Lair activations never
+ * appear: `isLegendaryAction` refuses them.
  */
 export function legendaryOptions(
   actions: CreatureAction[],

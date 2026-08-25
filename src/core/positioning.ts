@@ -124,7 +124,8 @@ export function centerOf(token: any): Point | null {
  * on a gridless scene — there `measurePath` returns the Euclidean distance anyway.
  */
 export function measureBetween(a: Point, b: Point): number {
-  const grid: any = (canvas as any)?.grid;
+  // globalThis: a bare `canvas` is a ReferenceError in the test bundle (same as `centerOf`).
+  const grid: any = (globalThis as any).canvas?.grid;
   try {
     if (typeof grid?.measurePath === "function") {
       const result = grid.measurePath([a, b]);

@@ -350,10 +350,22 @@ function withinSenses(spotter: any, target: any): boolean {
   return separation(spotter, target) <= radius;
 }
 
-function hasLineOfSight(spotter: any, target: any): boolean {
+/**
+ * Is there an unblocked sight ray from `spotter` to `target`?
+ *
+ * Walls and closed doors only — not darkness, not sense range, not stealth. `sightOf` is the
+ * full vision question; this is the cheap half awareness asks about everybody, because a
+ * Beholder that "knows" a monk is 50 ft behind two shut doors must not Disintegration-Ray him.
+ *
+ * A TokenDocument has no `checkCollision`; the placeable does. Fail toward "the view is clear"
+ * when neither is readable — granting free cover is the destructive miss.
+ */
+export function hasLineOfSight(spotter: any, target: any): boolean {
+  const from = typeof spotter?.checkCollision === "function" ? spotter : (spotter?.object ?? spotter);
+  const dest = target?.center ?? target?.object?.center ?? centerOf(target);
   try {
-    if (typeof spotter?.checkCollision === "function") {
-      return !spotter.checkCollision(target.center, { type: "sight", mode: "any" });
+    if (typeof from?.checkCollision === "function" && dest) {
+      return !from.checkCollision(dest, { type: "sight", mode: "any" });
     }
   } catch (err) {
     log("line-of-sight test threw; assuming the view is clear:", err);

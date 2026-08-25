@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.41
+
+**A wall is not line of sight, even if nobody hid.** Awareness only asked
+vision about creatures that were deliberately hiding, so a Monk who dashed
+through two closed doors stayed on the Beholder's board. The Beholder then
+fired a Disintegration Ray at 50 ft and hid from someone who already could
+not see it. Walls and closed doors now drop a target from `enemies` for
+everyone — legendary Eye Rays and the planned turn share that filter.
+Someone seen earlier becomes a search, not a ray. Darkness and sense range
+are still only applied to hiders, so an archer on a large map is not
+suddenly blind at 61 ft.
+
 ## 0.7.40
 
 **Glare actually fires an Eye Ray.** A DDB Beholder's legendary "Glare" is

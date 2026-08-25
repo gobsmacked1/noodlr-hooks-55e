@@ -7,22 +7,26 @@
 // 2026-08-16, and the giveaway was the pursuit track rather than any error: the behaviour was correct
 // for the board it was given, and the board was a lie.
 //
-// TWO QUESTIONS ARE ASKED AND THEY COST DIFFERENT AMOUNTS, which is the whole shape of this file.
+// THREE QUESTIONS, and they cost different amounts — which is the whole shape of this file.
 //
 //   `evades` is arithmetic — concealment layers, then a banked Stealth DC against passive Perception —
 //   and it is asked about EVERY enemy, because it is what catches an invisible one as well as a hidden
 //   one. It builds nothing and reads no polygons.
 //
-//   `sightOf` casts rays, and it is asked ONLY about creatures that are deliberately hiding. Asking it
-//   about everybody is the tempting version and it regresses ordinary combat: a creature whose token
-//   has vision switched off and whose stat block states no senses falls back to an ASSUMED 60 ft of
-//   sight, so on a large map every archer would abruptly be unable to see the thing it had been
-//   shooting at all fight. Nobody hiding means no vision source is ever built.
+//   `hasLineOfSight` is one wall-ray. Asked about EVERY enemy, stealth on or off. Walls and closed
+//   doors are not a stealth question: a monk who never hid, dashed through two shut doors and ended
+//   50 ft away was still `board.enemies`, so the Beholder Disintegration-Rayed him and then hid from
+//   someone who already could not see it (2026-08-25).
 //
-// The consequence, stated rather than left to be discovered: a creature that has NOT hidden is still
-// tracked through a wall. That is the behaviour this module has always had, and it is not what was
-// reported — somebody who never tried to be unfindable has not earned being unfindable, and the fix for
-// it is a per-creature sight model whose fallback is trustworthy rather than a filter here.
+//   `sightOf` casts rays AND applies sense range / darkness / detection modes, and it is asked ONLY
+//   about creatures that are deliberately hiding. Asking it about everybody regresses ordinary combat:
+//   a token whose vision is off and whose stat block states no senses falls back to an ASSUMED 60 ft,
+//   so on a large map every archer would abruptly be unable to see the thing it had been shooting at
+//   all fight. Nobody hiding means no vision source is ever built.
+//
+// Knowing someone is behind a door is not the same as seeing them. The filter drops them from
+// `enemies` (no Eye Rays, no hide-from-X) and, if they were seen earlier, puts the last spot on
+// `unseen` so the creature goes and looks.
 //
 // This READS the sweep's per-watcher `spotted` set — `evades` consults it internally — and deliberately
 // never WRITES to it. The set is maintained by `maintainSpotted`, which runs only inside the perception
@@ -35,7 +39,7 @@ import { log, MODULE_ID } from "../constants";
 import { readBoard, type Board, type BoardActor, type UnseenEnemy } from "../core/board";
 import { centerOf, measureBetween } from "../core/positioning";
 import { isStealthEnabled } from "../settings";
-import { releaseVision, sightOf, type VisionCache } from "../rules/sight";
+import { hasLineOfSight, releaseVision, sightOf, type VisionCache } from "../rules/sight";
 import { evades, hidingState } from "../rules/stealth";
 
 /** Where one observer last saw one creature. */
@@ -69,12 +73,18 @@ function key(observerId: string, targetId: string): string {
  * Returns a new board rather than mutating: `readBoard`'s answer is the measurement, this is one
  * creature's reading of it, and keeping them separable is what lets a diagnostic show both.
  *
- * FAILS TOWARD SEEING, at every level — a thrown vision test, an unreadable token, stealth switched off
- * — because the destructive failure here is granting free invisibility to something that never earned
- * it, and a monster that fights normally is merely the status quo. Same asymmetry as `sight.ts`.
+ * FAILS TOWARD SEEING on a thrown vision test or an unreadable token — granting free invisibility
+ * is the destructive miss. A wall or closed door is not that case: `hasLineOfSight` answers it
+ * even when stealth enforcement is off, because Eye Rays through a shut door is Monopoly.
  */
 export function applyAwareness(board: Board): Board {
-  if (!isStealthEnabled()) return board;
+  const stealth = (() => {
+    try {
+      return isStealthEnabled();
+    } catch {
+      return false;
+    }
+  })();
 
   const selfToken = board.self.token;
   const selfId = String(board.self.tokenId);
@@ -87,16 +97,21 @@ export function applyAwareness(board: Board): Board {
     for (const enemy of board.enemies) {
       let found = true;
       try {
-        const hiding = Boolean(hidingState(enemy.token));
-        // `useModes: false` says core's detection modes have NOT already run, which is true here and
-        // matters: it is what makes plain invisibility our business rather than something we are
-        // deferring on. A watcher with see-invisible still pierces it, through `evades`' own table.
-        found = !evades(selfToken, enemy.token, enemy.distance, false);
-        if (found && hiding) found = sightOf(selfToken, enemy.token, vision).seen;
+        if (stealth) {
+          const hiding = Boolean(hidingState(enemy.token));
+          // `useModes: false` says core's detection modes have NOT already run, which is true here and
+          // matters: it is what makes plain invisibility our business rather than something we are
+          // deferring on. A watcher with see-invisible still pierces it, through `evades`' own table.
+          found = !evades(selfToken, enemy.token, enemy.distance, false);
+          if (found && hiding) found = sightOf(selfToken, enemy.token, vision).seen;
+        }
       } catch (err) {
         log(`awareness: ${board.self.name} could not test its sight of ${enemy.name}:`, err);
         found = true;
       }
+      // Outside the stealth try: a thrown evades must not skip the wall. Fail-open on this one
+      // is hasLineOfSight's own job.
+      if (found && !hasLineOfSight(selfToken, enemy.token)) found = false;
 
       if (found) {
         remember(selfId, enemy);
@@ -168,8 +183,15 @@ export function surveyAwareness(): unknown {
           return "hiding state unreadable";
         }
       })();
+      const los = (() => {
+        try {
+          return hasLineOfSight(raw.self.token, enemy.token) ? "line" : "walled off";
+        } catch {
+          return "line of sight unreadable";
+        }
+      })();
       lines.push(
-        `  ${seen.has(enemy.tokenId) ? "SEES" : "lost"}  ${enemy.name} — ${Math.round(enemy.distance)} ${aware.units}, ${hiding}`,
+        `  ${seen.has(enemy.tokenId) ? "SEES" : "lost"}  ${enemy.name} — ${Math.round(enemy.distance)} ${aware.units}, ${hiding}, ${los}`,
       );
     }
     for (const lost of aware.unseen) {

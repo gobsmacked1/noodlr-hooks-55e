@@ -3358,18 +3358,23 @@ the tracker holds every combatant wherever they are standing, so `planTurn` pick
 
 `src/tactics/awareness.ts` is the filter, applied in `planTurn` between `readBoard` and any scoring.
 
-- **THE TWO QUESTIONS COST DIFFERENT AMOUNTS, and that asymmetry is the whole shape of the file.**
- `evades` is arithmetic (concealment layers, then a banked DC against passive Perception) and is asked
- about **every** enemy, because it is what catches an invisible one as well as a hidden one. `sightOf`
- casts rays and is asked **only** about creatures deliberately hiding. Asking `sightOf` about everybody
- is the tempting version and it **regresses ordinary combat**: a token with vision switched off and a
- stat block stating no senses falls back to an ASSUMED 60 ft, so on a large map every archer would
- abruptly stop being able to see what it had been shooting at all fight. Nobody hiding means no vision
- source is ever built, so an ordinary fight pays nothing.
-- **Stated rather than left to be found: a creature that has NOT hidden is still tracked through a
- wall.** That is unchanged behaviour and is not what was reported — somebody who never tried to be
- unfindable has not earned being unfindable — and fixing it needs a per-creature sight model whose
- fallback is trustworthy, not a wider filter here.
+- **THREE QUESTIONS, and they cost different amounts.** `evades` is arithmetic (concealment layers,
+ then a banked DC against passive Perception) and is asked about **every** enemy, because it is what
+ catches an invisible one as well as a hidden one. `hasLineOfSight` is one wall-ray and is asked
+ about **every** enemy, stealth on or off — walls and closed doors are not a stealth question.
+ `sightOf` casts rays AND applies sense range / darkness / detection modes, and it is asked ONLY
+ about creatures deliberately hiding. Asking `sightOf` about everybody **regresses ordinary combat**:
+ a token with vision switched off and a stat block stating no senses falls back to an ASSUMED 60 ft,
+ so on a large map every archer would abruptly stop being able to see what it had been shooting at
+ all fight. Nobody hiding means no vision source is ever built, so an ordinary fight pays nothing
+ beyond the wall ray.
+- **A creature that has NOT hidden is no longer tracked through a wall (v0.7.41, 2026-08-25).**
+ The older note here said that was unchanged and that fixing it needed a full per-creature sight
+ model. The Beholder proved the cheaper half was the load-bearing one: the Monk dashed through two
+ closed doors to 50+ ft, never hid, and the Beholder Disintegration-Rayed him (legendary actions
+ share this filter) then hid from someone who already could not see it. Knowing they are behind a
+ door is `unseen` + search last seen, not `enemies` + Eye Rays. The 60 ft fallback is still not
+ applied to non-hiders — only the wall.
 - **It READS the sweep's `spotted` set and never WRITES to it.** `maintainSpotted` runs only inside the
  perception sweep, which is gated on auto-engagement; so a watcher recorded from the planner on a table
  with auto-engagement off would never be cleared by anything. Reading a stale set costs a monster that
