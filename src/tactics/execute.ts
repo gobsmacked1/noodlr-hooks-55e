@@ -18,7 +18,7 @@ import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
 import { centerOf, tokenDistance } from "../core/positioning";
 import { gap3d } from "./altitude";
-import { duringAutomation } from "../rules/economy/enforce";
+import { clearNextUse, duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
 import { standUp } from "../rules/prone";
 import { declareReadied } from "../rules/ready";
@@ -116,8 +116,9 @@ async function withTarget<T>(tokenId: string | undefined, fn: () => Promise<T>):
 async function useAction(
   action: { item: any; activity?: any; name: string; attackMode?: string },
   target?: any,
-  asReaction = false,
+  opts: { asReaction?: boolean; skipEconomy?: boolean } = {},
 ): Promise<string | undefined> {
+  const asReaction = opts.asReaction === true;
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
   // `configure: false` on `use()` is only the USAGE dialog. AttackActivity then fires `rollAttack`
   // with an empty dialog config (and does not await it), which is the Attack Roll window that sat
@@ -169,8 +170,15 @@ async function useAction(
   // Asked before it is attempted, not only vetoed in the hook. A hook veto cancels the use without
   // throwing, so the loop below would see a clean return and report the action as taken — the turn
   // narration would then describe a swing that never happened, which is worse than the swing.
-  const refusal = unaffordable(action);
-  if (refusal) throw new Error(refusal);
+  //
+  // `skipEconomy` is a follow-through already paid for (Chomp → two Bites): the Bite still claims
+  // an Action, and off-turn that Action is checked against the legendary creature's last turn.
+  if (!opts.skipEconomy) {
+    const refusal = unaffordable(action);
+    if (refusal) throw new Error(refusal);
+  } else {
+    clearNextUse(action.activity);
+  }
 
   // Marked as automation throughout, so the action-economy ledger holds this creature to the rules
   // exactly rather than stopping to ask a question nobody is present to answer.
@@ -294,9 +302,9 @@ function unaffordable(action: { item: any; activity?: any; name: string }): stri
 export async function useActionAt(
   action: { item: any; activity?: any; name: string; attackMode?: string },
   target: any,
-  opts: { asReaction?: boolean } = {},
+  opts: { asReaction?: boolean; skipEconomy?: boolean } = {},
 ): Promise<string | undefined> {
-  return withTarget(tokenIdOf(target), () => useAction(action, target, opts.asReaction));
+  return withTarget(tokenIdOf(target), () => useAction(action, target, opts));
 }
 
 /** Plans whose whole point is that the creature ends up somewhere else. */

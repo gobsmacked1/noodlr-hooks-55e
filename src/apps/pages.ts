@@ -988,19 +988,37 @@ const PER_SIDE_RESOURCES: Section = {
           hint:
             "The one part of the action economy dnd5e genuinely tracks — the activation type declares a " +
             "resource pool and the system spends it. This module uses one option at the end of another " +
-            "creature's turn when we are playing the legendary creature. Incapacitated (Stun) blocks it.",
+            "creature's turn when we are playing the legendary creature. Incapacitated (Stun) blocks it. " +
+            "A utility that only names another item (Glare → Eye Rays) is followed through, not stared.",
           state: "system",
           today:
-            "This module, when we play the creature. One option per other turn; dnd5e spends the pool. Lair actions are not this.",
+            "This module, when we play the creature. One option per other turn. Pointer utilities resolve the named item. " +
+            "REFILL IS DND5E'S, NOT OURS, AND IT IS NOT RAW: the book and dnd5e's own flavour text refill at the start of its turn; " +
+            "NPCData#recoverCombatUses zeroes spent on that creature's turnEnd. Same spends if it cannot use them on its own turn. " +
+            "We never write the pool. A RAW start-of-turn override is the planned row below — do not ask for a hotfix, it is a known request.",
+        },
+        {
+          id: "legendaryActionRefill",
+          label: "Legendary action refill: RAW start-of-turn override",
+          hint:
+            "2024 MM: the monster regains all expended Legendary Action uses at the start of its own turn. " +
+            "dnd5e prints that sentence on the sheet and then refills at the END of its turn " +
+            "(recoverCombatUses on turnEnd, plus a full pool at encounter start). " +
+            "This module does not write the pool and will not add a second refill on turnStart — that would double-fill if dnd5e ever moves the hook. " +
+            "A RAW override would mean we take the refill away from the system. Not built. Expected request from tables that want the sheet to read 3/3 during its own turn.",
+          state: "planned",
+          today:
+            "dnd5e, incorrectly vs RAW. We follow the system. Override not offered.",
         },
         {
           id: "legendaryResistances",
           label: "Legendary resistances",
           hint:
             "The count is on the sheet and decrements when spent. A creature we play spends one on a " +
-            "fight-ending status (Stun and kin) or on damage worth the spend; the GM is still asked when they drive it.",
+            "fight-ending status (Stun and kin) or on damage worth the spend; the GM is still asked when they drive it. " +
+            "The pool is per day — it does not refill mid-combat or between encounters, only on a long rest.",
           state: "system",
-          today: "This module. Automated creatures spend; a GM-driven clock still declines.",
+          today: "This module. Automated creatures spend; a GM-driven clock still declines. Long rest only — we never refill in combat.",
         },
         {
           id: "lairActions",

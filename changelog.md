@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.7.40
+
+**Glare actually fires an Eye Ray.** A DDB Beholder's legendary "Glare" is
+prose that says to use Eye Rays; using the utility spent a legendary action
+and stared. The module now follows that pointer (and Chomp → two Bites):
+spend the utility so dnd5e decrements the pool, roll a real 1d10, then use
+the matching ray. A utility that points at nothing is not offered.
+
+**dnd5e's Legendary Action refill is not RAW, and we do not override it.**
+The book and dnd5e's own flavour text restore uses at the start of the
+monster's turn; the system zeroes `spent` at the end of that turn. Same
+number of rays in a round if it cannot spend on its own turn. A RAW
+start-of-turn override is listed under Combat → Not built yet — expected
+request, not a hotfix. Legendary resistances still refill only on a long
+rest.
 
 ## 0.7.39
 

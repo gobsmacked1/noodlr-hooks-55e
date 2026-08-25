@@ -37,6 +37,14 @@ dependency, and nothing here requires anything but Foundry and the D&D 5e system
 
 It also renders no visual or audio effects. Those are somebody else's craft.
 
+**Legendary Action refill is dnd5e's, and it is not RAW.** The 2024 Monster Manual
+(and the sentence dnd5e prints on the sheet) restores expended uses at the **start**
+of the monster's turn. The system actually zeroes the spent count at the **end** of
+that turn. This module never writes that pool, so we inherit the system's clock.
+There is no override yet — it is listed under Combat → Not built yet as
+"Legendary action refill: RAW start-of-turn override", because a second refill on
+top of dnd5e's would double-fill if they ever move the hook.
+
 ## Installation
 
 Paste this manifest URL into Foundry's **Add-on Modules → Install Module**:
@@ -83,6 +91,7 @@ api.testMove();           // really move it one square, reporting what core said
 api.surveyEconomy();      // what every combatant has left this turn
 api.surveyPerception();   // who can see whom, with distances, senses and each verdict
 api.surveyActions({ saveToFile: true });   // census every sheet in the world
+api.surveyLegendaryActions(); // pool, options, refill clock (RAW vs dnd5e)
 ```
 
 `api.surveyActions()` is the important one. Three shipped bugs were found by running it against a real

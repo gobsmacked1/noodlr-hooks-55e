@@ -4939,7 +4939,19 @@ A second `CONFIG.Token.objectClass` replacement would drop the Speed cap.
 - Pure halves: `src/core/pace.ts`, `src/core/traverse.ts`, `src/core/wall-height.ts`,
   `src/core/motion-fx.ts`.
 
-## Legendary actions (v0.7.39, 2026-08-25)
+## Legendary actions (v0.7.39, pointer follow-through v0.7.40, 2026-08-25)
+
+**DND5E REFILL IS NOT RAW. THIS WILL BE A RECURRING GM REQUEST. DO NOT HOTFIX IT.**
+
+2024 MM and dnd5e's own sheet flavour (`DND5E.LegendaryAction.Description`):
+regains all expended uses at the **start** of each of its turns.
+`NPCData#recoverCombatUses` (`npc.mjs:545-547`) zeroes `legact.spent` on
+`encounter` or **`turnEnd`** and ignores `turnStart`. The comment in that
+function says "end of the creature's turn". Same spends across a round if it
+cannot use a legendary action on its own turn. The visible disagreement is the
+counter **during** its turn. A RAW override means *taking the refill away from
+the system*, not adding `turnStart` on top (double-fill if they move the hook).
+Planned settings row `legendaryActionRefill`. We never write `legact`.
 
 `src/system/dnd5e-legact.ts` + `src/tactics/legendary-act.ts`. dnd5e already tracks
 `resources.legact`, spends it on `activity.use`, and refills it at the end of *that*
@@ -4962,10 +4974,31 @@ prevent.
 - **No walk.** Melee that cannot reach is not offered. Awareness is applied so a
   hidden monk is not rayed through a wall.
 - **Legendary utilities stay on the sheet reader** (`isLegendaryActivation` in
-  `actions.ts`) so Eye Rays as a picker is visible here, and stay **off** the
-  planner (`onTurn` is action/bonus only). Do not fold them into a planned turn.
-- **Lair is not this.** Initiative 20, still planned. Mythic shares `legact` and
-  is included.
+  `actions.ts`) so a picker is visible here, and stay **off** the planner
+  (`onTurn` is action/bonus only). Do not fold them into a planned turn.
+- **A utility that only names another item is not the effect.** DDB / 2024
+  sheets model Glare as "uses Eye Rays" and Chomp as "makes two Bite attacks".
+  `activity.use()` on the utility spends `legact` and posts flavour; it never
+  follows the pointer. `src/system/dnd5e-pointer.ts` reads enrichers and secret
+  prose (`[[/item Eye Rays]]`, `uses Eye Rays`, `makes two Bite attacks`).
+  Ignore `[[lookup …]]` — that is the source naming itself. Range comes off
+  the pointed activity (`range.value` 120 even when `override` is false), not
+  the utility (Self / infinite). A utility that points at nothing is not
+  offered and is never spent. Eye Rays: real Foundry `1d10`, then the
+  `"N: …"` save. Follow-throughs (`Bite`) skip the Action ledger via
+  `skipEconomy` + `clearNextUse` — they still claim an Action, and off-turn
+  that Action is the Beholder's last turn. Scoring picks Glare vs Chomp; the
+  1d10 is random.
+- **Two refill clocks, never swapped.** `legact` — dnd5e zeroes `spent` at
+  encounter start and at that creature's own `turnEnd` (`recoverCombatUses`).
+  Book text says start of its turns; for a spend that never happens on its
+  own turn those are equivalent. We never write the pool. `legres` — per day,
+  long rest only. `resistSave` increments `spent`. Do **not** zero resistances
+  on a turn or combat end. A long rest that refilled them mid-dungeon is the
+  system doing its job.
+- **Lair is not this.** Initiative 20, still planned. 2024's +1 max inside a
+  lair is already `resources.lair` / a higher `legact.max` on the sheet.
+  Mythic shares `legact` and is included.
 - Diagnostics: `noodlrHooks.surveyLegendaryActions()`. Own RNG stream `"legendary"`.
 
 ## Open items carried over from noodlr

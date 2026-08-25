@@ -21,8 +21,8 @@ function action(
 ): CreatureAction {
   const type = over.activation ?? "legendary";
   return {
-    item: {},
-    activity: { activation: { type, value: over.cost ?? 1 } },
+    item: over.item ?? {},
+    activity: over.activity ?? { activation: { type, value: over.cost ?? 1 } },
     name: over.name ?? "Eye Rays",
     kind: over.kind ?? "attack",
     economy: "legendary",
@@ -32,6 +32,72 @@ function action(
     available: over.available ?? true,
     depleting: false,
   };
+}
+
+function glareAndRays(): CreatureAction[] {
+  const glareItem = {
+    id: "glare",
+    name: "Glare",
+    system: { description: { value: "<section class=\"secret\">The beholder uses Eye Rays.</section>" } },
+  };
+  const raysItem = { id: "rays", name: "Eye Rays" };
+  const glare = action({
+    name: "Glare",
+    kind: "utility",
+    range: Number.POSITIVE_INFINITY,
+    item: glareItem,
+    activity: { activation: { type: "legendary", value: 1 }, range: { units: "self", override: false } },
+  });
+  const rays: CreatureAction[] = [];
+  for (let n = 1; n <= 10; n++) {
+    rays.push(
+      action({
+        name: `${n}: Ray ${n}`,
+        kind: "control",
+        activation: "special",
+        range: 5,
+        item: raysItem,
+        activity: {
+          name: `${n}: Ray ${n}`,
+          activation: { type: "special" },
+          range: { value: 120, units: "ft" },
+        },
+      }),
+    );
+  }
+  return [glare, ...rays];
+}
+
+function chompAndBite(): CreatureAction[] {
+  const chompItem = {
+    id: "chomp",
+    name: "Chomp",
+    system: { description: { value: "The beholder makes two Bite attacks." } },
+  };
+  const biteItem = { id: "bite", name: "Bite" };
+  return [
+    action({
+      name: "Chomp",
+      kind: "utility",
+      range: Number.POSITIVE_INFINITY,
+      item: chompItem,
+      activity: { activation: { type: "legendary", value: 1 }, range: { units: "self" } },
+    }),
+    action({
+      name: "Bite",
+      kind: "attack",
+      melee: true,
+      ranged: false,
+      range: 5,
+      activation: "action",
+      item: biteItem,
+      activity: {
+        name: "Bite",
+        activation: { type: "action" },
+        range: { reach: 5, units: "ft" },
+      },
+    }),
+  ];
 }
 
 const monk = {
@@ -97,11 +163,25 @@ test("lair activations never become options even when they share the legendary e
   assert.equal(options.length, 0);
 });
 
-test("a legendary utility in range is offered", () => {
-  const rays = action({ name: "Eye Rays", kind: "utility", range: 120 });
-  const options = legendaryOptions([rays], 3, { elevation: 0, hpFraction: 1 }, [monk]);
-  assert.equal(options.length, 1);
-  assert.equal(options[0]?.target === "self" ? null : options[0]?.target?.name, "Monkey");
+test("a bare legendary utility with no pointer is not offered", () => {
+  const stare = action({ name: "Glare", kind: "utility", range: 120 });
+  assert.equal(legendaryOptions([stare], 3, { elevation: 0, hpFraction: 1 }, [monk]).length, 0);
+});
+
+test("Glare is offered at the Eye Rays range, not at Self", () => {
+  const kit = glareAndRays();
+  const near = legendaryOptions(kit, 3, { elevation: 0, hpFraction: 1 }, [monk]);
+  assert.equal(near.length, 1);
+  assert.equal(near[0]?.action.name, "Glare");
+  const far = legendaryOptions(kit, 3, { elevation: 0, hpFraction: 1 }, [{ ...monk, distance: 200 }]);
+  assert.equal(far.length, 0);
+});
+
+test("Chomp at 80 ft is not offered — Bite is 5 ft and a legendary action does not walk", () => {
+  const options = legendaryOptions(chompAndBite(), 3, { elevation: 0, hpFraction: 1 }, [
+    { ...monk, distance: 80 },
+  ]);
+  assert.equal(options.length, 0);
 });
 
 test("heal is only offered when bloodied", () => {

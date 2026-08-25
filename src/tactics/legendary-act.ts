@@ -12,6 +12,15 @@
 // Stun / Incapacitated uses `isUnableToAct`, the same walk that skips the turn and (since v0.7.38)
 // the Opportunity Attack. A stunned Beholder must not ray the Monk who just walked away.
 //
+// Pointer utilities (Glare → Eye Rays, Chomp → Bite ×2) are not the effect. `activity.use()` on
+// the utility spends `legact` and posts flavour; the payload is a different item. A utility that
+// points at nothing is not offered and is never spent. Range comes off the pointed activity, not
+// Self.
+//
+// Two refill clocks, never swapped: `legact` is encounter + that creature's own turnEnd (dnd5e
+// writes it; we never do). `legres` is long rest only — we increment `spent` via `resistSave`
+// and never zero it on a turn or combat end.
+//
 // Lair actions are not this. Mythic shares the legendary pool and is included.
 
 import { log, MODULE_ID } from "../constants";
@@ -24,9 +33,17 @@ import {
   legendaryMax,
   legendaryRemaining,
 } from "../system/dnd5e-legact";
+import { legendaryResistances } from "../system/dnd5e-legendary";
+import {
+  matchPointerItem,
+  numberedIndex,
+  parseItemPointers,
+  pickNumbered,
+  pointerRangeOf,
+} from "../system/dnd5e-pointer";
 import { speakerFor } from "../util/speaker";
 import { isPrimaryGM } from "../util/gm";
-import { prewarmCastSpells, readActions, type CreatureAction } from "./actions";
+import { prewarmCastSpells, readActions, type ActionKind, type CreatureAction } from "./actions";
 import { applyAwareness } from "./awareness";
 import { useActionAt } from "./execute";
 import { shouldAutomate } from "./registry";
@@ -82,10 +99,159 @@ export function isLegendaryAction(action: { activity?: { activation?: { type?: u
   return isLegendaryActivation(action.activity?.activation?.type);
 }
 
-function inRange(action: Pick<CreatureAction, "range">, self: LegendarySelf, foe: LegendaryFoe): boolean {
+function inRange(range: number, self: LegendarySelf, foe: LegendaryFoe): boolean {
   const rise = foe.elevation - self.elevation;
   const separation = Math.hypot(foe.distance, rise);
-  return separation <= action.range;
+  return separation <= range;
+}
+
+function itemIdOf(action: Pick<CreatureAction, "item">): string {
+  return String(action.item?.id ?? "");
+}
+
+function proseOf(action: CreatureAction): string {
+  return `${String(action.item?.system?.description?.value ?? "")} ${String(action.activity?.description?.value ?? "")}`;
+}
+
+function activityLabel(action: CreatureAction): string {
+  return String(action.activity?.name ?? action.name ?? "");
+}
+
+function kitItems(kit: CreatureAction[], extra?: CreatureAction): { id?: unknown; name?: unknown; system?: { identifier?: unknown } }[] {
+  const items: { id?: unknown; name?: unknown; system?: { identifier?: unknown } }[] = [];
+  const seen = new Set<string>();
+  for (const row of extra ? [extra, ...kit] : kit) {
+    const id = itemIdOf(row);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    items.push(row.item);
+  }
+  return items;
+}
+
+export interface PointerPreview {
+  unresolved: boolean;
+  range: number;
+  kind: ActionKind;
+  token: string;
+  times: number;
+  numbered: boolean;
+  die: number;
+}
+
+/**
+ * A legendary utility that only names another item, or null if this option is the real thing.
+ *
+ * `unresolved` means the prose pointed and nothing on the sheet answered — do not spend a charge
+ * on a stare. Range comes off the pointed activity's own `range.value` (Eye Rays are 120 even
+ * when `override` is false), never off the utility (Self).
+ */
+export function previewPointer(action: CreatureAction, kit: CreatureAction[]): PointerPreview | null {
+  const specs = parseItemPointers(proseOf(action));
+  if (!specs.length) return null;
+  const except = itemIdOf(action);
+  const items = kitItems(kit, action);
+  for (const spec of specs) {
+    const item = matchPointerItem(spec.token, items, except);
+    if (!item) continue;
+    const kids = kit.filter((row) => itemIdOf(row) === String(item.id) && row.kind !== "utility");
+    if (!kids.length) continue;
+    const numbered = kids
+      .map((row) => numberedIndex(activityLabel(row)))
+      .filter((n): n is number => n !== null);
+    const range = Math.max(...kids.map((row) => pointerRangeOf(row.activity, row.item)));
+    const kind: ActionKind = kids.some((row) => row.kind === "control")
+      ? "control"
+      : kids.some((row) => row.kind === "attack")
+        ? "attack"
+        : kids[0]!.kind;
+    return {
+      unresolved: false,
+      range,
+      kind,
+      token: spec.token,
+      times: spec.times,
+      numbered: numbered.length > 0,
+      die: numbered.length ? Math.max(...numbered) : 0,
+    };
+  }
+  return {
+    unresolved: true,
+    range: action.range,
+    kind: action.kind,
+    token: specs[0]?.token ?? "",
+    times: 1,
+    numbered: false,
+    die: 0,
+  };
+}
+
+export interface RealizedPointer {
+  payloads: CreatureAction[];
+  label: string;
+}
+
+/**
+ * Turn a pointer into the activities that actually resolve. `rolls` is one value per use
+ * (a real 1d10 for Eye Rays). Empty payloads means refuse — do not use the utility alone.
+ */
+export function realizePointer(
+  action: CreatureAction,
+  kit: CreatureAction[],
+  rolls: number[],
+  used: Set<number>,
+): RealizedPointer | null {
+  const preview = previewPointer(action, kit);
+  if (!preview) return null;
+  if (preview.unresolved) return { payloads: [], label: action.name };
+
+  const except = itemIdOf(action);
+  const items = kitItems(kit, action);
+  const specs = parseItemPointers(proseOf(action));
+  const spec = specs.find((s) => matchPointerItem(s.token, items, except));
+  const item = spec ? matchPointerItem(spec.token, items, except) : null;
+  if (!item) return { payloads: [], label: action.name };
+
+  const kids = kit.filter((row) => itemIdOf(row) === String(item.id) && row.kind !== "utility");
+  const numbered = kids
+    .map((row) => {
+      const n = numberedIndex(activityLabel(row));
+      return n === null ? null : { n, value: row };
+    })
+    .filter((row): row is { n: number; value: CreatureAction } => row !== null);
+
+  const times = spec?.times ?? 1;
+  let payloads: CreatureAction[] = [];
+  if (numbered.length) {
+    const needed = rolls.length ? rolls : Array.from({ length: times }, () => 1);
+    payloads = pickNumbered(numbered, needed, used);
+  } else if (kids[0]) {
+    payloads = Array.from({ length: times }, () => kids[0]!);
+  }
+
+  const names = payloads.map((row) => {
+    const raw = activityLabel(row);
+    return raw.replace(/^\d+\s*:\s*/, "") || row.name;
+  });
+  const source = String(action.item?.name ?? action.name);
+  const label = names.length ? `${source} → ${names.join(", ")}` : action.name;
+  return { payloads, label };
+}
+
+const usedRays = new Map<string, Set<number>>();
+
+function usedRaysFor(combat: any, combatant: any): Set<number> {
+  const key = `${String(combat?.id ?? "")}:${Number(combat?.round ?? 0)}:${Number(combat?.turn ?? 0)}:${String(combatant?.id ?? "")}`;
+  let set = usedRays.get(key);
+  if (!set) {
+    if (usedRays.size > 32) {
+      const first = usedRays.keys().next().value;
+      if (first) usedRays.delete(first);
+    }
+    set = new Set();
+    usedRays.set(key, set);
+  }
+  return set;
 }
 
 /**
@@ -107,7 +273,16 @@ export function legendaryOptions(
     const cost = legendaryCost(action.activity);
     if (cost > remaining) continue;
 
-    if (action.kind === "heal") {
+    let range = action.range;
+    let kind = action.kind;
+    if (kind === "utility") {
+      const preview = previewPointer(action, actions);
+      if (!preview || preview.unresolved) continue;
+      range = preview.range;
+      kind = preview.kind;
+    }
+
+    if (kind === "heal") {
       if (self.hpFraction === null || self.hpFraction >= 0.5) continue;
       out.push({
         action,
@@ -120,14 +295,14 @@ export function legendaryOptions(
     }
 
     for (const enemy of enemies) {
-      if (!inRange(action, self, enemy)) continue;
+      if (!inRange(range, self, enemy)) continue;
       let score = 1;
       score += 0.6 * (1 - Math.min(1, enemy.distance / 60));
       if (enemy.hpFraction !== null && enemy.hpFraction < 1) {
         score += 0.4 * (1 - enemy.hpFraction);
       }
       const reasons = [`${Math.round(enemy.distance)} away`];
-      if (action.kind === "control") reasons.push("control");
+      if (kind === "control") reasons.push("control");
       out.push({ action, cost, target: enemy, score, reason: reasons.join("; ") });
     }
   }
@@ -214,14 +389,37 @@ async function spendOne(combatant: any): Promise<void> {
     return;
   }
 
+  const preview = previewPointer(chosen.action, kit);
+  if (preview?.unresolved) {
+    log(`legendary action: ${name} ${chosen.action.name} points at nothing resolvable — not spending`);
+    return;
+  }
+
+  let realized: RealizedPointer | null = null;
+  if (preview) {
+    const used = usedRaysFor(game.combat, combatant);
+    let rolls: number[] = [];
+    if (preview.numbered) {
+      const rolled = await rollRayDice(preview.die, preview.times, actor, name);
+      if (!rolled) return;
+      rolls = rolled;
+    }
+    realized = realizePointer(chosen.action, kit, rolls, used);
+    if (!realized?.payloads.length) {
+      log(`legendary action: ${name} ${chosen.action.name} resolved to no payload — not spending`);
+      return;
+    }
+  }
+
   const target = resolveTarget(chosen, combatant, board.self);
   const whom =
     chosen.target === "self"
       ? name
       : chosen.target?.name ?? "?";
-  const line = `${name} uses a legendary action: ${chosen.action.name} on ${whom}.`;
+  const shown = realized?.label ?? chosen.action.name;
+  const line = `${name} uses a legendary action: ${shown} on ${whom}.`;
   log(
-    `legendary action: ${name} uses ${chosen.action.name} on ${whom} (cost ${chosen.cost}, ${remaining} left) — ${chosen.reason}`,
+    `legendary action: ${name} uses ${shown} on ${whom} (cost ${chosen.cost}, ${remaining} left) — ${chosen.reason}`,
   );
 
   const ChatMessage = (globalThis as any).ChatMessage;
@@ -236,8 +434,13 @@ async function spendOne(combatant: any): Promise<void> {
 
   try {
     await useActionAt(chosen.action, target, { asReaction: false });
+    if (realized) {
+      for (const payload of realized.payloads) {
+        await useActionAt(payload, target, { asReaction: false, skipEconomy: true });
+      }
+    }
   } catch (err) {
-    log(`legendary action: ${name} could not use ${chosen.action.name}:`, err);
+    log(`legendary action: ${name} could not use ${shown}:`, err);
     try {
       await ChatMessage.create({
         content: `<p><em>${foundry.utils.escapeHTML(name)}: Noodlr could not carry that out (${foundry.utils.escapeHTML(String(err))}). Resolve it manually.</em></p>`,
@@ -248,6 +451,48 @@ async function spendOne(combatant: any): Promise<void> {
       /* announcement is optional */
     }
   }
+}
+
+async function rollRayDice(sides: number, count: number, actor: any, name: string): Promise<number[] | null> {
+  const Roll: any = (globalThis as any).Roll;
+  if (typeof Roll !== "function") {
+    log(`legendary action: ${name} has no Roll — cannot pick a numbered activity`);
+    return null;
+  }
+  const out: number[] = [];
+  for (let i = 0; i < Math.max(1, count); i++) {
+    try {
+      const roll = new Roll(`1d${sides}`, actor?.getRollData?.() ?? {});
+      await roll.evaluate();
+      const total = Number(roll.total);
+      if (!Number.isFinite(total) || total < 1) {
+        log(`legendary action: ${name} 1d${sides} was unreadable`);
+        return null;
+      }
+      try {
+        await roll.toMessage({
+          flavor: `${name}: legendary ${sides === 10 ? "Eye Rays" : "option"}`,
+          speaker: speakerFor(actor, name),
+        });
+      } catch {
+        /* the number is what matters */
+      }
+      out.push(Math.floor(total));
+    } catch (err) {
+      log(`legendary action: ${name} could not roll 1d${sides}:`, err);
+      return null;
+    }
+  }
+  return out;
+}
+
+function optionLabel(action: CreatureAction, kit: CreatureAction[]): string {
+  const cost = `cost ${legendaryCost(action.activity)}`;
+  const preview = previewPointer(action, kit);
+  if (!preview || preview.unresolved) return `${action.name} (${cost})`;
+  if (preview.numbered) return `${action.name} → ${preview.token} (1d${preview.die}, ${cost})`;
+  if (preview.times > 1) return `${action.name} → ${preview.token} ×${preview.times} (${cost})`;
+  return `${action.name} → ${preview.token} (${cost})`;
 }
 
 /**
@@ -286,19 +531,25 @@ export function surveyLegendaryActions(): unknown {
     const actor = combatant?.actor;
     const remaining = legendaryRemaining(actor);
     const max = legendaryMax(actor);
-    const kit = actor ? readActions(actor).filter(isLegendaryAction) : [];
-    const names = kit.map((a) => `${a.name} (cost ${legendaryCost(a.activity)})`);
+    const kit = actor ? readActions(actor) : [];
+    const legendary = kit.filter(isLegendaryAction);
+    const names = legendary.map((a) => optionLabel(a, kit));
+    const resist = legendaryResistances(actor);
     const row = {
       name: String(combatant?.name ?? "?"),
       remaining,
       max,
+      resistances: resist,
       automated: shouldAutomate(combatant),
       unable: skipReason(combatant),
       options: names,
     };
     rows.push(row);
+    const resistLine = resist ? `  resist ${resist.value}/${resist.max} (long rest only)` : "";
     lines.push(
-      `  ${row.name}  ${remaining ?? "?"}/${max ?? "?"}  ${row.automated ? "we play" : "hand"}` +
+      `  ${row.name}  actions ${remaining ?? "?"}/${max ?? "?"} (refills own turn end)` +
+        `${resistLine}` +
+        `  ${row.automated ? "we play" : "hand"}` +
         `${row.unable ? `  ${row.unable}` : ""}` +
         `${names.length ? `  — ${names.join(" | ")}` : "  — no legendary activities"}`,
     );
@@ -306,6 +557,9 @@ export function surveyLegendaryActions(): unknown {
   const ended = lastSlot?.combatId === String(combat.id ?? "") ? lastSlot.combatantId : null;
   const endedName = ended ? String(combatantById(combat, ended)?.name ?? ended) : "nobody yet";
   lines.push(`last slot was ${endedName}; next advance spends for everyone else we play`);
+  lines.push(
+    "REFILL: RAW and dnd5e's printed sentence = start of its turn; dnd5e code = end of its turn (turnEnd). We do not write the pool. A RAW override is not offered.",
+  );
   console.log(`[${MODULE_ID}] ${lines.join("\n")}`);
   return { ended: endedName, rows };
 }
