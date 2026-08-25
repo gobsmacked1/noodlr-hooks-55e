@@ -18,6 +18,7 @@ import { runTurnFor } from "./npc-turn";
 import { shouldAutomate } from "./registry";
 import { hasResolved } from "./encounter";
 import { isFleeingCombatant } from "./flee";
+import { fireLegendaryActions, noteLegendaryAdvance, resetLegendaryAdvance } from "./legendary-act";
 import { isUnableToAct, skipReason } from "./skip";
 
 /**
@@ -156,18 +157,27 @@ function takeTurn(combat: any): void {
   void runTurnFor(combatant).then(() => endAutomatedTurn(combat, id, startedAt));
 }
 
+async function onAdvance(combat: any): Promise<void> {
+  const ended = noteLegendaryAdvance(combat);
+  // Eye Rays at the end of the turn that just finished, before the next creature acts.
+  // Awaited so a Beholder that is also next in order rays first, then takes its turn.
+  await fireLegendaryActions(combat, ended);
+  takeTurn(combat);
+}
+
 export function registerAutomationTurnHook(): void {
   Hooks.on("deleteCombat", () => {
     consecutive = 0;
     playing = null;
     waiting = false;
+    resetLegendaryAdvance();
   });
 
   Hooks.on("updateCombat", (combat: any, changed: any) => {
     // Only when the turn actually moved: unrelated tracker edits (initiative fixes, a token added
     // mid-fight) must not re-run the current creature.
     if (!("turn" in (changed ?? {})) && !("round" in (changed ?? {}))) return;
-    takeTurn(combat);
+    void onAdvance(combat);
   });
 
   // The other way in: a fight that was held waiting for initiative becomes playable the moment the last

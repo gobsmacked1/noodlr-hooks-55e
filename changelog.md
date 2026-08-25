@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.7.39
+
+**Legendary creatures we play use one legendary action at the end of another
+creature's turn.** dnd5e already tracks the pool and spends it on use; nobody
+pressed the button at the right moment. After a player (or anyone else) ends
+their turn, an automated Beholder fires one Eye Ray it can reach — not all
+three, and not at the end of its own turn (that is when the pool refills).
+Stun / Incapacitated uses the same walk that skips the turn and the
+Opportunity Attack. Melee options that cannot reach are skipped; a legendary
+action does not walk. Lair actions are still unbuilt. A creature you are
+driving by hand is untouched. `noodlrHooks.surveyLegendaryActions()`.
+
 ## 0.7.38
 
 **A Stunned creature no longer takes Opportunity Attacks.** The planner already

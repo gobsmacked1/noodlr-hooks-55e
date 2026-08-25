@@ -61,6 +61,7 @@ import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
 import { registerTemplateTargets } from "./rules/template-targets";
 import { registerTemplateLifetime, surveyTemplates } from "./rules/template-lifetime";
 import { surveyLegendary } from "./rules/legendary";
+import { surveyLegendaryActions } from "./tactics/legendary-act";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
 import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
@@ -163,6 +164,7 @@ export interface NoodlrHooksApi {
   surveySneak(): unknown;
   surveyReady(): unknown;
   surveyLegendary(): unknown;
+  surveyLegendaryActions(): unknown;
   surveyConditions(): unknown;
   surveyDying(): unknown;
   surveyConcentration(): unknown;
@@ -300,6 +302,8 @@ const api: NoodlrHooksApi = {
   surveyReady: () => surveyReady(),
   /** What the selected creature has left to resist with, and how much damage would be worth asking about. */
   surveyLegendary: () => surveyLegendary(),
+  /** Legendary-action pool and which options we would spend at the end of another turn. */
+  surveyLegendaryActions: () => surveyLegendaryActions(),
   /** What condition combat math would apply for the controlled token against its current target. */
   surveyConditions: () => surveyConditions(),
   /** Who is dying, who is dead, and what the last drop to zero did. */

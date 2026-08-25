@@ -1182,11 +1182,12 @@ Reservations and known gaps:
     a dwarf is worse than silence. Gender markers are deliberately few: `hag-seed` is neutral (it is
     the *spawn* of a hag, aimed at Caliban) and `fellows` is a crowd, both verified against the file.
   - Speech follows the table's existing TTS switch; banter never enables voice on its own.
-- **Reactions and legendary actions are readable but not yet triggered** — which also means the
-  "or during a reaction" half of the banter trigger is unbuilt; turn-start only today. Recharge state is honored
-  (a spent breath weapon is not offered). Reactions, counterspell, and legendary actions all fire on
-  *other* creatures' turns, which needs an off-turn hook and a cost model the sheet does not state
-  machine-readably. Tier 1 grants the access; the trigger layer is still to build.
+- **Reactions fire off-turn; legendary actions do too (v0.7.39).** `tactics/legendary-act.ts`
+  spends **one** option at the end of another creature's turn when `shouldAutomate` is true.
+  dnd5e already tracks and spends `resources.legact` and refills it at the end of *that*
+  creature's own turn — we never write the pool. Incapacitated (Stun) uses `isUnableToAct`.
+  Lair actions are still unbuilt. The "or during a reaction" half of the banter trigger is
+  still turn-start only. Recharge state is honored (a spent breath weapon is not offered).
 - **Alignment gates mercy**, read as free text: lawful-anything, or anything not evil. An unreadable
   alignment is treated as *not* merciful — inventing a conscience the GM never wrote is the worse error.
 - Revert map: the pivot is self-contained in `src/combat/auto/` plus the rewritten `npc-turn.ts`.
@@ -3804,8 +3805,8 @@ harmless while a human was also applying the damage by hand, because the same pa
  `worthAsking` already prices — a Beholder that "takes" Stunning Strike because a six-second dialog
  timed out is the creature playing badly, not the GM being protected (Monk vs Beholder, 2026-08-25).
  A fight-ending status outranks a small damage number, because the 17:27 log priced a save as
- "14 damage" and declined. Legendary *actions* (Eye Rays at the end of someone else's turn) are a
- different tree and are not this file.
+ "14 damage" and declined. Legendary *actions* (Eye Rays at the end of someone else's turn) are
+ `tactics/legendary-act.ts` — one option per other turn, same `isUnableToAct` gate.
 - **The window is the same shape as the shield window and for the same reason**: `Activation.asking` is
  registered before anybody is asked and `settle` awaits it, so an answer cannot arrive after the damage has
  landed. `offered` is set *before* the await, which is what makes a re-entrant `settle` raise one dialog
@@ -4937,6 +4938,35 @@ A second `CONFIG.Token.objectClass` replacement would drop the Speed cap.
   one-square path decision (`ignore-all` / `cut` / `core`).
 - Pure halves: `src/core/pace.ts`, `src/core/traverse.ts`, `src/core/wall-height.ts`,
   `src/core/motion-fx.ts`.
+
+## Legendary actions (v0.7.39, 2026-08-25)
+
+`src/system/dnd5e-legact.ts` + `src/tactics/legendary-act.ts`. dnd5e already tracks
+`resources.legact`, spends it on `activity.use`, and refills it at the end of *that*
+creature's own turn (`NPCData#recoverCombatUses`). Nobody pressed the button at the
+end of someone else's turn. The MM sentence is "only one legendary action option at
+a time" — dumping the pool on the first PC turn end is the failure this exists to
+prevent.
+
+- **When:** `updateCombat` turn/round change, after `noteLegendaryAdvance`. The first
+  slot of a combat is not "the end of another creature's turn" (`ended === null`).
+  The creature who just ended is skipped — that is when the pool refills, not when
+  it spends. Awaited **before** `takeTurn` so a Beholder that is also next rays,
+  then takes its full turn.
+- **Who:** `shouldAutomate` + primary GM. No new setting. A creature you drive by
+  hand is untouched.
+- **How many:** one option per other turn. Cost is `activation.value` or **1** —
+  unset is never free. We never write the pool.
+- **Stun:** `isUnableToAct` / `isIncapacitated`, same walk as skip and OA. A
+  stunned Beholder must not Eye Ray.
+- **No walk.** Melee that cannot reach is not offered. Awareness is applied so a
+  hidden monk is not rayed through a wall.
+- **Legendary utilities stay on the sheet reader** (`isLegendaryActivation` in
+  `actions.ts`) so Eye Rays as a picker is visible here, and stay **off** the
+  planner (`onTurn` is action/bonus only). Do not fold them into a planned turn.
+- **Lair is not this.** Initiative 20, still planned. Mythic shares `legact` and
+  is included.
+- Diagnostics: `noodlrHooks.surveyLegendaryActions()`. Own RNG stream `"legendary"`.
 
 ## Open items carried over from noodlr
 

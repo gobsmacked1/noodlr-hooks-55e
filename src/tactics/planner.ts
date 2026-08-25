@@ -129,8 +129,8 @@ type Usable = CreatureAction;
  * Can this be spent on the creature's own turn?
  *
  * Reactions and legendary actions are off-turn resources: a creature that used its Parry as its turn
- * has thrown the turn away. Both are real behaviours the creature should get — just not from here, and
- * the off-turn layer that will spend them does not exist yet (see AGENTS.md gaps).
+ * has thrown the turn away. Both are spent elsewhere — reactions from `rules/reactions.ts`, legendary
+ * actions from `tactics/legendary-act.ts` at the end of another creature's turn.
  */
 // A creature's turn is its action and its bonus action. "free" is deliberately excluded: the system
 // marks those activations passive, and the surveyed world has 106 of them — grapple-escape checks and

@@ -987,17 +987,20 @@ const PER_SIDE_RESOURCES: Section = {
           label: "Legendary actions",
           hint:
             "The one part of the action economy dnd5e genuinely tracks — the activation type declares a " +
-            "resource pool and the system spends it. What is missing is prompting between turns.",
+            "resource pool and the system spends it. This module uses one option at the end of another " +
+            "creature's turn when we are playing the legendary creature. Incapacitated (Stun) blocks it.",
           state: "system",
-          today: "dnd5e tracks the pool; nothing offers the actions at the right moment.",
+          today:
+            "This module, when we play the creature. One option per other turn; dnd5e spends the pool. Lair actions are not this.",
         },
         {
           id: "legendaryResistances",
           label: "Legendary resistances",
           hint:
-            "The count is on the sheet and decrements when spent. Deciding to spend one is a judgement " +
-            "and stays the GM's.",
+            "The count is on the sheet and decrements when spent. A creature we play spends one on a " +
+            "fight-ending status (Stun and kin) or on damage worth the spend; the GM is still asked when they drive it.",
           state: "system",
+          today: "This module. Automated creatures spend; a GM-driven clock still declines.",
         },
         {
           id: "lairActions",

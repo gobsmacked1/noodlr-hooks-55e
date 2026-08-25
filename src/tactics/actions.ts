@@ -33,6 +33,7 @@
 
 import { log } from "../constants";
 import { isActionDeclaration } from "../system/dnd5e-declarations";
+import { isLegendaryActivation } from "../system/dnd5e-legact";
 import { isDamageRider } from "../system/dnd5e-riders";
 import { pick, pickNumber, pickString, systemPaths, type SystemPaths } from "../system/profiles";
 
@@ -48,7 +49,8 @@ export type ActionKind = "attack" | "control" | "heal" | "utility";
  *
  * - `action` / `bonus` — the creature's own turn
  * - `free` — costs nothing worth modelling ("special" activations, passive-but-usable things)
- * - `reaction` / `legendary` — real, but OFF-turn; the layer that spends them does not exist yet
+ * - `reaction` / `legendary` — real, but OFF-turn; reactions fire from `rules/reactions.ts`,
+ *   legendary actions from `tactics/legendary-act.ts`
  * - `trigger` — fires on an event (turn start/end, entering an encounter), never chosen
  */
 export type Economy = "action" | "bonus" | "free" | "reaction" | "legendary" | "trigger";
@@ -526,19 +528,24 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
     // spell for the SHAPE (attack or control, and how far), but keep the cast activity as the thing to
     // invoke, because that is where the feat's limited uses are enforced.
     const spell = castSpellOf(activity);
-    const shapeSource = spell
+    const activationType = activity?.activation?.type ?? pick(item, P.itemActivation);
+    const economy = economyOf(activationType);
+    // A ten-minute ritual is not something to do while being bitten; a trigger is not a choice.
+    if (economy === null || economy === "trigger") continue;
+
+    const spellShape = spell
       ? ((spell.system.activities?.contents ?? []) as any[]).find(
           (a) => kindOfActivity(a) !== "utility",
         )
-      : activity;
+      : null;
+    // A legendary utility is a real off-turn button (Eye Rays as a picker, Wing Attack flavour).
+    // Dropping it here is how those never reached the layer that spends them. Lair stays out —
+    // that trigger is initiative 20, not the end of another creature's turn.
+    const shapeSource = spellShape ?? (isLegendaryActivation(activationType) ? activity : spell ? null : activity);
     if (!shapeSource) continue;
 
     const kind = kindOfActivity(shapeSource);
-    if (kind === "utility") continue;
-
-    const economy = economyOf(activity?.activation?.type ?? pick(item, P.itemActivation));
-    // A ten-minute ritual is not something to do while being bitten; a trigger is not a choice.
-    if (economy === null || economy === "trigger") continue;
+    if (kind === "utility" && !isLegendaryActivation(activationType)) continue;
 
     // An empty attack type is not "unknown" — the system resolves it to melee/weapon during data
     // preparation, and its weapon-type map deliberately omits natural weapons so that every claw and
@@ -561,9 +568,12 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
       : innateRanged
         ? { range: innateRanged, attackMode: "ranged" as const, label: "Ranged" }
         : null;
-    const range = declaredRanged
-      ? (stated ?? rangeFrom(item?.system?.range, false) ?? 30)
-      : (stated ?? meleeReachOf(item));
+    const range =
+      isLegendaryActivation(activationType) && kind === "utility" && !declaredRanged
+        ? (stated ?? rangeFrom(item?.system?.range, false) ?? Number.POSITIVE_INFINITY)
+        : declaredRanged
+          ? (stated ?? rangeFrom(item?.system?.range, false) ?? 30)
+          : (stated ?? meleeReachOf(item));
 
     // Both names when they differ. "attacks with Midi Attack" told us nothing about which item it came
     // from — and that name is midi's localized TYPE TITLE, not a real activity name.
