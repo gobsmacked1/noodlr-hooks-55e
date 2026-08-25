@@ -39,9 +39,10 @@ import { isAutoSavesEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { canResist } from "../system/dnd5e-legendary";
+import { shouldAutomate } from "../tactics/registry";
 import { applyRolledDamage, type DamageEntry } from "./damage";
 import { savesSkip } from "./counterspell";
-import { considerResistance } from "./legendary";
+import { considerResistance, statusesOnFailedSave } from "./legendary";
 import { considerBarbs } from "./barbs";
 import {
   activityOf,
@@ -604,15 +605,31 @@ async function offerResistances(act: Activation): Promise<void> {
     }
 
     state.offered = true;
+    const item = itemOf(act.usage);
+    const activity = activityOf(act.usage, item);
     const resisted = await considerResistance({
       actor: state.doc.actor,
       message: state.saveMessage,
       name: state.name,
       spell: act.source,
       avoided,
+      statuses: statusesOnFailedSave(item, activity),
+      automated: wePlayToken(state.doc),
     });
     if (resisted) state.success = true;
   }
+}
+
+/** Is this module playing the token's combatant in the live fight? */
+function wePlayToken(doc: any): boolean {
+  const combat = (game as any).combat;
+  if (!combat?.started) return false;
+  const tokenId = String(doc?.id ?? "");
+  if (!tokenId) return false;
+  const combatant = combat.combatants?.find(
+    (c: any) => String(c.tokenId ?? c.token?.id ?? "") === tokenId,
+  );
+  return shouldAutomate(combatant);
 }
 
 /**

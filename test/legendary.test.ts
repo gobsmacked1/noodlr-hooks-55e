@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import { readSave } from "../src/rules/cards";
-import { worthAsking } from "../src/rules/legendary";
+import { decideResistance, statusesOnFailedSave, worthAsking } from "../src/rules/legendary";
 import { canResist, legendaryResistances } from "../src/system/dnd5e-legendary";
 
 // Three things are pinned here, and each of them is a way this feature can fail silently rather than loudly:
@@ -89,6 +89,87 @@ test("a save that changes nothing about the damage is not worth asking about at 
 
 test("an unreadable sheet is asked about, because the cost of being wrong is one prompt", () => {
   assert.equal(worthAsking({}, 5), true);
+});
+
+/* -------------------------------------------- */
+/*  Who decides when we play the creature        */
+/* -------------------------------------------- */
+
+test("an automated Beholder spends on Stunning Strike instead of asking", () => {
+  assert.equal(
+    decideResistance({
+      actor: creature(180),
+      avoided: null,
+      statuses: ["stunned"],
+      automated: true,
+    }),
+    "spend",
+  );
+});
+
+test("a GM-driven legendary is still asked, and the clock still defaults to decline", () => {
+  assert.equal(
+    decideResistance({
+      actor: creature(180),
+      avoided: null,
+      statuses: ["stunned"],
+      automated: false,
+    }),
+    "ask",
+  );
+});
+
+test("a fight-ending status outranks a small damage number", () => {
+  // The 17:27 log priced a failure as "14 damage" and declined. Stun on the same save must spend.
+  assert.equal(
+    decideResistance({
+      actor: creature(180),
+      avoided: 14,
+      statuses: ["stunned"],
+      automated: true,
+    }),
+    "spend",
+  );
+});
+
+test("14 damage with no status is still declined — a Firebolt is not a Stun", () => {
+  assert.equal(
+    decideResistance({
+      actor: creature(180),
+      avoided: 14,
+      statuses: [],
+      automated: true,
+    }),
+    "decline",
+  );
+});
+
+test("material damage is spent when we play the creature, asked when we do not", () => {
+  const lich = creature(100);
+  assert.equal(
+    decideResistance({ actor: lich, avoided: 25, statuses: [], automated: true }),
+    "spend",
+  );
+  assert.equal(
+    decideResistance({ actor: lich, avoided: 25, statuses: [], automated: false }),
+    "ask",
+  );
+});
+
+test("Stunning Strike's on-fail effect is stunned, not the Slowed success branch", () => {
+  const item = {
+    effects: [
+      { _id: "stun", statuses: ["stunned"] },
+      { _id: "slow", statuses: [] },
+    ],
+  };
+  const activity = {
+    effects: [
+      { _id: "stun", onSave: false },
+      { _id: "slow", onSave: true },
+    ],
+  };
+  assert.deepEqual(statusesOnFailedSave(item, activity), ["stunned"]);
 });
 
 /* -------------------------------------------- */

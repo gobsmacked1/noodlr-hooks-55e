@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { isIncapacitated, INCAPACITATED_BY } from "../src/system/dnd5e-conditions.js";
+import {
+  canReact,
+  cannotReactReason,
+  hasStatus,
+  isIncapacitated,
+  INCAPACITATED_BY,
+} from "../src/system/dnd5e-conditions.js";
 import { isDown, isUnableToAct, skipReason } from "../src/tactics/skip.js";
 
 function actor(statuses: string[] = [], hp?: number) {
@@ -49,4 +55,25 @@ test("Hold Person's paralyzed Assassin is skipped, including when only paralyzed
 
 test("defeated wins the reason when a corpse is also incapacitated", () => {
   assert.equal(skipReason(combatant({ statuses: ["unconscious"], hp: 0 })), "out of the fight");
+});
+
+test("a stunned AE without actor.statuses still forbids a reaction", () => {
+  const stunnedOnEffect = {
+    statuses: new Set<string>(),
+    effects: [{ statuses: ["stunned"] }],
+  };
+  assert.equal(isIncapacitated(stunnedOnEffect), true);
+  assert.equal(cannotReactReason(stunnedOnEffect), "stunned");
+  assert.equal(canReact(stunnedOnEffect), false);
+});
+
+test("actor.statuses as an array is still a stunned creature", () => {
+  const asArray = { statuses: ["stunned"], effects: [] };
+  assert.equal(hasStatus(asArray, "stunned"), true);
+  assert.equal(canReact(asArray), false);
+});
+
+test("grappled still has a reaction; dead does not", () => {
+  assert.equal(canReact(actor(["grappled"])), true);
+  assert.equal(cannotReactReason(actor(["dead"])), "dead");
 });

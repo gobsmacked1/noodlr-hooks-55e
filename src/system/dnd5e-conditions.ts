@@ -6,7 +6,7 @@
 // auto-fail Str/Dex, crit-on-hit within 5 ft — live only as journal prose. Nested statuses DO apply
 // Incapacitated for Paralyzed/Stunned/Unconscious/Petrified. `isIncapacitated` names those four as
 // well as the status itself, so a sheet that applied Paralyzed without the nest still cannot act —
-// and so the planner skip, the activity veto, and Dodge expiry cannot disagree.
+// and so the planner skip, the activity veto, Dodge expiry, and opportunity attacks cannot disagree.
 //
 // This file is the rule table. The hook engine that applies it lives in `rules/conditions.ts`.
 
@@ -56,6 +56,14 @@ export const DODGING_STATUS = "dodging";
 
 const SAVE_ABILITIES_AUTO_FAIL = new Set(["str", "dex"]);
 
+/** Set, Collection, array, or a single id — Foundry's bag shape moves between versions. */
+function bagHas(bag: any, status: string): boolean {
+  if (!bag) return false;
+  if (typeof bag.has === "function") return Boolean(bag.has(status));
+  if (Array.isArray(bag)) return bag.includes(status);
+  return typeof bag === "string" && bag === status;
+}
+
 /** Does this actor carry any of the named statuses? Respects condition immunity when readable. */
 export function hasStatus(actor: any, status: string): boolean {
   if (!actor) return false;
@@ -67,7 +75,7 @@ export function hasStatus(actor: any, status: string): boolean {
     // ignore unreadable immunity
   }
   try {
-    if (actor.statuses?.has?.(status)) return true;
+    if (bagHas(actor.statuses, status)) return true;
   } catch {
     // fall through
   }
@@ -75,9 +83,7 @@ export function hasStatus(actor: any, status: string): boolean {
     for (const effect of actor.effects ?? []) {
       if (effect?.disabled) continue;
       const statuses = effect.statuses ?? effect.flags?.core?.statusId;
-      if (statuses instanceof Set && statuses.has(status)) return true;
-      if (Array.isArray(statuses) && statuses.includes(status)) return true;
-      if (typeof statuses === "string" && statuses === status) return true;
+      if (bagHas(statuses, status)) return true;
     }
   } catch {
     return false;
@@ -109,6 +115,25 @@ export const INCAPACITATED_BY: ReadonlySet<string> = new Set([
 
 export function isIncapacitated(actor: any): boolean {
   return hasAnyStatus(actor, INCAPACITATED_BY) !== null;
+}
+
+/**
+ * Why a reaction is illegal, or null if it is legal.
+ *
+ * Same walk as `isIncapacitated` — effects, not only `actor.statuses`. A Stunned Beholder whose
+ * Active Effect landed but whose prepared Set has not caught up must not take an Opportunity Attack.
+ * `dead` is extra: Incapacitated does not name it, and a corpse still has a reaction slot on paper.
+ */
+export function cannotReactReason(actor: any): string | null {
+  if (!actor) return "no actor";
+  const incap = hasAnyStatus(actor, INCAPACITATED_BY);
+  if (incap) return incap;
+  if (hasStatus(actor, "dead")) return "dead";
+  return null;
+}
+
+export function canReact(actor: any): boolean {
+  return cannotReactReason(actor) === null;
 }
 
 export function autoFailsSave(actor: any, ability: string): string | null {

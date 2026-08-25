@@ -39,6 +39,7 @@ import { useActionAt } from "../tactics/execute";
 import { hasReaction, spend } from "./economy/ledger";
 import { claimOffer, releaseOffer } from "./reaction-once";
 import { isReactionPromptEnabled } from "../settings";
+import { canReact, cannotReactReason } from "../system/dnd5e-conditions";
 import { acBoostOf, isPolearmWeapon, midiPromptsReactions } from "../system/dnd5e-reactions";
 import { counterspellReady, isCounterspell, isCounterspellAction } from "../system/dnd5e-counterspell";
 import { isSilveryBarbs } from "../system/dnd5e-barbs";
@@ -165,7 +166,7 @@ async function settleOffer(request: OfferRequest): Promise<OfferAnswer> {
   // Re-checked on the writing client, because the asking client's reading is a moment old and this is the
   // client that will spend the reaction.
   const combatant = combatantFor(token);
-  if (!combatant || !hasReaction(combatant)) return { taken: false };
+  if (!combatant || !hasReaction(combatant) || !canReact(actor)) return { taken: false };
 
   const options = optionsFor(actor, request, target);
   if (!options.length) return { taken: false };
@@ -417,25 +418,7 @@ export function alive(actor: any): boolean {
   return !hp || hp.value === null || hp.value > 0;
 }
 
-/** Conditions that take a creature's reaction away entirely. */
-const CANNOT_REACT = ["incapacitated", "paralyzed", "stunned", "unconscious", "petrified", "dead"];
-
-/**
- * Is this creature in a state where a reaction is legal?
- *
- * A paralysed ogre does not swing at anybody, and letting one do so is the sort of rules break that makes
- * the whole feature untrustworthy. Read from status ids, which every system registers, rather than from a
- * helper belonging to some module.
- */
-export function canReact(actor: any): boolean {
-  try {
-    const statuses: any = actor?.statuses;
-    for (const status of CANNOT_REACT) if (statuses?.has?.(status)) return false;
-  } catch {
-    /* an unreadable status set is not evidence of incapacity */
-  }
-  return true;
-}
+export { canReact, cannotReactReason };
 
 /**
  * Mark the reaction spent in our ledger and, where midi is present, in midi's.

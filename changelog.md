@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.7.38
+
+**A Stunned creature no longer takes Opportunity Attacks.** The planner already
+skipped their turn (`isIncapacitated` walks Active Effects). Reactions only
+asked `actor.statuses.has` and treated a missing or array-shaped bag as "can
+react", so a Stunned Beholder bit the Monk who walked away to test RAW Stun.
+Reactions now use the same status walk, log why a watcher is held, and re-check
+before the swing. Grappled still reacts; dead does not.
+
+**A legendary creature we are playing spends Resistance on Stun.** The clock
+still declines when the GM is driving (a 3/day resource). Automated, it spends
+on stunned / paralyzed / petrified / unconscious / incapacitated, and a
+fight-ending status outranks chip damage. Legendary *actions* (Eye Rays at the
+end of someone else's turn) are still unbuilt.
+
 ## 0.7.37
 
 **A Large creature already next to you stops trying to close, and Polearm Master

@@ -1659,6 +1659,12 @@ edits closed without saving are lost. Same trade `noodlr` makes.
   only knew about the dead. Grappled / Restrained still get a turn. Not Phase 4 duration and not a
   compiled "skip this turn" rule: the general condition is already the strategy. A turn that has
   *already started* when the status lands is not aborted — that was the opening walk before the save.
+  **A reaction uses the same walk (2026-08-25).** `canReact` used to read only `actor.statuses.has`
+  and fail open if the Set was missing, an array, or the AE had landed and the prepared Set had not.
+  The planner skipped a Stunned Beholder (`automation skipping … incapacitated`) and then Opportunity
+  Attack bit the Monk who walked away without Disengaging — RAW Stun grants Incapacitated, so no
+  reaction. `cannotReactReason` is `isIncapacitated` plus `dead`; `strike` re-checks before spending.
+  Do not "fix" this by auto-Disengaging.
   the console entry point deliberately does not advance; and a runaway brake (`RUNAWAY_LIMIT` in
   `combat/auto/hooks.ts`) stops the chain after 24 consecutive automated turns, because an NPC-vs-NPC
   fight or a wiped party is otherwise an unbounded loop issuing real rolls unattended.
@@ -3791,9 +3797,15 @@ harmless while a human was also applying the damage by hand, because the same pa
 - **`onSave: "full"` is priced as UNKNOWN, not as zero.** A save that changes nothing about the damage does not
  make the resistance pointless; it makes its value unreadable, because whatever else the failure inflicts is
  prose on the item. Scoring it zero would have silently never asked.
-- **The default is to decline**, which is the prompt layer's one rule (a timeout may spend a renewing resource
- and never a depleting one) applied to the most depleting resource in the game. It is also what already
- happens on every table where nobody notices the button.
+- **The default is to decline when the GM is driving the creature**, which is the prompt layer's one rule
+ (a timeout may spend a renewing resource and never a depleting one) applied to the most depleting
+ resource in the game. **When this module is playing the creature, `decideResistance` spends** on a
+ `MUST_RESIST` status (stunned / paralyzed / petrified / unconscious / incapacitated) or on damage
+ `worthAsking` already prices — a Beholder that "takes" Stunning Strike because a six-second dialog
+ timed out is the creature playing badly, not the GM being protected (Monk vs Beholder, 2026-08-25).
+ A fight-ending status outranks a small damage number, because the 17:27 log priced a save as
+ "14 damage" and declined. Legendary *actions* (Eye Rays at the end of someone else's turn) are a
+ different tree and are not this file.
 - **The window is the same shape as the shield window and for the same reason**: `Activation.asking` is
  registered before anybody is asked and `settle` awaits it, so an answer cannot arrive after the damage has
  landed. `offered` is set *before* the await, which is what makes a re-entrant `settle` raise one dialog

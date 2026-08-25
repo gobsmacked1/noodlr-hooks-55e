@@ -22,9 +22,12 @@
 // changes something worth changing: a failure that does anything other than damage, or damage that is a
 // real share of what the creature has left. A lich is not asked about a Firebolt.
 //
-// NOT DONE HERE, deliberately: choosing FOR the GM. Whether to spend the second of three resistances on
-// this Banishment depends on what the party has left, what is coming, and how the evening is going, none of
-// which is readable. The clock picks the safe answer, not the clever one.
+// WHEN WE PLAY THE CREATURE, WE CHOOSE. The "do not choose for the GM" clause still holds for a legendary
+// the GM is driving by hand — the six-second prompt, default decline. It does not hold for a Beholder
+// this module is playing: that creature's resistances are part of its kit, the same way its Bite is, and
+// a Stunning Strike that lands because a dialog timed out is the creature playing badly, not the GM
+// being protected. `decideResistance` is that split. Legendary *actions* (end of someone else's turn)
+// are a different tree and are not this file.
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
 import { promptChoice } from "../util/prompt";
@@ -45,6 +48,25 @@ import {
  */
 const MATERIAL_FRACTION = 0.2;
 
+/**
+ * Failures that take the creature out of the fight, or skip its turn, including legendary actions.
+ *
+ * 2024 Stunned / Paralyzed / Unconscious / Petrified all grant Incapacitated, so a Beholder that
+ * "takes" Stunning Strike also loses its Eye Rays until the monk's next turn. Those are what a
+ * resistance is *for*. Named statuses rather than "any condition": Slowed or Frightened is a bad
+ * turn, not a lost one, and spending the last resistance on Frightened is the tree's next slice.
+ */
+export const MUST_RESIST = new Set([
+  "stunned",
+  "paralyzed",
+  "petrified",
+  "unconscious",
+  "incapacitated",
+]);
+
+/** What `decideResistance` tells `considerResistance` to do. */
+export type ResistDecision = "spend" | "ask" | "decline";
+
 /** One failed save that a legendary resistance could still overturn. */
 export interface ResistanceCase {
   actor: any;
@@ -61,6 +83,10 @@ export interface ResistanceCase {
    * Hold Monster, and those are exactly the failures a legendary creature spends a resistance on.
    */
   avoided: number | null;
+  /** Statuses the failed save would apply, read off the activity's on-fail effects. */
+  statuses?: string[];
+  /** True when this module is playing the creature this fight — we decide, we do not ask. */
+  automated?: boolean;
 }
 
 /** Is the rule switched on at all? */
@@ -73,21 +99,39 @@ export function resistancePromptsEnabled(): boolean {
 }
 
 /**
- * Offer the resistance, and spend it if it is taken.
+ * Offer the resistance, or spend it ourselves, if it is taken.
  *
- * Resolves false for every reason there is not to ask — switched off, no resistances, not worth it, clock
- * ran out — so a caller has one branch rather than five. Never throws: a prompt that fails must not take the
- * damage with it.
+ * Resolves false for every reason there is not to spend — switched off, no resistances, not worth it,
+ * clock ran out — so a caller has one branch rather than five. Never throws: a prompt that fails must
+ * not take the damage with it.
  */
 export async function considerResistance(request: ResistanceCase): Promise<boolean> {
   try {
     if (!resistancePromptsEnabled()) return false;
     if (!canResist(request.actor)) return false;
-    if (!worthAsking(request.actor, request.avoided)) {
+
+    const decision = decideResistance({
+      actor: request.actor,
+      avoided: request.avoided,
+      statuses: request.statuses ?? [],
+      automated: Boolean(request.automated),
+    });
+    if (decision === "decline") {
       log(
-        `legendary resistance: ${request.name} failed, but ${describeStake(request)} is not worth asking about`,
+        `legendary resistance: ${request.name} failed, but ${describeStake(request)} is not worth a resistance`,
       );
       return false;
+    }
+
+    if (decision === "spend") {
+      if (!(await spendResistance(request.actor, request.message))) return false;
+      const why = (request.statuses ?? []).filter((s) => MUST_RESIST.has(s)).join(", ");
+      log(
+        `legendary resistance: ${request.name} spends one on ${request.spell || "it"}${
+          why ? ` (${why})` : ""
+        } — we are playing it`,
+      );
+      return true;
     }
 
     const left = legendaryResistances(request.actor);
@@ -124,6 +168,60 @@ export async function considerResistance(request: ResistanceCase): Promise<boole
     log("legendary resistance: the offer failed, so the save stands as rolled:", err);
     return false;
   }
+}
+
+/**
+ * Who decides, and what they decide.
+ *
+ * Exported so the tree can be argued with in a test rather than reconstructed from a prompt default.
+ *
+ * A status in `MUST_RESIST` outranks a small damage number: Stunning Strike is a save activity with
+ * empty `damage.parts`, but a world that joined it to the attack's 14 damage must still spend. A
+ * creature we are playing never sees the dialog — that clock's default is decline, which is how a
+ * Stun landed on a Beholder this module was driving.
+ */
+export function decideResistance(input: {
+  actor: any;
+  avoided: number | null;
+  statuses: string[];
+  automated: boolean;
+}): ResistDecision {
+  const fightEnding = input.statuses.some((s) => MUST_RESIST.has(s));
+  if (!fightEnding && !worthAsking(input.actor, input.avoided)) return "decline";
+  return input.automated ? "spend" : "ask";
+}
+
+/**
+ * Statuses a failed save applies, read off the activity's effect links.
+ *
+ * `onSave: true` is the success branch (Stunning Strike's Slowed, if the content marks it that
+ * way). Everything else is the failure the resistance is buying off. An empty statuses array on
+ * the effect is ignored — Slowed in the stock item carries none.
+ */
+export function statusesOnFailedSave(item: any, activity: any): string[] {
+  const effects = listOf(item?.effects);
+  const byId = new Map<string, any>();
+  for (const effect of effects) {
+    const id = String(effect?.id ?? effect?._id ?? "");
+    if (id) byId.set(id, effect);
+  }
+  const found = new Set<string>();
+  for (const link of listOf(activity?.effects)) {
+    if (link?.onSave === true) continue;
+    const effect = byId.get(String(link?._id ?? link?.id ?? ""));
+    for (const status of listOf(effect?.statuses)) {
+      const id = String(status ?? "").trim();
+      if (id) found.add(id);
+    }
+  }
+  return [...found];
+}
+
+function listOf(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value[Symbol.iterator] === "function") return [...value];
+  return Object.values(value);
 }
 
 /**
@@ -168,6 +266,15 @@ export function surveyLegendary(): unknown {
     hp: actor ? currentHp(actor) : null,
     askedAboveDamageOf: actor
       ? Math.ceil((currentHp(actor) ?? 0) * MATERIAL_FRACTION) || null
+      : null,
+    mustResist: [...MUST_RESIST],
+    onStunningStrikeIfAutomated: actor
+      ? decideResistance({
+          actor,
+          avoided: null,
+          statuses: ["stunned"],
+          automated: true,
+        })
       : null,
   };
 }

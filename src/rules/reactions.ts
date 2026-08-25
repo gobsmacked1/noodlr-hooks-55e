@@ -50,7 +50,15 @@ import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
 import { canTakeEnterReach, isPolearmWeapon, standingExemption } from "../system/dnd5e-reactions";
 import { isCounterspellAction } from "../system/dnd5e-counterspell";
-import { alive, canReact, notifyMidi, offerReaction, offerable, opportunityTaken } from "./offer";
+import {
+  alive,
+  canReact,
+  cannotReactReason,
+  notifyMidi,
+  offerReaction,
+  offerable,
+  opportunityTaken,
+} from "./offer";
 import type { ReactionTrigger } from "./offer";
 import { claimProvoke, clearAllProvokes, forgetProvokesFor, resetOfferLock } from "./reaction-once";
 
@@ -433,7 +441,12 @@ function watchersOf(moverDoc: any): Watcher[] {
     const automated = shouldAutomate(combatant);
     if (!automated && !offerable(combatant?.actor)) continue;
     if (combatant?.isDefeated || !alive(combatant?.actor)) continue;
-    if (!hasReaction(combatant) || !canReact(combatant.actor)) continue;
+    if (!hasReaction(combatant)) continue;
+    const blocked = cannotReactReason(combatant.actor);
+    if (blocked) {
+      log(`reaction: ${combatant.name} cannot react (${blocked})`);
+      continue;
+    }
 
     const token = tokenFor(combatant);
     if (!tokenCenter(token)) continue;
@@ -795,8 +808,13 @@ async function strike(
   phrasing: string,
   action: CreatureAction = watcher.action,
 ): Promise<void> {
-  spendReaction(watcher.combatant);
   const name = String(watcher.combatant?.name ?? "Something");
+  const blocked = cannotReactReason(watcher.combatant?.actor);
+  if (blocked) {
+    log(`reaction: ${name} cannot react (${blocked}) — holding the swing`);
+    return;
+  }
+  spendReaction(watcher.combatant);
   const targetName = String(target?.name ?? "its attacker");
 
   const ChatMessage = (globalThis as any).ChatMessage;
