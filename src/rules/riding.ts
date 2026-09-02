@@ -44,6 +44,7 @@ import {
 import { isPolymorphed } from "../system/dnd5e-transform";
 import { FLAG_NAMESPACE, readFlag } from "../util/flags";
 import { isPrimaryGM } from "../util/gm";
+import { settingKeyOf } from "../util/setting-key";
 import { registerBadgeClick, wireEffectClicks } from "../util/token-badge";
 import { registerVaePanelAction } from "../util/vae-panel";
 
@@ -758,12 +759,10 @@ export function registerRidingWatch(): void {
     for (const token of (canvas as any)?.tokens?.placeables ?? []) wireToken(token);
   }
 
-  Hooks.on("updateSetting", (_setting: any, _value: any, key?: string) => {
-    if (
-      key === `${MODULE_ID}.${GENERAL_SETTINGS.riding}` ||
-      key?.endsWith(`.${GENERAL_SETTINGS.riding}`)
-    ) {
-      if (!isRidingEnabled()) {
+  Hooks.on("updateSetting", (setting: any) => {
+    const key = settingKeyOf(setting);
+    if (key === `${MODULE_ID}.${GENERAL_SETTINGS.riding}` || key.endsWith(`.${GENERAL_SETTINGS.riding}`)) {
+      if (!isRidingEnabled() && isPrimaryGM()) {
         for (const doc of allTokenDocs()) {
           if (ridingOn(doc)) void dismountToken(doc, { silent: true });
         }

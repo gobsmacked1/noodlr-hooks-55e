@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
+import { bindCapabilities, clearBindings } from "../src/capability/bindings";
 import { __grantsInternals } from "../src/capability/grants";
 import { MODULE_ID } from "../src/constants";
 
@@ -82,6 +83,44 @@ test("dnd5e attack config.subject is the Activity, not the Actor", () => {
   assert.equal(actorOf({ subject: activity }), barb);
   assert.equal(actorOf({ subject: barb }), barb);
   assert.equal(abilityOf({ subject: activity }), "str");
+});
+
+test("a known-but-uncast spell does not impose Disadvantage on every attack", () => {
+  const wind = {
+    id: "wind",
+    uuid: "Actor.drew.Item.wind",
+    type: "spell",
+    name: "Investiture of Wind",
+  };
+  const actor = {
+    uuid: "Actor.drew",
+    name: "Drew Id",
+    effects: [],
+    concentration: { items: [], effects: [] },
+  };
+  bindCapabilities(actor.uuid, [
+    {
+      item: wind,
+      capability: {
+        id: "wind-hash",
+        label: "Investiture of Wind",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_attack_roll" },
+            condition: [],
+            effect: { kind: "impose_disadvantage", rollType: "attack" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  try {
+    assert.equal(collect(actor, "attack", "", "").length, 0);
+  } finally {
+    clearBindings(actor.uuid);
+  }
 });
 
 test("applyToConfig stamps advantageMode, not only the advantage flag", () => {

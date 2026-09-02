@@ -32,6 +32,7 @@ import {
 } from "../integration/capability";
 import { readRest } from "../system/dnd5e-rest";
 import { bindingsFor } from "./bindings";
+import { bindingShouldFire, damageTakenGrantAllowed } from "./live-item";
 import { conditionsMet, type EvalContext, type Subject } from "./predicates";
 import { describePredicate, describeRule, onMoveDamageRefusal, staticRefusal } from "./describe";
 import { asQuantity, resolveQuantity } from "./quantity";
@@ -153,7 +154,7 @@ export async function fireTrigger(
   for (const binding of bindingsFor(actor)) {
     const capability = binding.capability;
     if (capability.status === "rejected") continue;
-    if (!bindingAppliesToActivity(binding, usedItemOf(ctx))) continue;
+    if (!bindingShouldFire(binding, actor, usedItemOf(ctx), bindingAppliesToActivity)) continue;
 
     // IF IT CANNOT BE PAID FOR, NONE OF IT HAPPENS. A compiler is free to split one ability into a
     // `spend_resource` rule and a separate effect rule on the same trigger, and when it does, that
@@ -171,6 +172,9 @@ export async function fireTrigger(
       .map((rule, index) => ({ rule, index }))
       .filter(({ rule }) => {
         if (rule.trigger?.event !== event) return false;
+        if (!damageTakenGrantAllowed(binding, actor, event, String(rule.effect?.kind ?? ""))) {
+          return false;
+        }
         if (event === "on_condition_applied") {
           return ruleMatchesApplied(rule, ctx.appliedStatuses ?? []);
         }

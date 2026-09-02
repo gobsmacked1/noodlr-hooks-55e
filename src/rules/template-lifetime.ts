@@ -8,9 +8,11 @@
 //
 // Two families, and they must not be conflated:
 //
-//   * Instant (Fireball, Lightning Bolt, a breath): in combat it must not outlive the turn that
-//     placed it. The combat clock, not worldTime — Hold Person already showed the world clock
-//     can run minutes during one round. Out of combat, a short real-time TTL.
+//   * Instant (Fireball, Lightning Bolt, a breath): settled, then gone — either the placing
+//     turn is over, or INSTANT_VISIBLE_MS has elapsed on the same slot. A Lightning Bolt is a
+//     flash; leaving the line up for a whole player turn looks like the cleanup never ran.
+//     The combat clock still ends it the moment the turn advances (Hold Person already showed
+//     worldTime can run minutes during one round). Out of combat, a short real-time TTL.
 //   * Lasting (Wall of Fire, Darkness, Moonbeam): BOTH clocks, when the spell has both.
 //     Concentration is required for the whole time it is up — a break ends the parent AE and
 //     every child template. The printed duration is a ceiling: you cannot hold the same slot
@@ -35,6 +37,8 @@ import { isPrimaryGM } from "../util/gm";
 
 export const SETTLE_MS = 4_000;
 export const OOC_TTL_MS = 8_000;
+/** Instant templates vanish after this even if the placing turn is still live. */
+export const INSTANT_VISIBLE_MS = 6_000;
 const POLL_MS = 6_000;
 
 export interface LifetimeStamp {
@@ -179,7 +183,8 @@ export function leftoverAfterCombat(stamp: LifetimeStamp, endedRound: number, no
 /**
  * Whether this stamp should be deleted *now*.
  *
- * Instant: settled, and either the placing turn is over or there was never a combat (OOC TTL).
+ * Instant: settled, and either the placing turn is over, the visible TTL elapsed, or
+ * there was never a combat (OOC TTL).
  * Lasting / keep: duration clock, or concentration we have actually seen and then lost.
  * An empty live set is not "concentration ended" — that is how a one-minute wall
  * vanished after SETTLE_MS.
@@ -191,7 +196,8 @@ export function isDue(stamp: LifetimeStamp, now: LifetimeNow): boolean {
       if (now.now < stamp.at + SETTLE_MS) return false;
       const sameCombat = now.combatId === stamp.combatId;
       const sameSlot = sameCombat && now.round === stamp.round && now.turn === stamp.turn;
-      return !sameSlot;
+      if (!sameSlot) return true;
+      return now.now >= stamp.at + INSTANT_VISIBLE_MS;
     }
     return now.now >= stamp.at + OOC_TTL_MS;
   }
@@ -218,7 +224,12 @@ export function stillHeld(stamp: LifetimeStamp, live: ReadonlySet<string>): bool
 
 export function dueReason(stamp: LifetimeStamp, now: LifetimeNow): string | null {
   if (!isDue(stamp, now)) return null;
-  if (stamp.kind === "instant") return stamp.combatId ? "turn over" : "ooc ttl";
+  if (stamp.kind === "instant") {
+    if (!stamp.combatId) return "ooc ttl";
+    const sameSlot =
+      now.combatId === stamp.combatId && now.round === stamp.round && now.turn === stamp.turn;
+    return sameSlot ? "visible ttl" : "turn over";
+  }
   if (durationExpired(stamp, now)) return "duration";
   return "concentration ended";
 }
@@ -239,12 +250,23 @@ function resolveSource(doc: any): any {
   return null;
 }
 
+/**
+ * Placement time for an unstamped template. Synthesizing `at = Date.now()` every
+ * poll made a player Lightning Bolt look zero seconds old forever, so it could
+ * never become due. `_stats.createdTime` is the document's own clock.
+ */
+export function createdAtOf(doc: any, fallback: number): number {
+  const t = Number(doc?._stats?.createdTime ?? doc?._source?._stats?.createdTime);
+  return Number.isFinite(t) && t > 0 ? t : fallback;
+}
+
 export function lifetimeOf(doc: any, clock: ReturnType<typeof combatClockOf>, at: number): LifetimeStamp | null {
   const stamped = ourStamp(doc);
   if (stamped) return stamped;
+  const placed = createdAtOf(doc, at);
   const source = resolveSource(doc);
-  if (source) return stampFor(doc, source, clock, at, worldTimeOf());
-  return stampFor(doc, null, clock, at);
+  if (source) return stampFor(doc, source, clock, placed, worldTimeOf());
+  return stampFor(doc, null, clock, placed);
 }
 
 function liveConcentration(): Set<string> {
@@ -433,6 +455,34 @@ function onPreCreate(doc: any): void {
   }
 }
 
+/**
+ * Player-placed bolts often get `flags.dnd5e.origin` on a later update, so
+ * preCreate sees a hand-drawn ruler and writes nothing. The GM then synthesizes
+ * a stamp every poll with `at = now` and the line never expires.
+ *
+ * Stamp once, using the document's createdTime, so a leftover from last turn is
+ * already due.
+ */
+async function adoptUnstamped(doc: any): Promise<void> {
+  if (!enabled() || !isPrimaryGM()) return;
+  if (ourStamp(doc)) return;
+  if (!isAbilityTemplate(doc)) return;
+  const at = createdAtOf(doc, Date.now());
+  const stamp = stampFor(
+    doc,
+    resolveSource(doc),
+    combatClockOf((globalThis as any).game?.combat),
+    at,
+    worldTimeOf(),
+  );
+  if (!stamp) return;
+  try {
+    await doc.update?.({ [`flags.${MODULE_ID}.lifetime`]: stamp });
+  } catch {
+    /* a locked template is not a reason to drop the sweep */
+  }
+}
+
 async function convertAfterCombat(combat: any): Promise<void> {
   if (!enabled() || !isPrimaryGM() || !combat?.id) return;
   const endedRound = Number(combat.round);
@@ -474,7 +524,13 @@ function onDeleteEffect(effect: any): void {
  */
 export function registerTemplateLifetime(): void {
   Hooks.on("preCreateMeasuredTemplate", onPreCreate);
-  Hooks.on("createMeasuredTemplate", () => scheduleSweep());
+  Hooks.on("createMeasuredTemplate", (doc: any) => {
+    void adoptUnstamped(doc);
+    scheduleSweep();
+  });
+  Hooks.on("updateMeasuredTemplate", (doc: any) => {
+    void adoptUnstamped(doc);
+  });
   Hooks.on("updateCombat", (_combat: any, changed: any) => {
     if (!("turn" in (changed ?? {})) && !("round" in (changed ?? {}))) return;
     scheduleSweep();

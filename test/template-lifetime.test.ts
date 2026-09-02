@@ -2,12 +2,15 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  INSTANT_VISIBLE_MS,
   OOC_TTL_MS,
   SETTLE_MS,
   combatClockOf,
+  createdAtOf,
   durationExpired,
   isDue,
   leftoverAfterCombat,
+  lifetimeOf,
   stampFor,
   type LifetimeNow,
   type LifetimeStamp,
@@ -138,7 +141,7 @@ test("stampFor on Wall of Fire writes the minute clocks from the item", () => {
   assert.equal(s.concentrating, true);
 });
 
-test("an instant in combat is not due on the placing slot, even after settle", () => {
+test("an instant in combat is not due on the placing slot until the visible TTL", () => {
   const placed = stamp({
     kind: "instant",
     at: 0,
@@ -146,13 +149,32 @@ test("an instant in combat is not due on the placing slot, even after settle", (
     round: 2,
     turn: 3,
   });
-  const sameSlot = now({
-    now: SETTLE_MS + 1,
-    combatId: "c1",
-    round: 2,
-    turn: 3,
-  });
-  assert.equal(isDue(placed, sameSlot), false);
+  assert.equal(
+    isDue(placed, now({ now: SETTLE_MS + 1, combatId: "c1", round: 2, turn: 3 })),
+    false,
+    "settle is not enough — saves may still be resolving",
+  );
+  assert.equal(
+    isDue(placed, now({ now: INSTANT_VISIBLE_MS - 1, combatId: "c1", round: 2, turn: 3 })),
+    false,
+  );
+  assert.equal(
+    isDue(placed, now({ now: INSTANT_VISIBLE_MS, combatId: "c1", round: 2, turn: 3 })),
+    true,
+    "a Lightning Bolt is a flash — it must not sit through the rest of the player's turn",
+  );
+});
+
+test("an unstamped template ages from createdTime, not from the poll clock", () => {
+  assert.equal(createdAtOf({ _stats: { createdTime: 1_000 } }, 9_000), 1_000);
+  assert.equal(createdAtOf({}, 9_000), 9_000);
+  const doc = {
+    flags: { dnd5e: { origin: "Activity.bolt", item: "Item.bolt" } },
+    _stats: { createdTime: 100 },
+  };
+  const synthesized = lifetimeOf(doc, { combatId: "c1", round: 2, turn: 3 }, 9_000);
+  assert.ok(synthesized);
+  assert.equal(synthesized.at, 100);
 });
 
 test("an instant is due once the placing turn is over and settle has passed", () => {

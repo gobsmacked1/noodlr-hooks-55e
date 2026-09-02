@@ -21,6 +21,7 @@
 import { MODULE_ID, log } from "../constants";
 import { isStanding } from "../integration/capability";
 import { bindingsFor } from "./bindings";
+import { itemIsInPlay } from "./live-item";
 import { conditionsMet, type EvalContext } from "./predicates";
 import { standingGrants } from "./standing";
 
@@ -121,6 +122,7 @@ function collect(actor: any, kind: RollKind, ability: string, skill: string, vs?
     };
     for (const binding of bindingsFor(actor)) {
       if (binding.capability.status === "rejected") continue;
+      if (!itemIsInPlay(binding.item, actor)) continue;
       for (const rule of binding.capability.rules ?? []) {
         if (isStanding(rule)) continue;
         if (rule.trigger?.event !== "on_attack_roll") continue;

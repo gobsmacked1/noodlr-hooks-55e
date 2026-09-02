@@ -3111,10 +3111,17 @@ What was locked:
 `combat.templateLifetime`, default **on**. Stamp `flags.<ns>.lifetime` in
 `preCreateMeasuredTemplate` on the creating client; delete on the primary GM.
 
-- **Instant** (`inst` or empty units): due when settle has passed AND the placing
-  combat slot is over (`combatId` + `round` + `turn`). Still their turn → never
-  delete. Combat clock, not `worldTime`. Out of combat (no `combatId`):
-  `OOC_TTL_MS` (8 s).
+- **Instant** (`inst` or empty units): due when settle has passed AND (the placing
+  combat slot is over **or** `INSTANT_VISIBLE_MS` (6 s) has elapsed on the same
+  slot). A Lightning Bolt is a flash; leaving the line for the rest of a player
+  turn looks like cleanup never ran. Combat clock still wins the moment the turn
+  advances. Out of combat (no `combatId`): `OOC_TTL_MS` (8 s).
+- **Player templates often arrive unstamped.** `preCreate` runs before dnd5e /
+  DDB writes `flags.dnd5e.origin`, so the creating client sees a hand-drawn
+  ruler and writes nothing. `lifetimeOf` used to synthesize `at = Date.now()`
+  every poll — age stayed 0 s and the bolt could never become due. Adopt on
+  `create` / `update` (primary GM) and age unstamped docs from
+  `_stats.createdTime`.
 - **Lasting** (turn/round/minute/…): expire with the **stamped duration** or when
   concentration we have actually seen then ends — whichever first. Clocks are
   written once at place time from `durationOf` (activity `override: false` means
@@ -3565,6 +3572,15 @@ button press.
   bound to the caster, so Otto's Irresistible Dance charmed the Assassin on Hold Person's failed save.
   Spell, weapon and consumable bindings must match the used item; a feat that watches any save still
   fires. `bindingAppliesToActivity` is the split, pinned in `test/saves-trigger.test.ts`.
+- **A known spell is not a live effect (2026-09-02).** That split returns true when there is no
+  used item, so `on_damage_taken`, standing grants and the pre-roll grant reader treated every
+  compiled spell on the sheet as active. Feast of Flesh granted Advantage to Drew on any damage
+  while uncast; Beast of Ragnarok / Investiture of Wind imposed Disadvantage on every sickle
+  swing. `src/capability/live-item.ts` is the one predicate: feats always; weapons if equipped;
+  spells/consumables only while concentrating on that item or wearing a **non-timed** AE from it.
+  Our timed AEs must not count — circular. A concentrating caster still does not get their own
+  `on_damage_taken` grant/impose (she is not the afflicted); Armor of Agathys `damage` still
+  runs. Do not recompile the world to "fix" those descriptors.
 - **What a failed save INFLICTS is not applied.** Restrained, Prone and the rest are prose on the item, which
   is the compiler's problem. Guessing at them would start an argument at the table.
 - **A leftover target is not who a Fireball is for (2026-08-19).** dnd5e writes `game.user.targets`
@@ -4837,7 +4853,13 @@ an argument.
 
 `src/system/dnd5e-riding.ts` + `src/rules/riding.ts`. No Rideable dependency. Stands aside when
 `Rideable` is active. Do **not** delete `x`/`y` in `preUpdateToken` — that is Rideable's trick and
-why `move() === true` is not evidence of movement. A rider who tries to walk is refused
+why `move() === true` is not evidence of movement.
+- **`updateSetting` is a document hook.** Signature is `(setting, changed, options, userId)`.
+  The key lives on `setting.key`. v0.7.41 treated the third argument as a string and threw
+  `key.endsWith is not a function` on **every** setting write — Calendaria ticks world time
+  constantly, so a player console filled with it. Read through `settingKeyOf`
+  (`src/util/setting-key.ts`); aura already did. A riding-off sweep writes token flags, so
+  it stays primary-GM only. A rider who tries to walk is refused
 (`preMoveToken` returns false). Follow uses `options.noodlrRiding === "follow"`, which
 `isForcedMovement` treats as displacement so it does not provoke a second OA.
 `syncRiderVisuals` sticks riders to the mount's interpolated seat; `followMount`

@@ -34,6 +34,7 @@ import {
   type EffectKind,
 } from "../integration/capability";
 import { bindingsFor } from "./bindings";
+import { itemIsInPlay } from "./live-item";
 import { conditionsMet } from "./predicates";
 
 export interface StandingGrant {
@@ -77,6 +78,7 @@ export function standingGrants(actor: any): StandingGrant[] {
   for (const binding of bindingsFor(actor)) {
     const capability = binding.capability;
     if (capability.status === "rejected") continue;
+    if (!itemIsInPlay(binding.item, actor)) continue;
     const rules = capability.rules ?? [];
     for (let index = 0; index < rules.length; index++) {
       const rule = rules[index];

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.42
+
+**A known-but-uncast spell is not a live effect.** Feast of Flesh granted
+Advantage to the caster on any damage while it sat unprepared on the sheet,
+and Investiture of Wind / Beast of Ragnarok put Disadvantage on every
+attack. Compiled riders now run only for feats, equipped weapons, or a
+spell/consumable the creature is concentrating on or actually wearing.
+Armor of Agathys-style damage while concentrating is unchanged. No world
+recompile.
+
+**Lightning Bolt leaves after six seconds.** Player-placed instant templates
+often arrived unstamped (dnd5e writes the origin after our create hook), so
+the cleanup clock restarted every poll and the line sat through the rest of
+the turn. Unstamped ability templates are adopted from their created time,
+and an instant vanishes after 6 s even if that turn is still live.
+
+**Calendaria no longer floods the player console.** Riding read Foundry's
+`updateSetting` arguments in the wrong order, so every world-time tick
+threw `key.endsWith is not a function`.
+
 ## 0.7.41
 
 **A wall is not line of sight, even if nobody hid.** Awareness only asked

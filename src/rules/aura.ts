@@ -60,6 +60,7 @@ import {
   spellAuraIsActive,
 } from "../system/dnd5e-auras";
 import { isPrimaryGM } from "../util/gm";
+import { settingKeyOf } from "../util/setting-key";
 
 const FLAG = "aura";
 const SETTLE_MS = 150;
@@ -628,7 +629,7 @@ export function registerAuraWatch(): void {
   });
   Hooks.on("canvasReady", schedule);
   Hooks.on("updateSetting", (setting: any) => {
-    const key = String(setting?.key ?? "");
+    const key = settingKeyOf(setting);
     if (key === `${MODULE_ID}.${GENERAL_SETTINGS.auras}` || key.endsWith(`.${GENERAL_SETTINGS.auras}`)) {
       schedule();
     }
