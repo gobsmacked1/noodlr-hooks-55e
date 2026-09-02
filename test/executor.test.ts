@@ -797,7 +797,39 @@ test("grant_advantage writes a timed effect rather than approximating the roll",
   assert.equal(outcomes[0].fired, true, outcomes[0].reason);
   assert.equal(actor.effects.length, 1);
   assert.equal(actor.effects[0].flags["noodlr-hooks-55e"].timed.kind, "grant_advantage");
+  assert.equal(actor.effects[0].flags["noodlr-hooks-55e"].timed.event, "on_turn_start");
   assert.equal(actor.effects[0].duration?.units, "rounds");
+});
+
+test("a save activity must not write Advantage on the button press", async () => {
+  // Stunning Strike (2026-09-02): the Monk pressed the feat, the Beholder bought the save,
+  // and "Stunning Strike: Advantage" was already sitting on the Monk. Using the ability is
+  // not the verdict. Reckless Attack above is a turn-start Utility and must keep writing.
+  const actor = withEffects(troll());
+  bindCapabilities(actor.uuid, [
+    {
+      capability: {
+        id: "hash-ss",
+        label: "Stunning Strike",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_activity_use" },
+            condition: [],
+            effect: { kind: "grant_advantage", rollType: "attack", target: "self" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  const outcomes = await fireTrigger("on_activity_use", {
+    self: { actor },
+    activity: { type: "save", save: { ability: "con" }, effects: [{ onSave: false }] },
+  });
+  assert.equal(outcomes[0].fired, false);
+  assert.match(String(outcomes[0].reason), /waits for a hit or a save/);
+  assert.equal(actor.effects.length, 0);
 });
 
 test("modify_speed refuses a costMultiplier it cannot write", async () => {

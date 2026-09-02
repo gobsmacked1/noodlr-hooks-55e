@@ -53,9 +53,10 @@ export interface SaveDispatch {
  * One target's verdict, as `rules/saves.ts` holds it after Barbs and legendary resistance.
  *
  * Split out so a test can assert the wait without a Foundry world. `pendingResistance` is the
- * legendary-resistance window still open: a failure that `canResist` and has not been `offered`
- * yet. Firing `on_save_failed` then, and `on_save_succeeded` later when the Resist lands, would
- * apply both halves of a Hold Person to the same creature.
+ * legendary-resistance window still open: a failure that `canResist` and has not been
+ * *settled* yet. `offered` is set BEFORE the dialog await, so it is not the final-verdict
+ * flag — `resistanceSettled` is. Firing `on_save_failed` during that await, then
+ * `on_save_succeeded` when the Resist lands, would apply both halves of a Hold Person.
  */
 export interface SaveVerdict {
   doc: any;
@@ -79,7 +80,7 @@ const DISPATCH_LIMIT = 64;
  *
  * `success === null` is "we cannot judge this" — no DC on the roll — and is the one outcome that
  * must never be treated as a failure. `pendingResistance` waits: the verdict is not final until
- * the resistance was offered or is inapplicable.
+ * the resistance was settled or is inapplicable.
  */
 export function dispatchesFor(verdicts: SaveVerdict[]): SaveDispatch[] {
   const out: SaveDispatch[] = [];

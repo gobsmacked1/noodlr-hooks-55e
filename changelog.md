@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.43
+
+**Using an ability is not the verdict.** Stunning Strike wrote Advantage on the
+Monk the moment the button was pressed, so it was already sitting there after
+the Beholder bought the save with Legendary Resistance. Contest-contingent
+riders (Advantage, Speed, statuses, damage) now wait for a hit or a save
+result on attack and save activities. Reckless Attack is unchanged — it is a
+Utility. An item that only declares `onSave: false` no longer applies compiled
+2024 consolation on a success. A bought save also strips leftover use-time
+effects. No world recompile. Delete any leftover Advantage already on a sheet
+by hand (or the next bought save will).
+
 ## 0.7.42
 
 **A known-but-uncast spell is not a live effect.** Feast of Flesh granted

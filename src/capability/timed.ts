@@ -23,6 +23,8 @@ export interface TimedEffectSpec {
   key: { kind: string; capability: string; ruleIndex: number };
   /** Effect parameters the pre-roll reader needs (rollType, ability, skill). */
   params?: Record<string, unknown>;
+  /** The trigger that wrote this, so a bought save can strip fail/use leftovers. */
+  event?: string;
   duration: EffectDurationPayload | null;
   origin?: string;
 }
@@ -91,6 +93,9 @@ export async function writeTimedEffect(spec: TimedEffectSpec): Promise<any | nul
           for (const [k, v] of Object.entries(spec.duration.start)) update[`start.${k}`] = v;
         }
       }
+      if (spec.event) {
+        update[`flags.${MODULE_ID}.timed.event`] = spec.event;
+      }
       await existing.update(update);
       return existing;
     } catch (err) {
@@ -107,7 +112,7 @@ export async function writeTimedEffect(spec: TimedEffectSpec): Promise<any | nul
     changes: spec.changes ?? [],
     flags: {
       [MODULE_ID]: {
-        timed: { ...spec.key, params: spec.params ?? {} },
+        timed: { ...spec.key, params: spec.params ?? {}, event: spec.event },
       },
     },
   };
@@ -123,6 +128,34 @@ export async function writeTimedEffect(spec: TimedEffectSpec): Promise<any | nul
     warn(`could not create timed effect "${spec.name}" on ${String(actor?.name)}:`, err);
     return null;
   }
+}
+
+/**
+ * Delete our timed AEs that `shouldDelete` names. Used when Legendary Resistance
+ * buys a save and use-time / fail-gated leftovers must not stay on the sheet.
+ */
+export async function deleteOurTimedEffects(
+  actor: any,
+  shouldDelete: (flag: Record<string, unknown>) => boolean,
+): Promise<number> {
+  const doomed: any[] = [];
+  for (const effect of actor?.effects ?? []) {
+    const flag = effect?.flags?.[MODULE_ID]?.timed;
+    if (!flag || !shouldDelete(flag)) continue;
+    doomed.push(effect);
+  }
+  if (!doomed.length) return 0;
+  const ids = doomed.map((e) => String(e.id ?? e._id ?? "")).filter(Boolean);
+  if (ids.length && typeof actor.deleteEmbeddedDocuments === "function") {
+    try {
+      await actor.deleteEmbeddedDocuments("ActiveEffect", ids);
+      return ids.length;
+    } catch (err) {
+      warn(`could not delete leftover timed effects on ${String(actor?.name)}:`, err);
+    }
+  }
+  actor.effects = (actor.effects ?? []).filter((e: any) => !doomed.includes(e));
+  return doomed.length;
 }
 
 export function effectModes(): { add: number; multiply: number; override: number } {

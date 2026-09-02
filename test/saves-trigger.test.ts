@@ -408,3 +408,91 @@ test("a feat that watches any save still fires beside the spell that was used", 
   assert.equal(bindingAppliesToActivity({ item: { id: "war-caster", type: "feat" } }, used), true);
   assert.equal(bindingAppliesToActivity({ item: undefined }, used), true);
 });
+
+function withEffects(actor: any) {
+  actor.effects = [];
+  actor.createEmbeddedDocuments = async (_type: string, data: any[]) => {
+    const docs = data.map((d: any, i: number) => ({
+      ...d,
+      id: `ae-${actor.effects.length + i}`,
+      async update(patch: any) {
+        Object.assign(this, patch);
+      },
+    }));
+    actor.effects.push(...docs);
+    return docs;
+  };
+  return actor;
+}
+
+/** DDB Stunning Strike: one linked AE, stun on a failed save only. */
+function failOnlySaveItem() {
+  const activity: any = {
+    id: "a1",
+    type: "save",
+    name: "Save",
+    save: { ability: "con", dc: { value: 15 } },
+    effects: [{ _id: "stun", onSave: false }],
+  };
+  const item: any = {
+    id: "ss",
+    type: "feat",
+    name: "Stunning Strike",
+    uuid: "Item.ss",
+    system: { activities: { get: (id: string) => (id === "a1" ? activity : null) } },
+  };
+  activity.item = item;
+  return { item, activity };
+}
+
+const CONSOLATION: Capability = {
+  id: "hash-ss-consolation",
+  label: "Stunning Strike",
+  status: "compiled",
+  rules: [
+    {
+      trigger: { event: "on_save_succeeded" },
+      condition: [],
+      effect: { kind: "grant_advantage", rollType: "attack", target: "self" },
+      adjudication: "engine",
+    },
+    {
+      trigger: { event: "on_save_succeeded" },
+      condition: [],
+      effect: { kind: "modify_speed", amount: { value: -15 }, target: "target" },
+      adjudication: "engine",
+    },
+  ],
+};
+
+test("a succeeded save does not apply compiled consolation the item never declared", async () => {
+  // The Beholder bought the Con save. The compiler still emitted 2024 Advantage + Speed on
+  // `on_save_succeeded`. The sheet only has `onSave: false`. Do not recompile to "fix" this.
+  const caster = creature("Monk", "Actor.monk");
+  withEffects(caster.actor);
+  const victim = creature("Beholder", "Actor.beholder");
+  withEffects(victim.actor);
+  place(caster.doc, victim.doc);
+  const { item } = failOnlySaveItem();
+  (globalThis as any).fromUuidSync = () => item;
+  assert.deepEqual(validateCapability(CONSOLATION), { ok: true, errors: [], warnings: [] });
+  bindCapabilities(caster.actor.uuid, [{ capability: CONSOLATION, item }]);
+
+  await fireSaveTriggers(usageMessage("u-ss", caster.doc, item), [succeeded(victim.doc, "s-ss")]);
+
+  assert.equal(caster.actor.effects.length, 0, "Monk must not gain Advantage");
+  assert.equal(victim.actor.effects.length, 0, "Beholder Speed must not change");
+});
+
+test("Hold Person with no effect links still restrains on a failed save", async () => {
+  // Unspecified `onSave` — the compiler is the only account. Gate 2 must not invent a fail-only
+  // sheet and refuse the restrain.
+  const caster = creature("Archmage", "Actor.archmage2");
+  const victim = creature("Assassin", "Actor.assassin2");
+  place(caster.doc, victim.doc);
+  bindCapabilities(caster.actor.uuid, [{ capability: HOLD_PERSON }]);
+
+  await fireSaveTriggers(usageMessage("u-hold-unspec", caster.doc), [failed(victim.doc, "s-hold-unspec")]);
+
+  assert.equal(victim.actor.statuses.has("restrained"), true);
+});

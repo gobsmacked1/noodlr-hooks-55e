@@ -60,6 +60,7 @@ import { registerConditionTriggers } from "./condition-applied";
 import { registerMoveTriggers } from "./move";
 import { durationPayload, worldOf } from "./duration";
 import { effectForStatus, effectModes, stampDuration, writeTimedEffect } from "./timed";
+import { contestRefusal, primaryContestActivity } from "./contest";
 import { registerGrantHooks } from "./grants";
 
 // ---- Firing -------------------------------------------------------------------------------------
@@ -272,6 +273,13 @@ async function runRule(
   if (!POSTHUMOUS.includes(rule.trigger?.event as TriggerEvent) && isDefeated(ctx.self)) {
     return no("the creature is out of the fight");
   }
+
+  // Using the ability is not the verdict. A save or attack activity must not write Advantage,
+  // Speed, a status, or damage from `on_activity_use` — those wait for the die, including a
+  // legendary resistance that turns a failure into a success. Reckless Attack is a Utility and
+  // is untouched. Same placement as the damage-duplicate guard: refuse before anything is spent.
+  const contested = contestRefusal(rule, ctx.activity ?? primaryContestActivity(item));
+  if (contested) return no(contested);
 
   // Checked before any state is read or spent, because this refusal is about the RULE rather than the
   // moment: an ability that restates its own printed damage will do so on every hit for as long as the
@@ -536,6 +544,7 @@ async function applyEffect(
         origin: capability.id,
         duration: timed.payload,
         key: { kind: String(effect.kind), capability: capability.id, ruleIndex: index },
+        event: String(rule.trigger?.event ?? ""),
         params: {
           rollType: effect.rollType,
           ability: effect.ability,
@@ -563,6 +572,7 @@ async function applyEffect(
         changes: changes.changes,
         duration: timed.payload,
         key: { kind: "modify_speed", capability: capability.id, ruleIndex: index },
+        event: String(rule.trigger?.event ?? ""),
       });
       if (!created) return { ok: false, reason: "could not write the Speed change" };
       return { ok: true, detail: "Speed changes" };

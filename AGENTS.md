@@ -3581,6 +3581,20 @@ button press.
   Our timed AEs must not count — circular. A concentrating caster still does not get their own
   `on_damage_taken` grant/impose (she is not the afflicted); Armor of Agathys `damage` still
   runs. Do not recompile the world to "fix" those descriptors.
+- **Using the ability is not the verdict (2026-09-02).** Stunning Strike: the Monk pressed the
+  feat, the Beholder spent Legendary Resistance, and "Stunning Strike: Advantage" was already
+  sitting on the Monk. The compiler had filed `grant_advantage` / `modify_speed` on
+  `on_activity_use` (the button) and on `on_save_succeeded` (2024 consolation). DDB's item is
+  fail-only (`onSave: false` on one linked AE). Two gates in `src/capability/contest.ts`,
+  neither a spell name: (1) contest-contingent kinds on `on_activity_use` wait for the die
+  when the activity is a save or an attack — Reckless Attack is a Utility and still writes;
+  (2) the item's `onSave` flags outrank a compiled success/fail branch — unspecified links
+  (Hold Person on a trait) stay legal. `runRule` and `staticRefusal` both call
+  `contestRefusal`. Timed AEs stamp `event` so a bought save can strip use-time / fail
+  leftovers via `deleteOurTimedEffects` + `isFailContingentFlag`. `pendingResistance` now
+  keys on `resistanceSettled`, not `offered` — `offered` is set before the Resist await.
+  Do not recompile the world to "fix" those descriptors. Leftovers already on a sheet stay
+  until the next bought save or a hand delete.
 - **What a failed save INFLICTS is not applied.** Restrained, Prone and the rest are prose on the item, which
   is the compiler's problem. Guessing at them would start an argument at the table.
 - **A leftover target is not who a Fireball is for (2026-08-19).** dnd5e writes `game.user.targets`

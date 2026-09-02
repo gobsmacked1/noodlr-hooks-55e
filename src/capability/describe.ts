@@ -22,6 +22,7 @@ import type {
 } from "../integration/capability";
 import { isExecutable, isStanding } from "../integration/capability";
 import { duplicatesItemDamage } from "./duplicate";
+import { contestRefusal, primaryContestActivity } from "./contest";
 import { sneakClaimedNatively } from "../rules/sneak";
 
 const TRIGGERS: Record<string, string> = {
@@ -339,6 +340,8 @@ export function onMoveDamageRefusal(rule: CapabilityRule): string {
 export function staticRefusal(rule: CapabilityRule, item: unknown): string {
   const move = onMoveDamageRefusal(rule);
   if (move) return move;
+  const contest = contestRefusal(rule, primaryContestActivity(item));
+  if (contest) return contest;
   if (!item) return "";
   return duplicatesItemDamage(rule, item) ?? sneakClaimedNatively(rule, item) ?? "";
 }

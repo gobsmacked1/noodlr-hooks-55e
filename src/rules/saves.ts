@@ -59,6 +59,9 @@ import {
   type DamagePart,
 } from "./cards";
 import { fireSaveTriggers, type SaveVerdict } from "../capability/saves";
+import { bindingsFor } from "../capability/bindings";
+import { isFailContingentFlag } from "../capability/contest";
+import { deleteOurTimedEffects } from "../capability/timed";
 import { placesTemplate } from "./template-targets";
 
 /** How long an unfinished activation is kept. A save nobody ever rolls must not pin a target forever. */
@@ -80,6 +83,12 @@ interface TargetState {
   saveMessage: any;
   /** Set once a resistance has been offered for this failure, so it is offered exactly once. */
   offered: boolean;
+  /**
+   * True once `considerResistance` has returned (spend or decline). `offered` is set BEFORE the
+   * await, so treating it as "the verdict is final" would dispatch `on_save_failed` while the
+   * Resist dialog is still open — and a bought save would then leave the fail riders in place.
+   */
+  resistanceSettled: boolean;
   /** Set once Silvery Barbs has been offered against this success, for the same reason. */
   barbed: boolean;
 }
@@ -286,6 +295,7 @@ async function onSave(message: any): Promise<void> {
     applied: false,
     saveMessage: null,
     offered: false,
+    resistanceSettled: false,
     barbed: false,
   };
   state.saveMessage = message;
@@ -327,6 +337,7 @@ async function onAutoFailedSave(message: any): Promise<void> {
     applied: false,
     saveMessage: null,
     offered: false,
+    resistanceSettled: false,
     barbed: false,
   };
   if (!applyAutoFailedSave(state)) {
@@ -431,6 +442,7 @@ function noteTargets(act: Activation, message: any): void {
       applied: false,
       saveMessage: null,
       offered: false,
+      resistanceSettled: false,
       barbed: false,
     });
   }
@@ -510,7 +522,8 @@ async function dispatchSaveTriggers(act: Activation): Promise<void> {
       doc: state.doc,
       success: state.success,
       saveMessage: state.saveMessage,
-      pendingResistance: state.success === false && !state.offered && canResist(state.doc?.actor),
+      pendingResistance:
+        state.success === false && !state.resistanceSettled && canResist(state.doc?.actor),
     });
   }
   try {
@@ -607,16 +620,54 @@ async function offerResistances(act: Activation): Promise<void> {
     state.offered = true;
     const item = itemOf(act.usage);
     const activity = activityOf(act.usage, item);
-    const resisted = await considerResistance({
-      actor: state.doc.actor,
-      message: state.saveMessage,
-      name: state.name,
-      spell: act.source,
-      avoided,
-      statuses: statusesOnFailedSave(item, activity),
-      automated: wePlayToken(state.doc),
-    });
-    if (resisted) state.success = true;
+    let resisted = false;
+    try {
+      resisted = await considerResistance({
+        actor: state.doc.actor,
+        message: state.saveMessage,
+        name: state.name,
+        spell: act.source,
+        avoided,
+        statuses: statusesOnFailedSave(item, activity),
+        automated: wePlayToken(state.doc),
+      });
+    } finally {
+      // `offered` is "we asked". This is "the verdict is final". A throw must not leave the
+      // save waiting forever, or `on_save_failed` never fires and the table looks frozen.
+      state.resistanceSettled = true;
+    }
+    if (resisted) {
+      state.success = true;
+      // Fail riders and use-time leftovers (Stunning Strike Advantage on the Monk) must not
+      // survive a bought save. Success-stamped AEs stay — a 2024 item that declared them.
+      await stripFailContingent(act, state, item);
+    }
+  }
+}
+
+/** Capability ids bound to the item that just demanded this save. */
+function capabilityIdsForItem(actor: any, item: any): string[] {
+  if (!actor || !item) return [];
+  const itemId = String(item.id ?? "");
+  const itemUuid = String(item.uuid ?? "");
+  return bindingsFor(actor)
+    .filter((b) => {
+      const it = b.item;
+      if (!it) return false;
+      return (
+        (itemId && String(it.id ?? "") === itemId) || (itemUuid && String(it.uuid ?? "") === itemUuid)
+      );
+    })
+    .map((b) => b.capability.id);
+}
+
+async function stripFailContingent(act: Activation, state: TargetState, item: any): Promise<void> {
+  const caster = speakerToken(act.usage?.speaker)?.actor;
+  const ids = new Set(capabilityIdsForItem(caster, item));
+  if (ids.size === 0) return;
+  for (const actor of [caster, state.doc?.actor]) {
+    if (!actor) continue;
+    await deleteOurTimedEffects(actor, (flag) => isFailContingentFlag(flag, ids));
   }
 }
 
