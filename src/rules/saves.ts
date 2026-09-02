@@ -10,11 +10,12 @@
 //
 // So this layer joins them. Three things fall out of it, in the order a table notices them:
 //
-//   1. A creature nobody but the GM can roll for rolls its own save, automatically. That is where most of
-//      the tedium lives — a Fireball on five goblins is five presses and five subtractions — and it is
-//      also the asymmetry the GM asked for, without a setting: `rollerForActor` says whether a player
-//      owns the creature, and a character with a player owner is left alone because that player came to
-//      the table to roll their own dice.
+//   1. A creature this client is elected to roll for rolls automatically. That is where most of the
+//      tedium lives — a Fireball on five goblins is five presses and five subtractions. Anyone else
+//      (a player character, or a combatant a GM is driving by hand whose auto-roll did not land) is
+//      asked on the owner's client — six-second clock, default roll. Initiative waits for every
+//      target of the demand, not the first one. A skipped petrify save is a turn taken with no
+//      consequence.
 //   2. The damage lands at the right fraction, by handing `multiplier` to the system rather than by doing
 //      arithmetic here. Halving is not always halving — resistance, vulnerability and Evasion all sit in
 //      `Actor5e#calculateDamage` — and a number we halved ourselves would be wrong on exactly the
@@ -63,6 +64,20 @@ import { bindingsFor } from "../capability/bindings";
 import { isFailContingentFlag } from "../capability/contest";
 import { deleteOurTimedEffects } from "../capability/timed";
 import { placesTemplate } from "./template-targets";
+import {
+  bindSaveOwed,
+  looksLikeDemandedRoll,
+  noteOwedDemand,
+  owedKey,
+  owedSecondsFor,
+  requestOwedRoll,
+  shouldPromptOwed,
+  syncOwedFlag,
+  abortOwedPrompt,
+  owedOutstanding,
+  type OwedLine,
+  type OwedRequest,
+} from "./owed-roll";
 
 /** How long an unfinished activation is kept. A save nobody ever rolls must not pin a target forever. */
 const ACTIVATION_TTL_MS = 5 * 60 * 1000;
@@ -78,6 +93,8 @@ interface TargetState {
   success: boolean | null;
   /** True while our own roll is in flight, so a second event cannot roll it twice. */
   rolling: boolean;
+  /** True while the owner's six-second prompt is open. */
+  prompting: boolean;
   applied: boolean;
   /** The failed save's message, which is what a legendary resistance is stamped on. */
   saveMessage: any;
@@ -115,6 +132,11 @@ interface Activation {
   source: string;
   /** An open resistance prompt. Damage must not land under it. */
   asking: Promise<void> | null;
+  /**
+   * True after compiled save riders have run. The initiative gate stays up until then,
+   * or a failed petrify save lifts and the player walks before the status lands.
+   */
+  ridersSettled: boolean;
   targets: Map<string, TargetState>;
   at: number;
 }
@@ -144,9 +166,17 @@ export function applyAutoFailedSave(state: {
 
 export function registerSaveResolution(): void {
   if (!isDnd5e()) return;
+  bindSaveOwed(listOwedSaves);
 
   Hooks.on("createChatMessage", (message: any) => {
     if (!active()) return;
+    if (looksLikeDemandedRoll(message)) {
+      noteOwedDemand();
+      // File targets now, not inside the void `route`. Legendary `activity.use()`
+      // returns once this hook returns; `waitForOwedRolls` must already see the debt.
+      fileUsage(message);
+      void syncOwedFlag();
+    }
     void route(message);
   });
 
@@ -212,19 +242,19 @@ async function route(message: any): Promise<void> {
   }
 }
 
-/** The spell has been cast. Note who it points at and roll for anyone the GM would otherwise roll for. */
-async function onUsage(message: any): Promise<void> {
+/** File the usage card so `owedOutstanding` can see player targets before `settle` runs. */
+function fileUsage(message: any): Activation | null {
   const item = itemOf(message);
   const activity = activityOf(message, item);
-  if (String(activity?.type ?? "") !== "save") return;
+  if (String(activity?.type ?? "") !== "save") return null;
 
   // Counterspell is a save activity and is not this layer's to settle. The window in `rules/counterspell.ts`
   // is holding a cast open waiting on that save's verdict, so it rolls and reads it there; settling it here
   // as well would race, and the visible symptom would be two legendary resistance prompts for one counter.
-  if (savesSkip(item)) return;
+  if (savesSkip(item)) return null;
 
   const usageId = String(message?.id ?? "");
-  if (!usageId) return;
+  if (!usageId) return null;
 
   const act = activation(usageId);
   act.usage = message;
@@ -246,6 +276,13 @@ async function onUsage(message: any): Promise<void> {
   } else {
     noteTargets(act, message);
   }
+  return act;
+}
+
+/** The spell has been cast. Note who it points at and roll for anyone the GM would otherwise roll for. */
+async function onUsage(message: any): Promise<void> {
+  const act = fileUsage(message);
+  if (!act) return;
   await settle(act);
 }
 
@@ -254,7 +291,7 @@ async function onUsage(message: any): Promise<void> {
  *
  * `onUsage` already opened the activation and declined to guess; this is the second
  * pass, after `placeAimedTemplate`. Calling `settle` rolls the saves that can be
- * rolled and leaves a player's button alone.
+ * rolled and prompts a player who still owes one.
  */
 export function adoptTemplateCatch(message: any): void {
   const usageId = String(message?.id ?? "");
@@ -292,6 +329,7 @@ async function onSave(message: any): Promise<void> {
     name: String(doc.name ?? "?"),
     success: null,
     rolling: false,
+    prompting: false,
     applied: false,
     saveMessage: null,
     offered: false,
@@ -304,7 +342,9 @@ async function onSave(message: any): Promise<void> {
   // plays by clicking tokens rather than by targeting them would otherwise be invisible here.
   state.success = reading.success;
   state.rolling = false;
+  state.prompting = false;
   act.targets.set(id, state);
+  abortOwedPrompt(owedKey(usageId, id));
   await settle(act);
 }
 
@@ -334,6 +374,7 @@ async function onAutoFailedSave(message: any): Promise<void> {
     name: String(doc.name ?? "?"),
     success: null,
     rolling: false,
+    prompting: false,
     applied: false,
     saveMessage: null,
     offered: false,
@@ -347,7 +388,9 @@ async function onAutoFailedSave(message: any): Promise<void> {
   // The auto-fail card is not a d20, so legendary resistance cannot stamp `forceSuccess` on a
   // real roll. `considerResistance` still spends the resource and this layer flips `success`.
   state.saveMessage = message;
+  state.prompting = false;
   act.targets.set(id, state);
+  abortOwedPrompt(owedKey(act.usageId, id));
   log(
     `save resolution: ${state.name} auto-fails ${String(fail?.ability ?? "?")} (${String(fail?.status ?? "?")}) — recorded as a failed save`,
   );
@@ -409,6 +452,7 @@ function activation(usageId: string): Activation {
     deals: null,
     source: "",
     asking: null,
+    ridersSettled: false,
     targets: new Map(),
     at: Date.now(),
   };
@@ -439,6 +483,7 @@ function noteTargets(act: Activation, message: any): void {
       name: String(doc.name ?? target.name),
       success: null,
       rolling: false,
+      prompting: false,
       applied: false,
       saveMessage: null,
       offered: false,
@@ -457,6 +502,7 @@ function noteTargets(act: Activation, message: any): void {
  */
 async function settle(act: Activation): Promise<void> {
   await rollMissing(act);
+  void syncOwedFlag();
 
   // Anybody still deciding whether to spend a resource gets to finish first. Same shape as the damage
   // layer's reaction window and for the same reason: an answer that arrives after the damage has landed has
@@ -472,7 +518,12 @@ async function settle(act: Activation): Promise<void> {
   // deals damage. The damage loop below returns early when none has arrived; that must not take
   // the riders with it. After `spoilAndResist`, so a spoiled success and a bought failure have
   // already moved between the two lists.
-  await dispatchSaveTriggers(act);
+  try {
+    await dispatchSaveTriggers(act);
+  } finally {
+    act.ridersSettled = true;
+    void syncOwedFlag();
+  }
 
   if (!act.damage) return;
 
@@ -684,55 +735,145 @@ function wePlayToken(doc: any): boolean {
 }
 
 /**
- * Roll a save for every target this client is the designated roller for.
+ * Roll a save for every target that still needs one.
  *
  * The election is `isRollerFor`, not a truthy `rollerForActor`. That function always names
  * someone when a GM is online (the player, else the GM), so treating a name as "leave the
  * button" skipped every NPC save — Hold Person's Wisdom DC sat on Bardo's usage card and
  * the Assassin never rolled. A connected player still owns their own dice: `isRollerFor`
- * is false on the GM for that character, and the button stays.
+ * is false on the GM for that character, so they are prompted on their client. If the
+ * elected auto-roll does not land, that combatant is prompted too — a GM can ignore a
+ * button the same way a player can.
  */
 async function rollMissing(act: Activation): Promise<void> {
   const ask = act.ask;
   if (!ask || ask.dc === null || !ask.abilities.length) return;
 
+  const jobs: Promise<void>[] = [];
   for (const state of act.targets.values()) {
     if (state.success !== null || state.rolling || state.applied) continue;
     const actor = state.doc?.actor;
     if (!actor?.system?.abilities) continue;
-    if (!isRollerFor(actor)) {
-      const who = rollerForActor(actor);
-      log(`save resolution: leaving ${state.name}'s save for ${who ?? "a player"}`);
+    if (isRollerFor(actor) && !shouldPromptOwed(owedSecondsFor(actor))) {
+      jobs.push(
+        (async () => {
+          await rollForTarget(act, state);
+          if (state.success === null && !state.applied) await collectPlayerSave(act, state);
+        })(),
+      );
       continue;
     }
+    jobs.push(collectPlayerSave(act, state));
+  }
+  if (jobs.length) {
+    void syncOwedFlag();
+    await Promise.all(jobs);
+    void syncOwedFlag();
+  }
+}
 
-    const ChatMessage = (globalThis as any).ChatMessage;
-    state.rolling = true;
-    log(`save resolution: rolling ${ask.abilities[0]} DC ${ask.dc} for ${state.name}`);
-    try {
-      await actor.rollSavingThrow(
-        { ability: ask.abilities[0], target: ask.dc },
-        // No dialog: this is the roll the GM was going to make without thinking about it. Any advantage
-        // or disadvantage the creature is entitled to is already in the roll — `#rollD20Test` reads the
-        // ability's roll mode, which is where the condition layer and AC5e both put theirs.
-        { configure: false },
-        {
-          data: {
-            speaker: ChatMessage.getSpeaker({ actor, token: state.doc }),
-            // Stamped by hand because we did not click a button, and this is the only thread back to the
-            // activation. Without it our own roll would arrive as an unjoinable save.
-            flags: { dnd5e: { originatingMessage: act.usageId } },
-          },
-        },
-      );
-    } catch (err) {
-      log(`save resolution: could not roll a save for ${state.name}:`, err);
-    } finally {
-      // A cancelled auto-fail returns [] without throwing. Leave `rolling` set only while a
-      // verdict is still outstanding so a later settle can retry; `onAutoFailedSave` clears
-      // it itself when the card arrives.
-      if (state.success === null) state.rolling = false;
+/** Outstanding unpaid saves the initiative gate reads — every combatant, not only players. */
+function listOwedSaves(): OwedLine[] {
+  const out: OwedLine[] = [];
+  for (const act of activations.values()) {
+    if (!act.ask || act.ask.dc === null) continue;
+    for (const [tokenId, state] of act.targets) {
+      if (state.applied) continue;
+      if (state.success !== null && act.ridersSettled) continue;
+      if (!state.doc?.actor) continue;
+      out.push({
+        tokenId,
+        name: state.name,
+        kind: "save",
+        ability: act.ask.abilities[0] ?? "",
+        dc: act.ask.dc,
+        source: act.source,
+      });
     }
+  }
+  return out;
+}
+
+async function collectPlayerSave(act: Activation, state: TargetState): Promise<void> {
+  if (state.prompting || state.success !== null || state.rolling || state.applied) return;
+  const ask = act.ask;
+  if (!ask || ask.dc === null || !ask.abilities.length) return;
+  const actor = state.doc?.actor;
+  if (!actor) return;
+
+  const tokenId = String(state.doc?.id ?? "");
+  const who = rollerForActor(actor);
+  log(`save resolution: asking ${who ?? "a player"} for ${state.name}'s ${ask.abilities[0]} DC ${ask.dc}`);
+  state.prompting = true;
+  state.rolling = true;
+  void syncOwedFlag();
+  try {
+    const request: OwedRequest = {
+      kind: "save",
+      actorUuid: String(actor.uuid ?? ""),
+      tokenUuid: String(state.doc?.uuid ?? ""),
+      tokenId,
+      ability: ask.abilities[0]!,
+      dc: ask.dc,
+      source: act.source,
+      usageId: act.usageId,
+    };
+    const answer = await requestOwedRoll(request);
+    if (state.success !== null) return;
+    if (answer?.rolled || answer?.already) {
+      await waitForVerdict(state, 5_000);
+      if (state.success !== null) return;
+    }
+    // Offline, a hung query, or a roll that never joined: the GM is last resort.
+    log(`save resolution: rolling ${ask.abilities[0]} DC ${ask.dc} for ${state.name} (owed fallback)`);
+    await rollForTarget(act, state);
+  } finally {
+    state.prompting = false;
+    if (state.success === null) state.rolling = false;
+    void syncOwedFlag();
+  }
+}
+
+async function rollForTarget(act: Activation, state: TargetState): Promise<void> {
+  const ask = act.ask;
+  const actor = state.doc?.actor;
+  if (!ask || ask.dc === null || !ask.abilities.length || !actor) return;
+  if (state.success !== null || state.applied) return;
+
+  const ChatMessage = (globalThis as any).ChatMessage;
+  state.rolling = true;
+  log(`save resolution: rolling ${ask.abilities[0]} DC ${ask.dc} for ${state.name}`);
+  try {
+    await actor.rollSavingThrow(
+      { ability: ask.abilities[0], target: ask.dc },
+      // No dialog: this is the roll the GM was going to make without thinking about it. Any advantage
+      // or disadvantage the creature is entitled to is already in the roll — `#rollD20Test` reads the
+      // ability's roll mode, which is where the condition layer and AC5e both put theirs.
+      { configure: false },
+      {
+        data: {
+          speaker: ChatMessage.getSpeaker({ actor, token: state.doc }),
+          // Stamped by hand because we did not click a button, and this is the only thread back to the
+          // activation. Without it our own roll would arrive as an unjoinable save.
+          flags: { dnd5e: { originatingMessage: act.usageId } },
+        },
+      },
+    );
+  } catch (err) {
+    log(`save resolution: could not roll a save for ${state.name}:`, err);
+  } finally {
+    // A cancelled auto-fail returns [] without throwing. Leave `rolling` set only while a
+    // verdict is still outstanding so a later settle can retry; `onAutoFailedSave` clears
+    // it itself when the card arrives.
+    if (state.success === null) state.rolling = false;
+  }
+}
+
+async function waitForVerdict(state: TargetState, ms: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (state.success !== null) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
@@ -756,6 +897,7 @@ async function explain(why: string): Promise<void> {
 /** What this layer is holding, and why any of it is unfinished. */
 export function surveyDamageSaves(): unknown {
   return {
+    owed: owedOutstanding(),
     setting: COMBAT_SETTINGS.autoSaves,
     enabled: isAutoSavesEnabled(),
     running: active(),
@@ -769,6 +911,7 @@ export function surveyDamageSaves(): unknown {
         name: state.name,
         saved: state.success,
         rolling: state.rolling,
+        prompting: state.prompting,
         applied: state.applied,
         barbsOffered: state.barbed,
         resistanceOffered: state.offered,

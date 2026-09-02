@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.44
+
+**A demanded off-turn roll cannot be walked past.** A save, skill check,
+contested ability check, or concentration check that sits on a chat-card
+button now prompts on the owner's client. If they do not roll, Foundry
+rolls against that sheet. There is no Skip. Initiative will not advance,
+and that token cannot walk or use an activity, until every target of the
+demand has a die — Mass Suggestion on four characters holds until all
+four exist. Legendary actions fire after the tracker has already moved,
+so the hold sits there before the new combatant acts.
+
+Two clocks on the Combat page (Rolling and reporting): **GM** defaults to
+0 (roll immediately, no dialog — a Fireball on five goblins still costs
+no presses) and **Players** defaults to 6. Either can go to 120. 0 means
+full automation for that audience. Who is elected to roll picks the
+clock, not sheet type.
+
+Opportunity attacks and damage stay on their own layers (the reaction
+prompt, and auto-damage). This gate is the demanded check that used to
+sit unpressed while the fight moved on.
+
+**Melee Advantage against a stunned Large creature.** A single
+centre-to-centre wall ray was inventing Disadvantage ("unseen target")
+and cancelling the stunned Advantage highlight. Sight now walks occupied
+squares and fails toward "can see."
+
 ## 0.7.43
 
 **Using an ability is not the verdict.** Stunning Strike wrote Advantage on the

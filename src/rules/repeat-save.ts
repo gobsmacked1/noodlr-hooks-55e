@@ -32,9 +32,10 @@
 import { MODULE_ID, log } from "../constants";
 import { isRepeatSaveEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
-import { isRollerFor } from "../util/gm";
+import { isPrimaryGM } from "../util/gm";
 import { speakerFor } from "../util/speaker";
 import { readFlag } from "../util/flags";
+import { collectDemanded, type OwedLine, type OwedRequest } from "./owed-roll";
 
 const FLAG = "repeatSaves";
 
@@ -123,10 +124,12 @@ export async function rollPendingSaves(actor: any): Promise<void> {
   const clauses = pending(actor);
   if (clauses.length === 0) return;
 
-  // A player's Wisdom save is the player's roll, on the same reasoning as the concentration layer:
-  // Bless, Inspiration and a reroll are all decisions, and they belong to whoever owns the creature.
-  if (!isRollerFor(actor)) return;
+  // Bookkeeping once. The owner rolls via owed-roll (clock rolls; a cancelled system dialog
+  // used to keep the clause forever, which is the skip this gate exists to close).
+  if (!isPrimaryGM()) return;
 
+  const token = firstToken(actor);
+  const tokenId = String(token?.id ?? actor?.id ?? "");
   const survivors: RepeatSave[] = [];
   for (const clause of clauses) {
     const status = String(clause.status).toLowerCase();
@@ -139,14 +142,31 @@ export async function rollPendingSaves(actor: any): Promise<void> {
       continue;
     }
 
-    const passed = await rollOne(actor, clause);
-    if (passed === null) {
-      // Cancelled, or the roll would not build. Keep the clause: a save nobody answered is not a
-      // failed one, and the creature gets asked again at the end of its next turn.
+    const request: OwedRequest = {
+      kind: "save",
+      actorUuid: String(actor.uuid ?? ""),
+      tokenUuid: String(token?.uuid ?? ""),
+      tokenId,
+      ability: clause.ability,
+      dc: clause.dc,
+      source: clause.source || status,
+      usageId: `repeat:${String(actor.uuid ?? actor.id ?? "")}:${status}:${Date.now()}`,
+    };
+    const line: OwedLine = {
+      tokenId,
+      name: String(actor.name ?? ""),
+      kind: "save",
+      ability: clause.ability,
+      dc: clause.dc,
+      source: request.source,
+    };
+    const answer = await collectDemanded(request, line);
+    const total = Number(answer?.total);
+    if (!Number.isFinite(total)) {
       survivors.push(clause);
       continue;
     }
-    if (!passed) {
+    if (total < clause.dc) {
       survivors.push(clause);
       continue;
     }
@@ -156,21 +176,14 @@ export async function rollPendingSaves(actor: any): Promise<void> {
   if (survivors.length !== clauses.length) await store(actor, survivors);
 }
 
-/** True on a success, false on a failure, null when no verdict was produced. */
-async function rollOne(actor: any, clause: RepeatSave): Promise<boolean | null> {
+function firstToken(actor: any): any {
   try {
-    const rolls = await actor.rollSavingThrow?.(
-      { ability: clause.ability, target: clause.dc },
-      { configure: Boolean(actor?.hasPlayerOwner) },
-    );
-    const total = Number(rolls?.[0]?.total);
-    if (!Number.isFinite(total)) return null;
-    // Meets the DC on equal, which is the general rule for every save in both editions.
-    return total >= clause.dc;
-  } catch (err) {
-    log(`repeat save: could not roll for ${String(actor?.name)}:`, err);
-    return null;
+    const placed = actor?.getActiveTokens?.() ?? [];
+    if (placed.length) return placed[0]?.document ?? placed[0];
+  } catch {
+    /* an unreadable token list is not a reason to skip the save */
   }
+  return actor?.token ?? null;
 }
 
 /** Take the status off and say so, so the table sees the effect end rather than just stop mattering. */
@@ -209,11 +222,11 @@ async function end(actor: any, clause: RepeatSave): Promise<void> {
 /**
  * Watch for turns ending.
  *
- * Registered on EVERY client, not just the GM's, which is why this cannot reuse the capability
- * executor's identical-looking tracker: that one is `isPrimaryGM()`-gated because it executes world
- * mutations, while a repeat save has to be rolled by whoever owns the creature. Two watchers reading
- * one hook, each keeping its own idea of the previous combatant, is the cheapest way to have both
- * gates — and each is a dozen lines with no shared state to drift.
+ * The turn watcher still registers on every client so a status deleted on the owner's machine
+ * clears the clause. The roll itself is primary-GM bookkeeping plus owed-roll: the owner is
+ * asked on their client, and the clock rolls if they do not. Two watchers reading one hook
+ * (this and the capability executor) keep their own previous-combatant, because the executor
+ * is GM-gated for mutations and this one is not.
  */
 export function registerRepeatSaveWatch(): void {
   let previous: string | null = null;

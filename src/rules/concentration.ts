@@ -10,7 +10,8 @@
 //
 //   1. On damage, roll the save — on the CLIENT THAT OWNS THE CREATURE, so a player's Constitution
 //      save stays the player's roll. The stock prompt is suppressed first so there is never a stale
-//      button sitting in the log that would produce a second save.
+//      button sitting in the log that would produce a second save. A cancelled dialog used to
+//      restock that button; owed-roll's clock rolls instead, and initiative waits.
 //   2. On a failed save, end concentration and say so out loud.
 //   3. On Incapacitated, death, or 0 hit points, end it with no save at all. That clause is RAW in
 //      both editions and is automated nowhere.
@@ -25,7 +26,8 @@
 import { COMBAT_SETTINGS, log, MODULE_ID } from "../constants";
 import { announceRuling } from "../integration/contract";
 import { enabledForEither, isConcentrationAutomationEnabled } from "../settings";
-import { isRollerFor, rollerForActor } from "../util/gm";
+import { isPrimaryGM, isRollerFor, rollerForActor } from "../util/gm";
+import { collectDemanded, type OwedLine, type OwedRequest } from "./owed-roll";
 import { speakerFor } from "../util/speaker";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
@@ -127,8 +129,8 @@ async function endAll(actor: any, reason: string): Promise<void> {
 /**
  * Damage landed. Either the spell is already gone, or somebody owes a saving throw.
  *
- * `dnd5e.damageActor` fires on every connected client, which is exactly what makes routing possible:
- * each one asks whether it is the elected roller and only one says yes.
+ * `dnd5e.damageActor` fires on every connected client. Bookkeeping is primary-GM only so the
+ * owed line is held once; the owner rolls on their client through owed-roll.
  */
 async function onDamaged(actor: any, changes: { total?: number }): Promise<void> {
   if (!enabled(actor) || !isConcentrating(actor)) return;
@@ -144,28 +146,49 @@ async function onDamaged(actor: any, changes: { total?: number }): Promise<void>
     return;
   }
 
-  if (!isRollerFor(actor)) return;
+  // Bookkeeping once, on the primary GM. The owner rolls via owed-roll (clock rolls; there is
+  // no Skip and no restocked chat-card button). A cancelled dialog used to call
+  // `challengeConcentration`, which is the skippable button this gate exists to close.
+  if (!isPrimaryGM()) return;
 
   const dc = concentrationDC(actor, damage);
-  // A monster's save is bookkeeping; a character's is a decision (Bless, Inspiration, a reroll), so
-  // the dialog follows who the creature belongs to rather than who is clicking.
-  const configure = Boolean(actor?.hasPlayerOwner);
-
+  const token = firstToken(actor);
+  const tokenId = String(token?.id ?? actor?.id ?? "");
+  const labels = concentrationLabels(actor);
+  const source = labels.join(", ") || "concentration";
+  const request: OwedRequest = {
+    kind: "concentration",
+    actorUuid: String(actor.uuid ?? ""),
+    tokenUuid: String(token?.uuid ?? ""),
+    tokenId,
+    ability: "con",
+    dc,
+    source,
+    usageId: `concentration:${String(actor.uuid ?? actor.id ?? "")}:${Date.now()}`,
+  };
+  const line: OwedLine = {
+    tokenId,
+    name: String(actor?.name ?? "Someone"),
+    kind: "concentration",
+    ability: "con",
+    dc,
+    source,
+  };
   try {
-    const rolls = await actor.rollConcentration({ target: dc }, { configure });
-    if (!rolls?.length) {
-      // Cancelled, or refused because this client turned out not to own the actor after all. Hand
-      // the table back the prompt we suppressed rather than letting the save vanish silently.
-      await actor.challengeConcentration?.({ dc });
-    }
+    await collectDemanded(request, line);
   } catch (err) {
     log(`concentration: save for ${String(actor?.name)} failed to roll:`, err);
-    try {
-      await actor.challengeConcentration?.({ dc });
-    } catch {
-      // nothing further to try
-    }
   }
+}
+
+function firstToken(actor: any): any {
+  try {
+    const placed = actor?.getActiveTokens?.() ?? [];
+    if (placed.length) return placed[0]?.document ?? placed[0];
+  } catch {
+    /* an unreadable token list is not a reason to skip the save */
+  }
+  return actor?.token ?? null;
 }
 
 /**

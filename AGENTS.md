@@ -3542,6 +3542,36 @@ button press.
   crossbow in that same fight was the Assassin's opening turn (init 29 vs 12), before the spell, not
   impatience after it. `test/gm.test.ts` pins the gate. The usage card's speaker is the system's and is
   not rewritten here; the Assassin's own save card is what tells a new player who is rolling.
+- **A demanded d20 is prompted, not left a button anyone can walk past (2026-09-02).** The Beholder's
+  Eye Rays are the specimen: the save that decides petrification sat on a chat card, initiative moved,
+  and the Monk took a turn as if nothing had happened. `src/rules/owed-roll.ts` asks on the owner's
+  client with the same six-second clock as a reaction; the timeout **rolls** against their sheet, never
+  skips. Dismissing the dialog rolls. There is no Skip. **Every combatant**, not only players — a GM
+  who ignores an NPC's chat-card button is the same skip. **Every demanded d20**, not only saves: a
+  Grapple, a forced Deception or Performance, a repeat end-of-turn save, and a concentration check.
+  **Every target of one demand** — Mass Suggestion on four of six holds until all four dice exist.
+  Initiative will not advance, and an owing token cannot walk or use an activity, until the list is
+  empty. Legendary rays fire in `onAdvance` *after* the tracker has already moved, so the hold sits
+  there (after `fireLegendaryActions`, before `takeTurn`) as well as in `endAutomatedTurn`. A wait
+  only at `nextTurn` is too late. The prompt handler is registered on every client, like reactions;
+  `registerSaveResolution` stays GM-only. Concentration and repeat-save bookkeep on the primary GM
+  and must not restock `challengeConcentration` on a cancel. Rides on `combat.autoSaves` for
+  save/check activities — no second switch. `OWED_TIMEOUT_CHOICE` is pinned as `"roll"`.
+  Two clocks (`combat.owedSeconds.gm` / `.players`), 0–120, default GM **0** (Fireball on
+  goblins still auto-rolls) and Players **6**. **0 = no prompt, roll immediately.** Who
+  is elected to roll (`rollerForActor` is a GM vs a player) picks the clock — not sheet
+  type, or "All Players: Owner" would give every goblin the Player timer. Transport and
+  `waitForOwedRolls` size to the longer clock so a 120 s Player timer is not GM-rolled
+  at 30 s. **OA attack rolls and damage rolls stay on their own layers** — the
+  reaction offer and auto-damage / the damage gate. This clock is the demanded
+  check that used to sit unpressed on a chat card while the fight moved on.
+- **Advantage + Disadvantage highlights neither button (Monk vs stunned Beholder, 2026-09-02).**
+  The condition layer did apply `vs:stunned`. dnd5e's `D20Roll.applyKeybindings` then cancelled it
+  against `unseen target (no line of sight)` from a single centre-to-centre ray. A Large token
+  adjacent to a Medium one is ~8 ft between centres; that ray often clips a wall the shared edge
+  does not. `sightOccluded` walks occupied-square centres and fails toward "can see". Do not
+  highlight Advantage when they truly cancel. Prone was not on that log line — Stunning Strike
+  2024 is stun only.
 - **A cancelled auto-fail is a failed save, not a missing verdict (2026-08-18).** Disintegrate vs a
   Paralyzed Assassin rolled Dex DC 20, the condition layer cancelled it (`Assassin auto-fails DEX —
   no roll`), and Apply sat on 70 force. `settle` skips `success === null`; `damage.ts` silently

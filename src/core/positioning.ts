@@ -173,6 +173,47 @@ export function cellCenters(fp: Footprint, gridSize: number): Point[] {
 }
 
 /**
+ * Sight is occluded only when every readable ray between occupied squares is blocked.
+ *
+ * A single centre-to-centre ray on a Large token next to a Medium one often clips a wall
+ * the shared edge does not. That invented "no line of sight", stacked Disadvantage on
+ * stunned Advantage, and the attack dialog highlighted neither button. Fail toward
+ * "can see": any clear pair, or an unreadable API, is not occlusion.
+ *
+ * Exported so a test can pin the fold without a canvas.
+ */
+export function sightPairsOccluded(readings: readonly (boolean | null)[]): boolean {
+  let anyClear = false;
+  let anyReadable = false;
+  for (const hit of readings) {
+    if (hit === null) continue;
+    anyReadable = true;
+    if (hit === false) anyClear = true;
+  }
+  return anyReadable && !anyClear;
+}
+
+/** True only when every occupied-square pair that can be tested is walled off. */
+export function sightOccluded(a: any, b: any): boolean {
+  const fa = footprintOf(a);
+  const fb = footprintOf(b);
+  const grid = Number((globalThis as any).canvas?.grid?.size ?? 0);
+  const cellsA = fa && grid > 0 ? cellCenters(fa, grid) : [];
+  const cellsB = fb && grid > 0 ? cellCenters(fb, grid) : [];
+  if (cellsA.length && cellsB.length) {
+    const readings: (boolean | null)[] = [];
+    for (const p of cellsA) {
+      for (const q of cellsB) readings.push(blocked(p, q, "sight"));
+    }
+    return sightPairsOccluded(readings);
+  }
+  const from = centerOf(a);
+  const to = centerOf(b);
+  if (!from || !to) return false;
+  return blocked(from, to, "sight") === true;
+}
+
+/**
  * 5e melee range between two token footprints: the closest pair of occupied squares.
  *
  * Adjacent creatures of any size measure one square (usually 5 ft). Centre-to-centre

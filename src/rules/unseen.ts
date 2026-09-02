@@ -18,11 +18,14 @@
 // surface as a rogue who is unseen enough to avoid starting a fight but not unseen enough to get
 // Advantage, which reads as the module being broken rather than as two implementations drifting.
 //
-// WHAT IS APPROXIMATE, STATED PLAINLY. Line of sight is a single ray between the two token centres
-// (`blocked`), not the per-creature detection-mode sweep `rules/perception.ts` runs. That sweep is the
-// right answer and cannot be afforded inside a synchronous pre-roll hook that fires on every attack in
-// the fight. Consequences: total cover is caught, partial cover is not, and a creature whose only sense
-// is blindsight through a wall is handled by the sense check rather than by the ray.
+// WHAT IS APPROXIMATE, STATED PLAINLY. Line of sight walks occupied-square centres (`sightOccluded`),
+// not a single ray between token centres and not the per-creature detection-mode sweep
+// `rules/perception.ts` runs. That sweep is the right answer and cannot be afforded inside a
+// synchronous pre-roll hook that fires on every attack in the fight. A centre-to-centre ray on a
+// Large token next to a Medium one is the melee-reach bug arriving as Disadvantage: the centres are
+// ~8 ft apart and the ray often clips a wall the shared edge does not. Any clear pair means they
+// can see. Consequences: total cover is caught, partial cover is not, and a creature whose only
+// sense is blindsight through a wall is handled by the sense check rather than by the ray.
 //
 // EVERY FAILURE FALLS TOWARD "CAN SEE". An unreadable canvas, a missing token, a null from `blocked` —
 // all of them mean the attack rolls straight. That is deliberate: a spurious Advantage is a hit that
@@ -30,7 +33,7 @@
 // swing the table can still argue about.
 
 import { log } from "../constants";
-import { blocked, centerOf } from "../core/positioning";
+import { sightOccluded } from "../core/positioning";
 import { hasStatus, isIncapacitated } from "../system/dnd5e-conditions";
 import { separation } from "./sight";
 import { evades } from "./stealth";
@@ -62,9 +65,7 @@ export function unseenBy(spotter: any, subject: any): string | null {
   const veiled = evades(spotter, subject, distance, false);
   if (veiled) return veiled;
 
-  const from = centerOf(spotter);
-  const to = centerOf(subject);
-  if (from && to && blocked(from, to, "sight") === true) return "no line of sight";
+  if (sightOccluded(spotter, subject)) return "no line of sight";
   return null;
 }
 

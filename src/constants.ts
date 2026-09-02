@@ -56,6 +56,16 @@ export const COMBAT_SETTINGS = {
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */
   autoSaves: "combat.autoSaves",
   /**
+   * Seconds a GM-elected roller has to press a demanded d20 before Foundry rolls it.
+   * 0 = no prompt, roll immediately (full unresolved-roll automation).
+   */
+  owedSecondsGm: "combat.owedSeconds.gm",
+  /**
+   * Seconds a player-elected roller has to press a demanded d20 before Foundry rolls it.
+   * Same control as `owedSecondsGm`: 0–120, 0 = roll immediately.
+   */
+  owedSecondsPlayers: "combat.owedSeconds.players",
+  /**
    * Whether a placed MeasuredTemplate is deleted when its turn is over or its source is gone.
    *
    * Instantaneous leftovers (Fireball) and broken-concentration leftovers (a cone that was never a

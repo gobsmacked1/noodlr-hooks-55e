@@ -38,6 +38,13 @@ export interface ChoiceRequest {
   /** Picked when the countdown runs out, or when there is nothing to draw a dialog with. */
   defaultId: string;
   seconds?: number;
+  /**
+   * Abort the dialog without taking the default. Used when the person already answered
+   * another way (they pressed the chat-card save button) so the clock must not roll again.
+   */
+  signal?: AbortSignal;
+  /** Settled when `signal` aborts. Falls back to `defaultId` if omitted. */
+  abortId?: string;
 }
 
 /** Six seconds, which is the number the brief asked for and also one round of combat. */
@@ -54,6 +61,8 @@ export const DEFAULT_SECONDS = 6;
 export async function promptChoice(request: ChoiceRequest): Promise<string> {
   const DialogV2: any = (globalThis as any).foundry?.applications?.api?.DialogV2;
   const seconds = Math.max(1, Math.round(request.seconds ?? DEFAULT_SECONDS));
+  const abortedId = request.abortId ?? request.defaultId;
+  if (request.signal?.aborted) return abortedId;
   if (!DialogV2 || !request.choices.length) {
     log("prompt: nothing to draw a dialog with, so the default stands");
     return request.defaultId;
@@ -65,11 +74,18 @@ export async function promptChoice(request: ChoiceRequest): Promise<string> {
     let ticker: any = null;
     let dialog: any = null;
 
+    const onAbort = (): void => settle(abortedId);
+
     const settle = (id: string): void => {
       if (done) return;
       done = true;
       if (timer) clearTimeout(timer);
       if (ticker) clearInterval(ticker);
+      try {
+        request.signal?.removeEventListener("abort", onAbort);
+      } catch {
+        /* signal already finished */
+      }
       resolve(id);
       try {
         dialog?.close();
@@ -79,6 +95,7 @@ export async function promptChoice(request: ChoiceRequest): Promise<string> {
     };
 
     try {
+      request.signal?.addEventListener("abort", onAbort, { once: true });
       dialog = new DialogV2({
         window: { title: request.title },
         classes: ["noodlr-hooks", "noodlr-hooks-prompt"],

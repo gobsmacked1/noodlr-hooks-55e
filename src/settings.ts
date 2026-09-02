@@ -170,6 +170,15 @@ export function registerCombatSettings(): void {
   // the party to click) is the wrong way round.
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
+  // Two identical clocks — who is elected to roll, not sheet type. `hasPlayerOwner` would treat
+  // every goblin as a player on "All Players: Owner". GM defaults to 0 so a Fireball on five
+  // goblins still rolls itself; players keep the six-second prompt. 0 is automate, not skip.
+  world(COMBAT_SETTINGS.owedSecondsGm, "OwedSeconds.Gm", Number, 0, {
+    range: { min: 0, max: 120, step: 1 },
+  });
+  world(COMBAT_SETTINGS.owedSecondsPlayers, "OwedSeconds.Players", Number, 6, {
+    range: { min: 0, max: 120, step: 1 },
+  });
   world(COMBAT_SETTINGS.templateLifetime, "TemplateLifetime", Boolean, true);
   world(COMBAT_SETTINGS.damageGate, "DamageGate", Boolean, true);
   split(COMBAT_SETTINGS.reactionPrompts, "ReactionPrompts", Boolean, { npc: true, pc: true });
@@ -495,11 +504,10 @@ export function isAutoDamageEnabled(subject: unknown): boolean {
  * the activity's own "on save" setting says half, none or full, and neither is ever read: the result is a
  * number in the chat log for a human to interpret, after which that human works out half of 24.
  *
- * NOT per audience, unlike applying the damage, and the asymmetry people expect is here already without a
- * switch: a creature nobody but the GM can roll for has its save rolled automatically, and a character
- * with a player owner does not, because that player came to the table to roll it. That is derived from
- * ownership rather than configured, which is the right place for it — a table does not want a preference,
- * it wants its players rolling their own dice.
+ * NOT per audience in the sheet-type sense, unlike applying the damage. Who is asked is the
+ * elected roller (`rollerForActor`): a GM-owned combatant uses the GM clock, a player-owned one
+ * uses the Player clock. 0 on either clock means roll immediately, no dialog. The timeout still
+ * rolls, never skips.
  *
  * What this does NOT do is apply the conditions a failed save imposes. Those live on the item as prose,
  * which is the compiler's problem rather than this layer's.

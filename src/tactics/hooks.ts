@@ -20,6 +20,14 @@ import { hasResolved } from "./encounter";
 import { isFleeingCombatant } from "./flee";
 import { fireLegendaryActions, noteLegendaryAdvance, resetLegendaryAdvance } from "./legendary-act";
 import { isUnableToAct, skipReason } from "./skip";
+import {
+  waitForOwedRolls,
+  owedOutstanding,
+  OWED_CLEARED,
+} from "../rules/owed-roll";
+
+/** Why we have not yet advanced or played: an Eye Ray save (or similar) is still open. */
+let owedHold: "take" | "next" | null = null;
 
 /**
  * Floor on how long an automated turn occupies the table, in milliseconds.
@@ -77,6 +85,14 @@ async function endAutomatedTurn(
     if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
     // Re-check: the pause is long enough for the GM to have acted during it.
     if (!combat?.started || String(combat.combatant?.id ?? "") !== playedId) return;
+  }
+
+  const clear = await waitForOwedRolls();
+  if (!clear) {
+    owedHold = "next";
+    const names = owedOutstanding().map((o) => o.name).join(", ");
+    log(`automation holding nextTurn — ${names || "a demanded roll"} still outstanding`);
+    return;
   }
 
   try {
@@ -162,7 +178,25 @@ async function onAdvance(combat: any): Promise<void> {
   // Eye Rays at the end of the turn that just finished, before the next creature acts.
   // Awaited so a Beholder that is also next in order rays first, then takes its turn.
   await fireLegendaryActions(combat, ended);
+  // Legendary rays post AFTER the tracker has already moved. Waiting only in `nextTurn`
+  // lets the new current combatant act (or be played) before a petrify save exists.
+  const clear = await waitForOwedRolls();
+  if (!clear) {
+    owedHold = "take";
+    const names = owedOutstanding().map((o) => o.name).join(", ");
+    log(`automation holding takeTurn — ${names || "a demanded roll"} still outstanding`);
+    return;
+  }
   takeTurn(combat);
+}
+
+function resumeOwedHold(): void {
+  const what = owedHold;
+  owedHold = null;
+  const combat = (globalThis as any).game?.combat;
+  if (!combat?.started) return;
+  if (what === "take") takeTurn(combat);
+  else if (what === "next") void combat.nextTurn?.();
 }
 
 export function registerAutomationTurnHook(): void {
@@ -170,7 +204,13 @@ export function registerAutomationTurnHook(): void {
     consecutive = 0;
     playing = null;
     waiting = false;
+    owedHold = null;
     resetLegendaryAdvance();
+  });
+
+  Hooks.on(OWED_CLEARED, () => {
+    if (!owedHold) return;
+    resumeOwedHold();
   });
 
   Hooks.on("updateCombat", (combat: any, changed: any) => {

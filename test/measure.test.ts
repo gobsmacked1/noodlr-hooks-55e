@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { afterEach, test } from "node:test";
 
-import { centerOf, measureBetween, tokenDistance } from "../src/core/positioning";
+import { centerOf, measureBetween, sightPairsOccluded, tokenDistance } from "../src/core/positioning";
 
 const GRID = 100;
 const PER_SQUARE = 5;
@@ -82,6 +82,16 @@ test("a Large token adjacent to a Medium one is 5 ft, not ~8", () => {
   assert.equal(tokenDistance(monk, beholder), PER_SQUARE);
   const centres = measureBetween(centerOf(monk)!, centerOf(beholder)!);
   assert.ok(centres > 7 && centres < 8);
+});
+
+test("sight is occluded only when every readable ray is blocked", () => {
+  // THE BUG: one blocked centre-to-centre ray on a Large adjacent token invented
+  // Disadvantage, cancelled stunned Advantage, and highlighted neither button.
+  assert.equal(sightPairsOccluded([true]), true);
+  assert.equal(sightPairsOccluded([true, false]), false);
+  assert.equal(sightPairsOccluded([true, null, false]), false);
+  assert.equal(sightPairsOccluded([null, null]), false);
+  assert.equal(sightPairsOccluded([]), false);
 });
 
 test("two Mediums in adjacent squares are still one square apart", () => {
