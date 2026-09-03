@@ -166,6 +166,7 @@ export function registerCombatSettings(): void {
   );
   world(COMBAT_SETTINGS.movement, "Movement", Boolean, true);
   world(COMBAT_SETTINGS.forced, "Forced", Boolean, true);
+  world(COMBAT_SETTINGS.masteries, "Masteries", Boolean, true);
   // Both sides on: see `isAutoDamageEnabled()` for why the obvious asymmetry (automate monsters, leave
   // the party to click) is the wrong way round.
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
@@ -362,6 +363,17 @@ function storedValue(fullKey: string): unknown {
  */
 export function isForcedMovementEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.forced));
+}
+
+/**
+ * Whether Sap, Slow, Topple, Vex and Cleave apply themselves.
+ *
+ * Push stays on `combat.forced` (it moves a token). Graze stays on auto-damage (flat modifier on
+ * a miss). Nick stays on the action ledger (a free Light swing). This switch is the remaining five.
+ * On by default: a label on the card that never does the thing is how these sat for months.
+ */
+export function isMasteriesEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.masteries));
 }
 
 /**

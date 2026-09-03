@@ -556,6 +556,15 @@ const SHARED_STATE: Section = {
       ownership: "forced",
     },
     {
+      id: "masteries",
+      label: "NOODLRHOOKS.Combat.Masteries.Name",
+      hint: "NOODLRHOOKS.Combat.Masteries.Hint",
+      state: "live",
+      setting: C.masteries,
+      kind: "boolean",
+      ownership: "masteries",
+    },
+    {
       id: "movement",
       label: "NOODLRHOOKS.Combat.Movement.Name",
       hint: "NOODLRHOOKS.Combat.Movement.Hint",

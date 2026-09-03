@@ -38,6 +38,7 @@ const ALL_RULES = {
   [C.importantNpcSaves]: true,
   [C.concentration]: true,
   [C.forced]: true,
+  [C.masteries]: true,
   [C.movement]: true,
   [C.stealth]: true,
   [C.surprise]: true,

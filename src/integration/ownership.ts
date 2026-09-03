@@ -365,6 +365,7 @@ const AREAS: Area[] = [
         : null;
     },
   },
+  { id: "masteries", setting: COMBAT_SETTINGS.masteries },
   { id: "movement", setting: COMBAT_SETTINGS.movement },
   { id: "economy", setting: COMBAT_SETTINGS.economy, enabled: (key) => economyOn(key) },
   { id: "stealth", setting: COMBAT_SETTINGS.stealth },
@@ -869,15 +870,15 @@ function sceneAdvisories(): Advisory[] {
 export function conflicts(): Advisory[] {
   const out: Advisory[] = [];
 
-  if (moduleActive("wm5e") && settingOn(COMBAT_SETTINGS.forced)) {
+  if (moduleActive("wm5e") && (settingOn(COMBAT_SETTINGS.forced) || settingOn(COMBAT_SETTINGS.masteries))) {
     out.push({
       level: "warn",
-      title: "Weapon Mastery 5e may double up on Push",
+      title: "Weapon Mastery 5e may double up on masteries",
       detail:
-        "This module implements the Push mastery natively (Pike, Warhammer, Heavy Crossbow, " +
-        "Greatclub) and does not recognise wm5e, so a hit with one of those may move the target " +
-        "twice. UNVERIFIED — wm5e's source has not been read. If you see a double push, turn off " +
-        "forced movement here and let wm5e have it.",
+        "This module implements Push natively (on forced movement) and Sap, Slow, Topple, Vex " +
+        "and Cleave on the masteries switch. It does not recognise wm5e, so a hit may apply a " +
+        "mastery twice. UNVERIFIED — wm5e's source has not been read. If you see a double " +
+        "application, turn the matching switch off here and let wm5e have it.",
     });
   }
 

@@ -43,6 +43,7 @@ import { considerAgainstDiceMods, considerDiceMods } from "./dice-mod";
 import { considerDamageDice } from "./damage-dice";
 import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
 import { offerSneakAttack } from "./sneak";
+import { applyCleaveCut, noteMasteryDamageDealt, peekCleaveCut } from "./masteries";
 import {
   activityOf,
   damageParts,
@@ -540,6 +541,11 @@ export async function applyRolledDamage(
   const healing = isHealing(parts);
   const lines: string[] = [];
   const snapshots: HpSnapshot[] = [];
+  const attacker = speakerToken(message?.speaker)?.actor;
+  // Peek only. The subtract that actually lands is `preCalculateDamage` in masteries.ts,
+  // so a skipped auto-damage path still trims when someone presses Apply. Passing `dealt`
+  // into `applyDamageTo` would cut twice.
+  const dealt = applyCleaveCut(parts, peekCleaveCut(attacker, message));
 
   for (const entry of entries) {
     const doc = entry.doc;
@@ -561,12 +567,19 @@ export async function applyRolledDamage(
       continue;
     }
     const after = snapshotHp(actor);
+    if (
+      before &&
+      after &&
+      (after.value < before.value || after.temp < before.temp)
+    ) {
+      void noteMasteryDamageDealt(actor);
+    }
     if (before) snapshots.push(before);
     // The amount reported is what was ROLLED, adjusted only by the multiplier we passed. It is
     // deliberately not the difference in hit points: those two disagree whenever the system resolved a
     // resistance or soaked something into temporary hit points, and the before → after pair beside it
     // already tells the honest half of that story.
-    const rolled = Math.abs(total(parts)) * entry.multiplier;
+    const rolled = Math.abs(total(dealt)) * entry.multiplier;
     lines.push(
       game.i18n.format(`NOODLRHOOKS.Combat.AutoDamage.${healing ? "Healed" : "Line"}`, {
         name: String(doc?.name ?? "?"),

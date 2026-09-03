@@ -31,6 +31,25 @@ interface GrantHit {
   advantage: boolean;
   disadvantage: boolean;
   source: string;
+  consume?: boolean;
+  effect?: any;
+}
+
+/**
+ * A grant that names `params.vs` only applies against that creature.
+ *
+ * Missing vs on the roll + a vs filter on the AE = fail closed (no grant). Vex is "your next
+ * attack against *that* creature"; granting it on a swing at somebody else would spend the AE
+ * and change the wrong die. A grant with no `vs` is unchanged — Reckless Attack and every
+ * compiled standing grant.
+ */
+export function vsMatches(params: Record<string, unknown>, vs: any): boolean {
+  const want = String(params.vs ?? "").trim();
+  if (!want) return true;
+  if (!vs) return false;
+  const have = String(vs.uuid ?? vs.actor?.uuid ?? "");
+  if (!have) return false;
+  return have === want || String(vs.actor?.uuid ?? "") === want;
 }
 
 function rollTypesOf(raw: unknown): Set<string> {
@@ -69,16 +88,25 @@ function matchesRoll(
   return true;
 }
 
-function fromEffect(effect: any, kind: RollKind, ability: string, skill: string): GrantHit | null {
+function fromEffect(
+  effect: any,
+  kind: RollKind,
+  ability: string,
+  skill: string,
+  vs?: any,
+): GrantHit | null {
   const flag = effect?.flags?.[MODULE_ID]?.timed;
   if (!flag || effect?.disabled || effect?.duration?.expired) return null;
   if (flag.kind !== "grant_advantage" && flag.kind !== "impose_disadvantage") return null;
   const params = (flag.params ?? {}) as Record<string, unknown>;
   if (!matchesRoll(params, kind, ability, skill)) return null;
+  if (!vsMatches(params, vs)) return null;
   return {
     advantage: flag.kind === "grant_advantage",
     disadvantage: flag.kind === "impose_disadvantage",
     source: String(flag.capability ?? effect.name ?? "compiled"),
+    consume: params.consume === true,
+    effect,
   };
 }
 
@@ -89,13 +117,16 @@ function fromParams(
   roll: RollKind,
   ability: string,
   skill: string,
+  vs?: any,
 ): GrantHit | null {
   if (kindName !== "grant_advantage" && kindName !== "impose_disadvantage") return null;
   if (!matchesRoll(params, roll, ability, skill)) return null;
+  if (!vsMatches(params, vs)) return null;
   return {
     advantage: kindName === "grant_advantage",
     disadvantage: kindName === "impose_disadvantage",
     source,
+    consume: params.consume === true,
   };
 }
 
@@ -104,13 +135,13 @@ function collect(actor: any, kind: RollKind, ability: string, skill: string, vs?
   if (!actor) return hits;
 
   for (const effect of actor.effects ?? []) {
-    const hit = fromEffect(effect, kind, ability, skill);
+    const hit = fromEffect(effect, kind, ability, skill, vs);
     if (hit) hits.push(hit);
   }
 
   for (const grant of standingGrants(actor)) {
     if (!grant.active) continue;
-    const hit = fromParams(grant.kind, grant.params, grant.capability, kind, ability, skill);
+    const hit = fromParams(grant.kind, grant.params, grant.capability, kind, ability, skill, vs);
     if (hit) hits.push(hit);
   }
 
@@ -138,6 +169,7 @@ function collect(actor: any, kind: RollKind, ability: string, skill: string, vs?
           kind,
           ability,
           skill,
+          vs,
         );
         if (hit) hits.push(hit);
       }
@@ -220,10 +252,22 @@ function targetActorOf(config: any): any {
   }
 }
 
+async function consumeHits(hits: GrantHit[]): Promise<void> {
+  for (const hit of hits) {
+    if (!hit.consume || !hit.effect) continue;
+    try {
+      if (typeof hit.effect.delete === "function") await hit.effect.delete();
+    } catch (err) {
+      log("grants: could not consume timed grant:", err);
+    }
+  }
+}
+
 function onPreRoll(config: any, kind: RollKind): void {
   const actor = actorOf(config);
   const hits = collect(actor, kind, abilityOf(config), skillOf(config), kind === "attack" ? targetActorOf(config) : undefined);
   applyToConfig(config, hits);
+  void consumeHits(hits);
 }
 
 export function registerGrantHooks(): void {
@@ -277,5 +321,5 @@ export function registerGrantHooks(): void {
 
 /** Exported so a test can pin the rollType matching without a scene. */
 export function __grantsInternals() {
-  return { rollTypesOf, matchesRoll, collect, actorOf, abilityOf, applyToConfig };
+  return { rollTypesOf, matchesRoll, vsMatches, collect, actorOf, abilityOf, applyToConfig };
 }

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.7.47
+
+**The remaining 2024 weapon masteries now apply.** v0.7.46 put Cleave,
+Sap, Topple, Slow, and Vex on the chat card as labels. They now do what
+the book says, automatically, the same way Push already did:
+
+- **Sap** — Disadvantage on the target's next attack, until the start of
+  your next turn.
+- **Slow** — Speed −10 on every listed speed when the hit deals damage.
+  Does not stack past −10.
+- **Topple** — Constitution save (DC 8 + the attack ability + PB) or
+  Prone. No size limit.
+- **Vex** — Advantage on *your* next attack against *that* creature, if
+  the hit dealt damage.
+- **Cleave** — one extra melee attack against the nearest legal hostile
+  within 5 ft of the first target and within your reach, once per turn.
+  The extra swing drops the positive ability modifier.
+
+Push (10 ft), Graze (ability modifier on a miss), and Nick (free Light
+off-hand) are unchanged. New Combat switch **Weapon masteries**
+(`combat.masteries`, default on). Push still follows Forced movement.
+`noodlrHooks.surveyMasteries()` lists what fired.
+
+Weapon Mastery 5e (`wm5e`) is still an unverified conflict — the Combat
+page warns if it is on; we do not stand aside.
+
 ## 0.7.46
 
 **A fly animates at fly Speed.** Sheet pace was reading the token HUD's

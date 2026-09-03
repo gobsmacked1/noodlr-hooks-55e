@@ -51,6 +51,8 @@ export const COMBAT_SETTINGS = {
   movement: "combat.movement",
   /** Whether pushes, pulls and shoves actually move the token they land on. */
   forced: "combat.forced",
+  /** Whether Sap / Slow / Topple / Vex / Cleave apply themselves. Push stays on `forced`. */
+  masteries: "combat.masteries",
   /** Per audience. Whether rolled damage lands on the creature it was rolled against, with no button. */
   autoDamage: "combat.autoDamage",
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */

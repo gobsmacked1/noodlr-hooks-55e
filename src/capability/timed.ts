@@ -96,6 +96,9 @@ export async function writeTimedEffect(spec: TimedEffectSpec): Promise<any | nul
       if (spec.event) {
         update[`flags.${MODULE_ID}.timed.event`] = spec.event;
       }
+      if (spec.params) {
+        update[`flags.${MODULE_ID}.timed.params`] = spec.params;
+      }
       await existing.update(update);
       return existing;
     } catch (err) {

@@ -4742,16 +4742,25 @@ that fires *after* dnd5e's five passes — decorating on core `renderChatMessage
   target traits fall back to the raw roll rather than guessing. Healing is untraited.
 - Compact cards stay a padding preference. This rewrite is always on.
 
-**Mastery suffixes are labels on the card.** Push, Graze, and Nick's economy are implemented
-elsewhere. Cleave extra attacks, Sap, Topple's save, Slow, and Vex are **not** automated —
-the card still names the mastery that was chosen (`flags.dnd5e.roll.mastery`).
+**Mastery suffixes are labels on the card.** The eight 2024 masteries are all automated.
 
 | Mastery | When the suffix appears | Automated? |
 | --- | --- | --- |
-| Cleave, Push, Sap, Topple | Attack card, on a hit (or crit) | Push only (10 ft) |
-| Graze | Attack card, on a miss, amount > 0 | Yes — modifier only |
-| Nick | Attack card, hit or miss | Economy only |
-| Slow, Vex | Damage card, hit with > 0 damage | No |
+| Push | Attack card, on a hit (or crit) | Yes — 10 ft (`combat.forced`) |
+| Sap | Attack card, on a hit (or crit) | Yes — Disadvantage on next attack (`combat.masteries`) |
+| Topple | Attack card, on a hit (or crit) | Yes — Con save or Prone (`combat.masteries`) |
+| Cleave | Attack card, on a hit (or crit) | Yes — one extra melee attack, once/turn (`combat.masteries`) |
+| Graze | Attack card, on a miss, amount > 0 | Yes — modifier only (auto-damage) |
+| Nick | Attack card, hit or miss | Yes — economy only (free Light swing) |
+| Slow | Damage card, hit with > 0 damage | Yes — Speed −10 (`combat.masteries`) |
+| Vex | Damage card, hit with > 0 damage | Yes — Advantage on your next attack vs that creature (`combat.masteries`) |
+
+`src/rules/masteries.ts` + `src/system/dnd5e-masteries.ts`. Hit masteries listen on chat
+the same way forced movement does, so they still run when auto-damage is off. Slow and
+Vex wait for hit points (or temp HP) to actually drop — immunity is not "dealt".
+Cleave's modifier cut is stamped on the extra-attack's damage card and subtracted in
+`dnd5e.preCalculateDamage`, so a player pressing Apply still loses the positive
+ability modifier. `noodlrHooks.surveyMasteries()`.
 
 ### Compact cards, and the Bloodied status
 

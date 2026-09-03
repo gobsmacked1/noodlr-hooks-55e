@@ -5,7 +5,8 @@ import { bindCapabilities, clearBindings } from "../src/capability/bindings";
 import { __grantsInternals } from "../src/capability/grants";
 import { MODULE_ID } from "../src/constants";
 
-const { rollTypesOf, matchesRoll, collect, actorOf, abilityOf, applyToConfig } = __grantsInternals();
+const { rollTypesOf, matchesRoll, vsMatches, collect, actorOf, abilityOf, applyToConfig } =
+  __grantsInternals();
 
 test("rollType is matched as a closed set of three, not as free text", () => {
   assert.deepEqual([...rollTypesOf("attack")].sort(), ["attack"]);
@@ -121,6 +122,37 @@ test("a known-but-uncast spell does not impose Disadvantage on every attack", ()
   } finally {
     clearBindings(actor.uuid);
   }
+});
+
+test("a vs filter fails closed when the roll names nobody", () => {
+  assert.equal(vsMatches({ vs: "Actor.goblin" }, null), false);
+  assert.equal(vsMatches({ vs: "Actor.goblin" }, { uuid: "Actor.wolf" }), false);
+  assert.equal(vsMatches({ vs: "Actor.goblin" }, { uuid: "Actor.goblin" }), true);
+  assert.equal(vsMatches({}, { uuid: "Actor.goblin" }), true);
+});
+
+test("Vex Advantage does not fire against a different creature", () => {
+  const actor = {
+    name: "Fighter",
+    effects: [
+      {
+        name: "Vex",
+        flags: {
+          [MODULE_ID]: {
+            timed: {
+              kind: "grant_advantage",
+              capability: "mastery-vex:Actor.goblin",
+              ruleIndex: 0,
+              params: { rollType: "attack", vs: "Actor.goblin", consume: true },
+            },
+          },
+        },
+      },
+    ],
+  };
+  assert.equal(collect(actor, "attack", "", "", { uuid: "Actor.goblin" }).length, 1);
+  assert.equal(collect(actor, "attack", "", "", { uuid: "Actor.wolf" }).length, 0);
+  assert.equal(collect(actor, "attack", "", "").length, 0);
 });
 
 test("applyToConfig stamps advantageMode, not only the advantage flag", () => {

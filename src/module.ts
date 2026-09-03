@@ -59,6 +59,7 @@ import { registerReady, registerReadyExpiry, surveyReady } from "./rules/ready";
 import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
+import { registerMasteries, surveyMasteries } from "./rules/masteries";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerStreamlineCards } from "./rules/streamline-cards";
 import { registerDamageGate, surveyGate } from "./rules/gate";
@@ -161,6 +162,7 @@ export interface NoodlrHooksApi {
   surveyEconomy(): Record<string, unknown>;
   surveyMovement(): unknown;
   surveyForced(): unknown;
+  surveyMasteries(): unknown;
   surveyDamage(): unknown;
   surveyGate(): unknown;
   surveyDamageSaves(): unknown;
@@ -297,6 +299,8 @@ const api: NoodlrHooksApi = {
   surveyMovement: () => surveyMovement(),
   /** Which push/pull rules are recognised on the selected creature, and whether the layer is live. */
   surveyForced: () => surveyForced(),
+  /** Whether Sap / Slow / Topple / Vex / Cleave are applying, and the selected creature's state. */
+  surveyMasteries: () => surveyMasteries(),
   /** Whether rolled damage is being applied here, for whom, and what could be put back. */
   surveyDamage: () => surveyDamage(),
   /** Which Damage buttons are held shut, why, and whether a verdict is still expected. */
@@ -593,6 +597,9 @@ Hooks.once("ready", () => {
   // Automated attacks skip the system's roll-configuration dialogs. Every client: a reaction
   // can roll on the GM, and `preRollAttack` fires only where the roll is built.
   registerAutoRoll();
+  // Weapon masteries. Hit application stays primary-GM inside; `preCalculateDamage` must
+  // run wherever Apply is pressed, or a Cleave extra against a player keeps the modifier.
+  registerMasteries();
   // The system's cards drawn at half height, if this screen asked for it.
   applyCompactCards();
   // One-line totals after dnd5e has finished colouring the card. Every client: a player
