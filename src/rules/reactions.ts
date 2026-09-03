@@ -53,6 +53,19 @@ import { isCounterspellAction } from "../system/dnd5e-counterspell";
 import { alive, canReact, cannotReactReason, offerReaction, offerable } from "./offer";
 import type { ReactionTrigger } from "./offer";
 import { claimProvoke, clearAllProvokes, forgetProvokesFor, resetOfferLock } from "./reaction-once";
+import { awaitPendingReactions } from "./reaction-wait";
+import { hasHalted } from "./halt-state";
+import {
+  clearHolds,
+  haltMovement,
+  isHeld,
+  leaveSquareAt,
+  pauseHeld,
+  pendingRemainder,
+  resumeHeld,
+  shouldHoldMove,
+} from "./move-hold";
+import { noteOpportunitySwing } from "./oa-swing";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -149,6 +162,27 @@ export function registerReactionHooks(): void {
     if (!active()) return;
     void retaliate(actor, amount);
   });
+}
+
+/**
+ * Pause remaining waypoints on the initiator so Halt can stop the walk.
+ *
+ * Not gated on `active()` — that is primary-GM-only, and `pauseMovement` belongs
+ * to whoever started the drag. Register on every client, before the GM provoke hook.
+ */
+export function registerMoveHold(): void {
+  Hooks.on("moveToken", (doc: any, movement: any, operation: any) => {
+    try {
+      if (!(game.combat as any)?.started) return;
+      if (!shouldHoldMove(leavingWouldProvoke(doc, movement, operation), pendingRemainder(movement))) {
+        return;
+      }
+      pauseHeld(doc, movement, firstLeaveSquare(doc, movement, operation));
+    } catch (err) {
+      log("move-hold: pause failed:", err);
+    }
+  });
+  Hooks.on("deleteCombat", () => clearHolds());
 }
 
 /**
@@ -479,116 +513,187 @@ function enqueueProvoke(doc: any, movement: any, operation?: any): void {
     .catch((err) => log("opportunity attack failed:", err));
 }
 
+/** Would anyone get a leave-reach Opportunity Attack (not PAM enter, not Disengage/Flyby)? */
+export function leavingWouldProvoke(doc: any, movement: any, operation?: any): boolean {
+  if (isForcedMovement(movement, operation)) return false;
+  if (!(game.combat as any)?.started) return false;
+  const mover = doc?.object ?? doc;
+  const route = movementRoute(movement, {
+    x: Number(doc?._source?.x ?? doc?.x ?? mover?.x),
+    y: Number(doc?._source?.y ?? doc?.y ?? mover?.y),
+    elevation: elevationOf(doc?._source?.elevation ?? doc?.elevation),
+  });
+  if (route.length < 2) return false;
+  const standing = standingExemption(doc?.actor);
+  const waypoints: any[] = movement?.passed?.waypoints ?? [];
+  const exempt = standing && (!standing.requiresFlight || flew(doc, waypoints));
+  if (exempt || hasDisengaged(doc?.actor)) return false;
+  for (const watcher of watchersOf(doc)) {
+    for (const event of crossingsAt(watcher, route, doc, watcher.reach)) {
+      if (event.kind === "leave") return true;
+    }
+  }
+  return false;
+}
+
+export function firstLeaveSquare(
+  doc: any,
+  movement: any,
+  operation?: any,
+): { x: number; y: number; elevation?: number } | null {
+  void operation;
+  const mover = doc?.object ?? doc;
+  const route = movementRoute(movement, {
+    x: Number(doc?._source?.x ?? doc?.x ?? mover?.x),
+    y: Number(doc?._source?.y ?? doc?.y ?? mover?.y),
+    elevation: elevationOf(doc?._source?.elevation ?? doc?.elevation),
+  });
+  if (route.length < 2) return null;
+  let earliest = Infinity;
+  let square: { x: number; y: number; elevation?: number } | null = null;
+  for (const watcher of watchersOf(doc)) {
+    for (const event of crossingsAt(watcher, route, doc, watcher.reach)) {
+      if (event.kind !== "leave" || event.index >= earliest) continue;
+      earliest = event.index;
+      square = leaveSquareAt(route, event.index);
+    }
+  }
+  return square;
+}
+
+async function settleLeave(moverDoc: any): Promise<boolean> {
+  await awaitPendingReactions();
+  return hasHalted(moverDoc?.actor);
+}
+
 async function provoke(moverDoc: any, movement: any, operation?: any): Promise<void> {
   const mover = moverDoc?.object ?? moverDoc;
   const who = String(moverDoc?.name ?? mover?.name ?? "?");
-  if (!tokenCenter(mover) && !tokenCenter(moverDoc)) {
-    log(`reaction: ${who} moved but has no readable centre — no opportunity attacks`);
-    return;
-  }
-  const id = String(moverDoc?.id ?? "");
-  handled.add(id);
-  // Cleared on a timer, not immediately: the fallback's `updateToken` fires just after this one.
-  setTimeout(() => handled.delete(id), 2000);
+  let stopped = false;
+  try {
+    if (!tokenCenter(mover) && !tokenCenter(moverDoc)) {
+      log(`reaction: ${who} moved but has no readable centre — no opportunity attacks`);
+      return;
+    }
+    const id = String(moverDoc?.id ?? "");
+    handled.add(id);
+    // Cleared on a timer, not immediately: the fallback's `updateToken` fires just after this one.
+    setTimeout(() => handled.delete(id), 2000);
 
-  // Neither a teleport nor a shove provokes. A creature that was never between the two points cannot be
-  // swung at on the way past (Misty Step, Blink and Dimension Door all arrive as displacements), and
-  // under the 2024 rules an opportunity attack triggers only on movement a creature SPENDS — being
-  // pushed, pulled or dragged is somebody else's expenditure.
-  const waypoints: any[] = movement?.passed?.waypoints ?? [];
-  if (isForcedMovement(movement, operation)) {
-    log(`reaction: ${who} was displaced — forced movement does not provoke`);
-    return;
-  }
+    // Neither a teleport nor a shove provokes. A creature that was never between the two points cannot be
+    // swung at on the way past (Misty Step, Blink and Dimension Door all arrive as displacements), and
+    // under the 2024 rules an opportunity attack triggers only on movement a creature SPENDS — being
+    // pushed, pulled or dragged is somebody else's expenditure.
+    const waypoints: any[] = movement?.passed?.waypoints ?? [];
+    if (isForcedMovement(movement, operation)) {
+      log(`reaction: ${who} was displaced — forced movement does not provoke`);
+      return;
+    }
 
-  const route = movementRoute(movement, {
-    x: Number(moverDoc?._source?.x ?? moverDoc?.x ?? mover?.x),
-    y: Number(moverDoc?._source?.y ?? moverDoc?.y ?? mover?.y),
-    elevation: elevationOf(moverDoc?._source?.elevation ?? moverDoc?.elevation),
-  });
-  if (route.length < 2) {
-    log(`reaction: ${who} moved but the route had fewer than two points — no opportunity attacks`);
-    return;
-  }
+    const route = movementRoute(movement, {
+      x: Number(moverDoc?._source?.x ?? moverDoc?.x ?? mover?.x),
+      y: Number(moverDoc?._source?.y ?? moverDoc?.y ?? mover?.y),
+      elevation: elevationOf(moverDoc?._source?.elevation ?? moverDoc?.elevation),
+    });
+    if (route.length < 2) {
+      log(`reaction: ${who} moved but the route had fewer than two points — no opportunity attacks`);
+      return;
+    }
 
-  const watchers = watchersOf(moverDoc);
-  if (watchers.length === 0) {
-    log(`reaction: ${who} moved and nobody on the tracker could take an opportunity attack`);
-    return;
-  }
+    const watchers = watchersOf(moverDoc);
+    if (watchers.length === 0) {
+      log(`reaction: ${who} moved and nobody on the tracker could take an opportunity attack`);
+      return;
+    }
 
-  // A standing trait — Flyby, Agile — is checked here rather than beside Disengage because Flyby's
-  // exemption is conditional on HOW the creature left, and the waypoints are the only record of that.
-  const standing = standingExemption(moverDoc?.actor);
-  const exempt = standing && (!standing.requiresFlight || flew(moverDoc, waypoints));
-  const disengaged = hasDisengaged(moverDoc?.actor);
+    // A standing trait — Flyby, Agile — is checked here rather than beside Disengage because Flyby's
+    // exemption is conditional on HOW the creature left, and the waypoints are the only record of that.
+    const standing = standingExemption(moverDoc?.actor);
+    const exempt = standing && (!standing.requiresFlight || flew(moverDoc, waypoints));
+    const disengaged = hasDisengaged(moverDoc?.actor);
 
-  let left = 0;
-  let entered = 0;
-  const moverId = String(moverDoc?.id ?? "");
-  for (const watcher of watchers) {
-    const events = moveEvents(watcher, route, moverDoc);
-    if (events.includes("leave")) left++;
-    if (events.includes("enter")) entered++;
+    let left = 0;
+    let entered = 0;
+    const moverId = String(moverDoc?.id ?? "");
+    for (const watcher of watchers) {
+      const events = moveEvents(watcher, route, moverDoc);
+      if (events.includes("leave")) left++;
+      if (events.includes("enter")) entered++;
 
-    const watcherId = String(watcher.combatant?.id ?? "");
-    for (const event of events) {
-      // One reaction until this creature's next turn, no matter how many combatants walked past.
-      if (!hasReaction(watcher.combatant)) {
-        log(`reaction: ${watcher.combatant?.name} has already spent its reaction`);
-        break;
-      }
-
-      if (event === "leave") {
-        if (exempt) {
-          log(
-            `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
-          );
-          continue;
+      const watcherId = String(watcher.combatant?.id ?? "");
+      for (const event of events) {
+        // One reaction until this creature's next turn, no matter how many combatants walked past.
+        if (!hasReaction(watcher.combatant)) {
+          log(`reaction: ${watcher.combatant?.name} has already spent its reaction`);
+          break;
         }
-        if (disengaged) {
-          log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
-          continue;
-        }
-        if (watcher.automated && withholds(watcher.combatant)) continue;
-        if (!claimProvoke(watcherId, moverId, "leave")) {
-          log(`reaction: ${watcher.combatant?.name} already had its chance at ${who} leaving`);
-          continue;
-        }
-        if (!watcher.automated) {
-          const taken = await ask(watcher.combatant, watcher.token, mover, "opportunity");
-          if (taken) break;
-          continue;
-        }
-        await strike(watcher, mover, "as it slips away");
-        break;
-      }
 
-      // Polearm Master's Reactive Strike is not an Opportunity Attack. Disengage and Flyby name
-      // OAs; they do not shut this off. The printed trigger is entering the polearm's reach.
-      // Once per enemy combatant until the watcher's next turn — a Large walk fires
-      // `moveToken` per square, and each remaining-path event still contains the enter.
-      if (event === "enter" && watcher.enterAction) {
-        if (watcher.automated && withholds(watcher.combatant)) continue;
-        if (!claimProvoke(watcherId, moverId, "enter")) {
-          log(`reaction: ${watcher.combatant?.name} already had its Reactive Strike at ${who}`);
-          continue;
+        if (event === "leave") {
+          if (exempt) {
+            log(
+              `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
+            );
+            continue;
+          }
+          if (disengaged) {
+            log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
+            continue;
+          }
+          if (watcher.automated && withholds(watcher.combatant)) continue;
+          if (!claimProvoke(watcherId, moverId, "leave")) {
+            log(`reaction: ${watcher.combatant?.name} already had its chance at ${who} leaving`);
+            continue;
+          }
+          if (!watcher.automated) {
+            const taken = await ask(watcher.combatant, watcher.token, mover, "opportunity");
+            if (taken && (await settleLeave(moverDoc))) {
+              stopped = true;
+              await haltMovement(moverDoc);
+              return;
+            }
+            if (taken) break;
+            continue;
+          }
+          await strike(watcher, mover, "as it slips away", undefined, "opportunity");
+          if (await settleLeave(moverDoc)) {
+            stopped = true;
+            await haltMovement(moverDoc);
+            return;
+          }
+          break;
         }
-        if (!watcher.automated) {
-          const taken = await ask(watcher.combatant, watcher.token, mover, "enter");
-          if (taken) break;
-          continue;
+
+        // Polearm Master's Reactive Strike is not an Opportunity Attack. Disengage and Flyby name
+        // OAs; they do not shut this off. The printed trigger is entering the polearm's reach.
+        // Once per enemy combatant until the watcher's next turn — a Large walk fires
+        // `moveToken` per square, and each remaining-path event still contains the enter.
+        if (event === "enter" && watcher.enterAction) {
+          if (watcher.automated && withholds(watcher.combatant)) continue;
+          if (!claimProvoke(watcherId, moverId, "enter")) {
+            log(`reaction: ${watcher.combatant?.name} already had its Reactive Strike at ${who}`);
+            continue;
+          }
+          if (!watcher.automated) {
+            const taken = await ask(watcher.combatant, watcher.token, mover, "enter");
+            if (taken) break;
+            continue;
+          }
+          await strike(watcher, mover, "as it steps in", watcher.enterAction, "enter");
+          break;
         }
-        await strike(watcher, mover, "as it steps in", watcher.enterAction);
-        break;
       }
     }
-  }
-  if (left === 0 && entered === 0) {
-    log(
-      `reaction: ${who} moved past ${watchers.length} watcher(s) and left nobody's reach` +
-        ` (${watchers.map((w) => `${w.combatant?.name}@${w.reach}`).join(", ")})`,
-    );
+    if (left === 0 && entered === 0) {
+      log(
+        `reaction: ${who} moved past ${watchers.length} watcher(s) and left nobody's reach` +
+          ` (${watchers.map((w) => `${w.combatant?.name}@${w.reach}`).join(", ")})`,
+      );
+    }
+  } finally {
+    if (isHeld(moverDoc)) {
+      if (stopped || hasHalted(moverDoc?.actor)) await haltMovement(moverDoc);
+      else await resumeHeld(moverDoc);
+    }
   }
 }
 
@@ -784,6 +889,8 @@ async function retaliate(actor: any, amount: number): Promise<void> {
     { combatant, token: self, action: best, reach: best.range, automated },
     culprit,
     "in answer",
+    undefined,
+    "hurt",
   );
 }
 
@@ -793,6 +900,7 @@ async function strike(
   target: any,
   phrasing: string,
   action: CreatureAction = watcher.action,
+  trigger: Extract<ReactionTrigger, "opportunity" | "hurt" | "enter"> = "opportunity",
 ): Promise<void> {
   const name = String(watcher.combatant?.name ?? "Something");
   const blocked = cannotReactReason(watcher.combatant?.actor);
@@ -801,6 +909,7 @@ async function strike(
     return;
   }
   spendReaction(watcher.combatant);
+  if (trigger === "opportunity") noteOpportunitySwing(watcher.combatant?.actor, target);
   const targetName = String(target?.name ?? "its attacker");
 
   const ChatMessage = (globalThis as any).ChatMessage;
@@ -813,7 +922,7 @@ async function strike(
   });
 
   try {
-    await useActionAt(action, target, { asReaction: true });
+    await useActionAt(action, target, { asReaction: true, reactionTrigger: trigger });
   } catch (err) {
     log(`reaction: ${name} could not use ${action.name}:`, err);
     await ChatMessage.create({

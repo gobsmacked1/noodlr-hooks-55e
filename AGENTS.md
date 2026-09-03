@@ -5091,6 +5091,20 @@ or AC5e (2026-09-03): those are not a supported install.
   If any resolved target is in range, allow. Public text names nobody.
 - **Never `range.value` as melee reach** — a thrown spear's 20 is not a 20-foot poke
   (Assassin, 2026-08-20). Dual-mode weapons with no `attackMode` yet are skipped.
+- **A 5 ft utility or damage rider is melee reach, not a 5-foot bow (v0.7.51).**
+  Redirect Attack and Goading Attack Damage ship `type: utility|damage`,
+  `range.value: 5`, no `long`. Classifying that `ranged` used 3D hypot, so a
+  Large token 5.8 ft away toasted "Out of range." `stated-reach` uses the
+  melee cylinder. A block that *does* carry `range.long` stays ranged.
+- **`usageConfig.noodlrReaction` skips a second measure** for
+  `opportunity | enter | incoming | hurt`. The offer already decided they
+  could reach — they were just hit, or the mover left their reach. Ready
+  and Counterspell do not set it; those still gate. Stamped from
+  `useActionAt({ reactionTrigger })`.
+- **Leftover cover and fly-away wait for that offer** (`awaitPendingReactions`
+  in `execute.ts`, after the use and before the second walk). The 21:13
+  Beholder Bite then 14 ft fallback is the specimen: Redirect measured the
+  square they had already left. Kite still withdraws *before* the shot.
 - Setting `combat.attackRange`, default on. GM warned and allowed; players and automation
   refused. `noodlrHooks.surveyAttackRange()`.
 
@@ -5123,6 +5137,32 @@ or AC5e (2026-09-03): those are not a supported install.
   same actor. Enter and leave are separate keys — declining PAM must not eat the OA.
   The one-reaction cap is the ledger. Do not "fix" this by ignoring later `moveToken`
   (the first square of a long walk is often still out of reach).
+
+## Sentinel Halt pauses the remaining walk (v0.7.52, 2026-09-03)
+
+`src/system/dnd5e-sentinel.ts` + `src/rules/sentinel.ts` + `src/rules/move-hold.ts` +
+`src/rules/halt-state.ts`. No new setting — it rides on Opportunity Attacks.
+
+- **Guardian is the Disengage *button*, not a second leave.** Leave-reach OA still
+  honours Disengage / Flyby / Withdraw. Piercing that would be two chances at one
+  reaction. Real Disengage only (`isDisengageActivity`); `grantsExemptMovement` is
+  not that action. Hits someone else: chat create/update (works with auto-damage
+  off). Do not add Guardian to `reactionWindow`.
+- **Halt is any Opportunity Attack a Sentinel hits.** Leave, Guardian Disengage,
+  Guardian attack-other. Not PAM enter, not hurt, not incoming. Duration is
+  `targetEnd` — `stampFor` alone lasts the rest of the *round*.
+- **Pause remaining waypoints on the initiator.** Core `moveToken` is not awaited
+  and fires per waypoint. `pauseMovement` / `stopMovement` belong to the User who
+  started the drag — a GM cannot stop a player walk. Register `registerMoveHold`
+  on every client, before the GM provoke hook. Do **not** `revertRecordedMovement`
+  of the whole drag — that returns them to the start. Halt square is
+  `leaveSquareAt(route, index)` = the first out-of-reach waypoint.
+- **Do not pause for PAM enter-only.** WASD is one square (`pending` empty) — Halt
+  AE + budget 0 stop the next square.
+- Discovery: identifier `sentinel` on a feat; name `/^\s*sentinel\s*$/i` only with
+  no identifier; `flags.<ns>.sentinel`. Never `sentinel-shield`. A weapon named
+  Sentinel is not the feat. Glossary declines the feat so the compiler does not
+  buy it. `noodlrHooks.surveySentinel()`.
 
 ## Mount riding (v0.7.23, initial slice)
 

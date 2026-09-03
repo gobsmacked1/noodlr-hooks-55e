@@ -73,6 +73,8 @@ import {
   type WallLike,
 } from "../../core/wall-height";
 import { check, dashesTaken, takeDash } from "./ledger";
+import { hasHalted } from "../halt-state";
+import { isForcedMovement } from "../shove";
 import { stoodThisTurn } from "../prone";
 import { isAutomating } from "./enforce";
 import { bonusDashSource } from "../../system/dnd5e-dash";
@@ -131,6 +133,18 @@ function dashCost(actor: any, combat: any, combatant: any): DashCost | null {
 }
 
 function budgetFor(doc: any): Budget | null {
+  const actor = doc?.actor;
+  if (hasHalted(actor)) {
+    return {
+      speed: 0,
+      spent: spentThisTurn(doc),
+      allowance: 0,
+      dash: null,
+      combatant: doc?.combatant,
+      actor,
+    };
+  }
+
   if (!isMovementCapEnabled()) return null;
 
   const combat = game.combat;
@@ -141,7 +155,6 @@ function budgetFor(doc: any): Budget | null {
   // creature that moves on somebody else's turn would otherwise spend a budget it has not been given.
   if (!combatant || String(combatant.id) !== String(combat.combatant?.id ?? "")) return null;
 
-  const actor = doc?.actor;
   if (!actor) return null;
 
   const speed = speedFor(doc, actor);
@@ -409,10 +422,14 @@ export function registerMovementCap(): void {
 
   // Refusal. Arrow keys never pass through the drag options above, and this also catches the reading of
   // `maxCost` in which core measures only the proposed path.
-  Hooks.on("preMoveToken", (doc: any, movement: any) => {
+  Hooks.on("preMoveToken", (doc: any, movement: any, operation?: any) => {
     try {
-      if (game.user?.isGM || isAutomating()) return true;
       const method = String(movement?.method ?? "");
+      if (hasHalted(doc?.actor) && method !== "undo" && !isForcedMovement(movement, operation)) {
+        ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.Movement.Halted"));
+        return false;
+      }
+      if (game.user?.isGM || isAutomating()) return true;
       if (method !== "dragging" && method !== "keyboard") return true;
 
       // How far ONE leap may go, which is a different question from how far the turn may go and has

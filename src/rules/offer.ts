@@ -35,6 +35,8 @@ import { promptChoice, type Choice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
 import { readActions, type CreatureAction } from "../tactics/actions";
 import { useActionAt } from "../tactics/execute";
+import { trackReaction } from "./reaction-wait";
+import { noteOpportunitySwing } from "./oa-swing";
 import { hasReaction, spend } from "./economy/ledger";
 import { claimOffer, releaseOffer } from "./reaction-once";
 import { isReactionPromptEnabled } from "../settings";
@@ -125,9 +127,13 @@ export async function offerReaction(actor: any, request: OfferRequest): Promise<
 
   // Comfortably longer than the countdown the far client enforces. A transport that gave up first would
   // report "no reaction" while the person was still reading their options, which is the one outcome worse
-  // than not asking at all.
-  const answer = await askUser<OfferAnswer>(owner, QUERY, { request }, { timeout: 30000 });
-  return answer ?? { taken: false };
+  // than not asking at all. Tracked so leftover cover / fly-away waits for the answer.
+  return trackReaction(
+    (async () => {
+      const answer = await askUser<OfferAnswer>(owner, QUERY, { request }, { timeout: 30000 });
+      return answer ?? { taken: false };
+    })(),
+  );
 }
 
 /** Everything from here down runs on the client that owns the creature. */
@@ -188,6 +194,7 @@ async function settleOffer(request: OfferRequest): Promise<OfferAnswer> {
   // dialog), and a second trigger arriving in that window would otherwise find the reaction unspent and
   // offer it again. The ledger is turn-stamped, so an over-spend cannot leak into the next round.
   spend(actor, game.combat, combatant, "reaction", false);
+  if (request.trigger === "opportunity") noteOpportunitySwing(actor, target);
 
   const boost = acBoostOf(chosen.item, actor);
   // Read BEFORE the use, because using the spell spends the slot and a sheet mid-update is a bad place to
@@ -197,7 +204,10 @@ async function settleOffer(request: OfferRequest): Promise<OfferAnswer> {
     request.trigger === "casting" ? (counterspellReady(actor)?.dc ?? undefined) : undefined;
   try {
     // A reaction that raises AC is cast on oneself; everything else is pointed at whatever provoked it.
-    await useActionAt(chosen, boost ? token : (target ?? token), { asReaction: true });
+    await useActionAt(chosen, boost ? token : (target ?? token), {
+      asReaction: true,
+      reactionTrigger: request.trigger,
+    });
   } catch (err) {
     log(`reaction offer: ${actor?.name} could not use ${chosen.name}:`, err);
     return { taken: true, label: chosen.name, acBonus: boost?.bonus, dc };

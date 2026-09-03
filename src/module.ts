@@ -45,7 +45,9 @@ import { registerPerceptionWatch, surveyPerception } from "./rules/perception";
 import { registerStealthWatch } from "./rules/stealth";
 import { hideSelected, surveyHide } from "./rules/hide";
 import { registerInvisibilityHooks } from "./rules/invisibility";
-import { registerReactionHooks } from "./rules/reactions";
+import { registerMoveHold, registerReactionHooks } from "./rules/reactions";
+import { registerMoveHoldQueries } from "./rules/move-hold";
+import { registerSentinel, surveySentinel } from "./rules/sentinel";
 import { registerReactionOffers, surveyOffers } from "./rules/offer";
 import { surveyCounterspell } from "./rules/counterspell";
 import { surveyBarbs } from "./rules/barbs";
@@ -161,6 +163,7 @@ export interface NoodlrHooksApi {
   surveyPerception(): Promise<Record<string, unknown>>;
   surveyEconomy(): Record<string, unknown>;
   surveyMovement(): unknown;
+  surveySentinel(): unknown;
   surveyAttackRange(): unknown;
   surveyForced(): unknown;
   surveyMasteries(): unknown;
@@ -298,6 +301,8 @@ const api: NoodlrHooksApi = {
   surveyEconomy: () => surveyEconomy(),
   /** How far each combatant has moved this turn against its Speed. */
   surveyMovement: () => surveyMovement(),
+  /** Sentinel on the selected creature, Halt, and who else in the fight carries the feat. */
+  surveySentinel: () => surveySentinel(),
   /** Whether a use can reach its current targets, and who else already enforces range. */
   surveyAttackRange: () => surveyAttackRange(),
   /** Which push/pull rules are recognised on the selected creature, and whether the layer is live. */
@@ -561,6 +566,14 @@ Hooks.once("ready", () => {
   // as Influence: the GM detects the trigger, and the client that owns the sheet draws the prompt, spends
   // the reaction and rolls it.
   registerReactionOffers();
+  // Pause remaining waypoints on the initiator so Halt can stop a walk already in
+  // motion. Must register before the GM provoke hook: `pauseMovement` belongs to
+  // whoever started the drag, and `active()` is primary-GM-only.
+  registerMoveHold();
+  registerMoveHoldQueries();
+  // Guardian (Disengage / hit-someone-else) and Halt. Chat watch is GM-gated
+  // inside; the query handler has to live on every client.
+  registerSentinel();
   // A demanded save or check is asked on the owner's client. Same clock as a reaction, but the
   // timeout rolls rather than skips — a skipped petrify save is a turn taken with no consequence.
   // Every client: the addressee is the owner, and a player End Turn has to be able to read the gate.

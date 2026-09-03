@@ -20,6 +20,7 @@ import {
   classifyActivityRange,
   distanceOf,
   isTooFar,
+  reactionRangeAlreadyChecked,
 } from "../system/dnd5e-range";
 import { matchPointerItem, parseItemPointers } from "../system/dnd5e-pointer";
 import { tokenDistance } from "../core/positioning";
@@ -138,6 +139,11 @@ export function gateActivityRange(
 
   const actor = activity?.actor;
   if (!actor) return true;
+
+  // The offer already decided they could reach (they were just hit, or the
+  // mover left their reach). Measuring again after leftover cover / fly-away
+  // is how Redirect toasted "Out of range" against a Bite that had landed.
+  if (reactionRangeAlreadyChecked(usageConfig)) return true;
 
   const item = activity?.item;
   const classified = classifyActivityRange(activity, item, {

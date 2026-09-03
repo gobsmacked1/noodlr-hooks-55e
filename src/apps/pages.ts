@@ -608,9 +608,10 @@ const SHARED_STATE: Section = {
       label: "Opportunity attacks",
       hint:
         "Reacting when someone leaves your reach, when a creature with Polearm Master sees someone " +
-        "enter theirs, and when you are hurt off-turn. Always on: it is the reaction trigger " +
-        "everything else hangs off. Defers to Gambit's Premades when that is installed with its " +
-        "own opportunity attacks on.",
+        "enter theirs, and when you are hurt off-turn. Sentinel adds an Opportunity Attack after a " +
+        "nearby creature Disengages or hits someone else, and Halt sets Speed to 0 on a hit — the " +
+        "walk pauses so the remaining squares do not play out. Always on: it is the reaction " +
+        "trigger everything else hangs off.",
       state: "live",
       ownership: "opportunity",
     },

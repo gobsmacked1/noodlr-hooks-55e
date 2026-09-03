@@ -81,6 +81,11 @@ const GLOSSARY: { id: string; name: RegExp; why: string; types?: readonly string
     name: /^\s*two[-\s]weapon\s+fighting\s*$/i,
     why: "built deterministically in system/dnd5e-two-weapon.ts",
   },
+  {
+    id: "sentinel",
+    name: /^\s*sentinel\s*$/i,
+    why: "built deterministically in rules/sentinel.ts",
+  },
   // Ships as `type: weapon` (equipment24/weapons/unarmed-strike.yml), so it is THE ONE ENTRY the
   // `feat`-only name test could never rescue. Every creature in the game has one, its Grapple and Shove
   // halves are `rules/forced.ts`'s already, and in the capture it was one of only two features the model

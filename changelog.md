@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.52
+
+**Sentinel Halt stops a walk already in motion.** Guardian offers an Opportunity
+Attack after a nearby creature takes the Disengage action or hits someone else.
+Halt sets Speed to 0 for the rest of that creature's turn when a Sentinel hits
+with an Opportunity Attack. Remaining waypoints pause on whoever started the
+drag, so a Halted token does not finish the flee animation. Leave-reach
+Opportunity Attacks still honour Disengage; Guardian is the Disengage *button*,
+not a second leave.
+
+## 0.7.51
+
+**A Bite is not a ranged attack, and leftover movement waits for your reaction.**
+A Beholder that bit and then fell back 14 feet into cover (or flew on after a
+fly-by) used to walk before Redirect Attack or Goading Attack Damage resolved.
+Those riders were also classified as 5-foot *ranged* attacks, so a Large token
+5.8 feet away — or one that had already taken that leftover step — toasted
+"Out of range." Cover and fly-away now wait for the incoming / hurt offer.
+A reaction the offer already decided could reach is not measured again.
+A 5-foot utility or damage rider is melee reach, not a 5-foot bow.
+
 ## 0.7.50
 
 **Legendary Resistance no longer spends on a Shove.** A creature this module plays

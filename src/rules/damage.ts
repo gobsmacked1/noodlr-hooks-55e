@@ -37,6 +37,7 @@ import {
 import { grazeDamage } from "../system/dnd5e-graze";
 import { fireAttackTriggers } from "../capability/attack";
 import { offerReaction } from "./offer";
+import { trackReaction } from "./reaction-wait";
 import { considerBarbs } from "./barbs";
 import { considerAgainstDiceMods, considerDiceMods } from "./dice-mod";
 import { considerDamageDice } from "./damage-dice";
@@ -157,9 +158,11 @@ async function consider(message: any, flags: any): Promise<void> {
       }
     }
     // Registered before anything is awaited, so a damage roll arriving in the same tick still finds it.
-    const window = reactionWindow(message, reading).finally(() => {
-      for (const key of keysOf(message)) if (windows.get(key) === window) windows.delete(key);
-    });
+    const window = trackReaction(
+      reactionWindow(message, reading).finally(() => {
+        for (const key of keysOf(message)) if (windows.get(key) === window) windows.delete(key);
+      }),
+    );
     for (const key of keysOf(message)) windows.set(key, window);
     await window;
     // Only now, because a Shield answered inside that window moves a creature out of `hits` and the

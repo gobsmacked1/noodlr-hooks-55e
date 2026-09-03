@@ -383,6 +383,8 @@ test("the general rules that ship as items are declined, and nothing else is", (
   assert.ok(generalRuleOf(item({ name: "Long Rest", type: "feat", identifier: "long-rest" })));
   assert.ok(generalRuleOf(item({ name: "Fall", type: "feat", identifier: "fall" })));
   assert.ok(generalRuleOf(item({ name: "Underwater", type: "feat", identifier: "underwater" })));
+  assert.ok(generalRuleOf(item({ name: "Sentinel", type: "feat", identifier: "sentinel" })));
+  assert.ok(generalRuleOf(item({ name: "Sentinel", type: "feat" })));
 
   // A creature's own ability, which is the whole population the compiler exists for.
   assert.equal(generalRuleOf(item({ name: "Loathsome Limbs", type: "feat" })), null);
@@ -397,6 +399,12 @@ test("a weapon named after a general rule is never declined", () => {
   assert.equal(generalRuleOf(item({ name: "Jump", type: "weapon" })), null);
   assert.equal(generalRuleOf(item({ name: "Fall", type: "spell" })), null);
   assert.equal(generalRuleOf(item({ name: "Long Rest", type: "consumable" })), null);
+  assert.equal(generalRuleOf(item({ name: "Sentinel", type: "weapon" })), null);
+  assert.equal(generalRuleOf(item({ name: "Sentinel Shield", type: "equipment" })), null);
+  assert.equal(
+    generalRuleOf(item({ name: "Sentinel Shield", type: "equipment", identifier: "sentinel-shield" })),
+    null,
+  );
 });
 
 test("a re-identified general rule is not declined on the strength of its name", () => {
@@ -459,7 +467,7 @@ test("the glossary survey cannot silently undercount what it is measuring", () =
   assert.ok(ids.has("fall"), "the glossary table is not being read");
   // Every pattern is a live regex against its own canonical spelling, which is what a shape change
   // would break without changing the count.
-  for (const spelling of ["Dash", "Hide", "Attack", "Jump", "Long Rest", "Underwater"]) {
+  for (const spelling of ["Dash", "Hide", "Attack", "Jump", "Long Rest", "Underwater", "Sentinel"]) {
     assert.ok(matches(spelling), `no pattern matches ${spelling}`);
   }
   // And it is still a name test rather than a substring sweep: a real ability must not be counted.

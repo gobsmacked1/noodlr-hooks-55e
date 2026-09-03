@@ -18,6 +18,8 @@ import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
 import { centerOf, tokenDistance } from "../core/positioning";
 import { gap3d } from "./altitude";
+import { awaitPendingReactions } from "../rules/reaction-wait";
+import { hasHalted } from "../rules/halt-state";
 import { clearNextUse, duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
 import { standUp } from "../rules/prone";
@@ -110,7 +112,7 @@ async function withTarget<T>(tokenId: string | undefined, fn: () => Promise<T>):
 async function useAction(
   action: { item: any; activity?: any; name: string; attackMode?: string },
   target?: any,
-  opts: { asReaction?: boolean; skipEconomy?: boolean } = {},
+  opts: { asReaction?: boolean; skipEconomy?: boolean; reactionTrigger?: string } = {},
 ): Promise<string | undefined> {
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
   // `configure: false` on `use()` is only the USAGE dialog. AttackActivity then fires `rollAttack`
@@ -124,6 +126,7 @@ async function useAction(
   const dialog = { configure: false };
   const message = {};
   const usage: Record<string, unknown> = { subsequentActions: false };
+  if (opts.reactionTrigger) usage.noodlrReaction = opts.reactionTrigger;
   if (placesTemplate(action.activity)) usage.create = { measuredTemplate: false };
 
   const attempts: Array<() => Promise<unknown>> = [];
@@ -277,7 +280,7 @@ function unaffordable(action: { item: any; activity?: any; name: string }): stri
 export async function useActionAt(
   action: { item: any; activity?: any; name: string; attackMode?: string },
   target: any,
-  opts: { asReaction?: boolean; skipEconomy?: boolean } = {},
+  opts: { asReaction?: boolean; skipEconomy?: boolean; reactionTrigger?: string } = {},
 ): Promise<string | undefined> {
   return withTarget(tokenIdOf(target), () => useAction(action, target, opts));
 }
@@ -445,10 +448,9 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
               ? "the token would not move — still out of reach, so the attack was not made"
               : `flew ${Math.round(result.moved)} ${plan.board.units} but still ${Math.round(gap)} ${plan.board.units} away`;
         }
-        const leftover = Math.max(0, budget - result.moved);
-        if (leftover > 0 && option.target?.token) {
-          result.moved += await moveAwayFrom(selfToken, option.target.token, leftover, leftover, gaitOr);
-        }
+        // Leftover fly-away waits with cover, after incoming reactions. Walking
+        // first is how a Bite looked ranged: Redirect measured the square they
+        // had already left.
         break;
       }
 
@@ -561,6 +563,20 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
       case "surrender":
       case "mercy":
         break;
+    }
+
+    // Hit → incoming / hurt reactions → then leave. Cover and fly-away used to
+    // walk while the player still had the Redirect dialog, so the use measured
+    // 15 ft against a 5 ft rider.
+    if (result.used) await awaitPendingReactions();
+    if (hasHalted(selfToken?.actor)) return result;
+
+    if (option.kind === "flyby") {
+      const leftover = Math.max(0, budget - result.moved);
+      const gaitOr = { action: option.moveAction ?? gait.action, elevation: option.elevation };
+      if (leftover > 0 && option.target?.token) {
+        result.moved += await moveAwayFrom(selfToken, option.target.token, leftover, leftover, gaitOr);
+      }
     }
 
     // Cover is a second, smaller move at the end of the turn, and only after the action resolved.

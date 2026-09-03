@@ -30,6 +30,23 @@ export interface ClassifyOpts {
   attackMode?: string;
 }
 
+/**
+ * Triggers whose offer already decided the creature could reach.
+ *
+ * Opportunity / enter fire as the mover leaves or arrives; incoming / hurt fire because
+ * they just hit or damaged you. Re-measuring after they walk away is the Beholder
+ * "ranged Bite" toast: Redirect and Goading Damage classified as 5 ft ranged against
+ * a square the leftover cover walk had already vacated.
+ *
+ * Ready is deliberately absent — a readied shot still has to reach from here.
+ */
+export const REACTION_RANGE_ALREADY_CHECKED = ["opportunity", "enter", "incoming", "hurt"] as const;
+
+export function reactionRangeAlreadyChecked(usage: { noodlrReaction?: unknown } | null | undefined): boolean {
+  const trigger = String(usage?.noodlrReaction ?? "");
+  return (REACTION_RANGE_ALREADY_CHECKED as readonly string[]).includes(trigger);
+}
+
 function unitsOf(range: unknown): string {
   return String((range as { units?: unknown } | undefined)?.units ?? "").toLowerCase();
 }
@@ -136,7 +153,19 @@ export function classifyActivityRange(
 
   const stated = toSceneUnits(Number(range.value), units);
   if (stated == null) return { kind: "skip", reason: "unreadable" };
-  return { kind: "ranged", reason: "stated-range", limit: stated, short: stated };
+  // A utility or damage rider that says "5 feet" is melee reach, not a 5-foot
+  // ranged attack. Redirect Attack and Goading Attack Damage ship that shape;
+  // classifying them `ranged` used 3D hypot, so a Large token 5.8 ft away
+  // (or one that had already taken its leftover step) toasted "Out of range."
+  // A thrown spear's `range.value` is still never melee — that path is `type:
+  // "attack"` above. `range.long` is a real missile and stays ranged.
+  const longRaw = Number(range.long);
+  if (Number.isFinite(longRaw) && longRaw > 0) {
+    const long = toSceneUnits(longRaw, units);
+    if (long == null) return { kind: "skip", reason: "unreadable" };
+    return { kind: "ranged", reason: "stated-range", limit: long, short: stated };
+  }
+  return { kind: "melee", reason: "stated-reach", limit: stated };
 }
 
 /**

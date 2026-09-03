@@ -27,6 +27,7 @@ import { readFlag } from "../util/flags";
 import { isDisengageActivity } from "../system/dnd5e-actions";
 import { grantsExemptMovement } from "../system/dnd5e-reactions";
 import { stampFor } from "./economy/ledger";
+import { notifyGuardianDisengage } from "./sentinel";
 
 const FLAG = "disengaged";
 
@@ -115,6 +116,7 @@ export function registerDisengageWatch(): void {
         activity?.actor,
         granted ? `used ${String(activity?.item?.name ?? "a feature")}` : "disengaged",
       );
+      notifyGuardianDisengage(activity, granted, isDisengageActivity(activity?.item, activity));
     } catch (err) {
       log("reaction: the Disengage watch failed:", err);
     }

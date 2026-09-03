@@ -5,6 +5,7 @@ import {
   classifyActivityRange,
   isTooFar,
   itemMeleeReach,
+  reactionRangeAlreadyChecked,
 } from "../src/system/dnd5e-range";
 
 const UNARMED = {
@@ -102,15 +103,51 @@ test("a ranged attack uses long range", () => {
   assert.equal(got.limit, 320);
 });
 
-test("a 2014-shaped 5 ft utility is ranged max 5", () => {
+test("a 5 ft utility rider is melee reach, not a 5-foot ranged attack", () => {
   const got = classifyActivityRange({
     type: "utility",
     range: { value: 5, units: "ft" },
     target: { affects: { type: "creature" } },
   });
+  assert.equal(got.kind, "melee");
+  assert.equal(got.reason, "stated-reach");
+  assert.equal(got.limit, 5);
+});
+
+test("Goading Attack Damage is melee at its stated 5 feet", () => {
+  const got = classifyActivityRange({
+    type: "damage",
+    range: { value: 5, units: "ft" },
+    target: { affects: { type: "creature" } },
+  });
+  assert.equal(got.kind, "melee");
+  assert.equal(got.reason, "stated-reach");
+  assert.equal(got.limit, 5);
+  assert.equal(isTooFar(got, 5, 0), false);
+  assert.equal(isTooFar(got, 5.8, 0), true);
+});
+
+test("a utility with a long range stays ranged", () => {
+  const got = classifyActivityRange({
+    type: "utility",
+    range: { value: 30, long: 120, units: "ft" },
+    target: { affects: { type: "creature" } },
+  });
   assert.equal(got.kind, "ranged");
   assert.equal(got.reason, "stated-range");
-  assert.equal(got.limit, 5);
+  assert.equal(got.limit, 120);
+  assert.equal(got.short, 30);
+});
+
+test("reaction uses already checked at the offer skip a second measure", () => {
+  assert.equal(reactionRangeAlreadyChecked({ noodlrReaction: "hurt" }), true);
+  assert.equal(reactionRangeAlreadyChecked({ noodlrReaction: "opportunity" }), true);
+  assert.equal(reactionRangeAlreadyChecked({ noodlrReaction: "enter" }), true);
+  assert.equal(reactionRangeAlreadyChecked({ noodlrReaction: "incoming" }), true);
+  assert.equal(reactionRangeAlreadyChecked({ noodlrReaction: "casting" }), false);
+  assert.equal(reactionRangeAlreadyChecked({ noodlrReaction: "ready" }), false);
+  assert.equal(reactionRangeAlreadyChecked({}), false);
+  assert.equal(reactionRangeAlreadyChecked(null), false);
 });
 
 test("melee is a cylinder: 50 ft away is too far, 5 ft is not, 5 ft + 10 ft up is", () => {
