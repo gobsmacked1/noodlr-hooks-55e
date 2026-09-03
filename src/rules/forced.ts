@@ -310,7 +310,11 @@ async function fromMidi(message: any, midi: any): Promise<void> {
   if (hits.length > 0) {
     const rule =
       chooseRule(
-        forcedRules({ ...query, trigger: "mastery", mastery: masteryOf(message, item) }),
+        forcedRules({
+          ...query,
+          trigger: "mastery",
+          mastery: masteryOf(message, item, pusherDoc?.actor),
+        }),
       ) ??
       chooseRule(forcedRules({ ...query, trigger: "hit" })) ??
       chooseRule(forcedRules({ ...query, trigger: "damage", damageTypes: damageTypesOf(message) }));
@@ -351,7 +355,13 @@ async function fromAttack(message: any): Promise<void> {
   // Mastery is checked first because it is data rather than a name match, and a weapon whose mastery
   // pushes should not also fire a name-matched rule for the same swing.
   const rule =
-    chooseRule(forcedRules({ ...query, trigger: "mastery", mastery: masteryOf(message, item) })) ??
+    chooseRule(
+      forcedRules({
+        ...query,
+        trigger: "mastery",
+        mastery: masteryOf(message, item, pusherDoc?.actor),
+      }),
+    ) ??
     chooseRule(forcedRules({ ...query, trigger: "hit" }));
   if (!rule) return;
 

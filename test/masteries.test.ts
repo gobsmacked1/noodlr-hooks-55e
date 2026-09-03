@@ -8,14 +8,17 @@ import {
   peekCleaveCut,
   trimCleaveDamage,
 } from "../src/rules/masteries";
+import { masteryOf } from "../src/rules/cards";
 import {
   abilityKeyOf,
+  canUseWeaponMastery,
   cleaveDamageAdjustment,
   isHitMastery,
   isMeleeAttack,
   movementKeysOf,
   slowAmount,
   toppleDc,
+  usableMastery,
 } from "../src/system/dnd5e-masteries";
 
 test("Topple DC is 8 + attack ability modifier + PB, and refuses a missing number", () => {
@@ -107,6 +110,66 @@ test("the attack ability prefers the activity over the item", () => {
   assert.equal(abilityKeyOf({ ability: "dex" }, { system: { ability: "str" } }), "dex");
   assert.equal(abilityKeyOf({}, { system: { ability: "str" } }), "str");
   assert.equal(abilityKeyOf({}, {}), "str");
+});
+
+function staff(mastery = "topple", base = "quarterstaff") {
+  return { system: { mastery, type: { baseItem: base } } };
+}
+
+function monk(masteries: string[] = []) {
+  return {
+    type: "character",
+    system: {
+      traits: {
+        weaponProf: {
+          value: new Set(["sim"]),
+          mastery: { value: new Set(masteries), bonus: new Set<string>() },
+        },
+      },
+    },
+  };
+}
+
+test("Weapon Mastery is a feature, not a tag on the item", () => {
+  // RAW: "To use this property, you must have a feature that lets you use it."
+  // Proficiency with simple weapons is not that feature — the Monk's quarterstaff,
+  // shortbow, dagger and spear all carry a mastery string.
+  const untrained = monk();
+  assert.equal(canUseWeaponMastery(untrained, staff("topple"), "topple"), false);
+  assert.equal(canUseWeaponMastery(untrained, staff("vex", "shortbow"), "vex"), false);
+  assert.equal(canUseWeaponMastery(untrained, staff("nick", "dagger"), "nick"), false);
+  assert.equal(canUseWeaponMastery(untrained, staff("sap", "spear"), "sap"), false);
+  assert.equal(usableMastery(untrained, staff()), "");
+
+  const fighter = monk(["quarterstaff"]);
+  assert.equal(canUseWeaponMastery(fighter, staff("topple"), "topple"), true);
+  assert.equal(usableMastery(fighter, staff()), "topple");
+  assert.equal(canUseWeaponMastery(fighter, staff("vex", "shortbow"), "vex"), false);
+});
+
+test("a leftover roll.mastery flag still needs the wielder's feature", () => {
+  const card = { flags: { dnd5e: { roll: { mastery: "topple" } } } };
+  assert.equal(masteryOf(card, staff(), monk()), "");
+  assert.equal(masteryOf(card, staff(), monk(["quarterstaff"])), "topple");
+});
+
+test("Weapon Master extras only apply on a weapon the wielder already masters", () => {
+  const feat = monk(["quarterstaff"]);
+  feat.system.traits.weaponProf.mastery.bonus = new Set(["sap"]);
+  assert.equal(canUseWeaponMastery(feat, staff("topple"), "sap"), true);
+  assert.equal(canUseWeaponMastery(feat, staff("vex", "shortbow"), "sap"), false);
+});
+
+test("an NPC without a mastery list uses the printed tag; an empty list is a no", () => {
+  const bandit = { type: "npc", system: { traits: {} } };
+  assert.equal(canUseWeaponMastery(bandit, staff("nick", "scimitar"), "nick"), true);
+  assert.equal(canUseWeaponMastery(bandit, staff("nick", "scimitar"), "topple"), false);
+
+  const listed = {
+    type: "npc",
+    system: { traits: { weaponProf: { mastery: { value: new Set<string>() } } } },
+  };
+  assert.equal(canUseWeaponMastery(listed, staff("nick", "scimitar"), "nick"), false);
 });
 
 test("opposite dispositions are hostile; SECRET is never a Cleave target", () => {

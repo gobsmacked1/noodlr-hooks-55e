@@ -198,11 +198,21 @@ test("a Light melee weapon offers the extra attack out of the bonus action", () 
 
 test("Nick makes it free, but only for a wielder entitled to the mastery", () => {
   // `system.mastery` sits on every dagger in the world whether or not its holder may use it, so
-  // reading the field alone would make the bonus action free for everybody.
-  const untrained = actor();
+  // reading the field alone would make the bonus action free for everybody. Proficiency is
+  // not Weapon Mastery — the Monk is the specimen.
+  const untrained = actor() as any;
+  untrained.type = "character";
   assert.equal(lightExtraAttackCost(untrained, lightWeapon("nick"), swing), "bonus");
 
+  const proficient = actor();
+  (proficient as any).type = "character";
+  (proficient as any).system = {
+    traits: { weaponProf: { value: new Set(["sim"]), mastery: { value: new Set() } } },
+  };
+  assert.equal(lightExtraAttackCost(proficient, lightWeapon("nick"), swing), "bonus");
+
   const trained = actor();
+  (trained as any).type = "character";
   (trained as any).system = { traits: { weaponProf: { mastery: { value: new Set(["dagger"]) } } } };
   assert.equal(lightExtraAttackCost(trained, lightWeapon("nick"), swing), "free");
 });

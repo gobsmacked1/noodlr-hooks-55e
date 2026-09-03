@@ -30,6 +30,7 @@ import { isMasteriesEnabled } from "../settings";
 import { useActionAt } from "../tactics/execute";
 import {
   abilityModOf,
+  canUseWeaponMastery,
   cleaveDamageAdjustment,
   cleaveReach,
   isAutomatedMastery,
@@ -161,11 +162,10 @@ async function fromHits(message: any, hits: any[]): Promise<void> {
   if (!hits.length) return;
   const item = itemOf(message);
   const activity = activityOf(message, item);
-  const mastery = masteryOf(message, item);
-  if (!isAutomatedMastery(mastery)) return;
-
   const attackerDoc = speakerToken(message?.speaker);
   const attacker = attackerDoc?.actor;
+  const mastery = masteryOf(message, item, attacker);
+  if (!isAutomatedMastery(mastery)) return;
   if (!attacker) return;
 
   const attackId = String(message?.id ?? "");
@@ -527,6 +527,13 @@ export function surveyMasteries(): unknown {
     `setting (${COMBAT_SETTINGS.masteries}): ${isMasteriesEnabled() ? "on" : "off"}`,
     `creature: ${String(token?.name ?? "— select a token —")}`,
     `weapon mastery on a sheet item: ${item ? `${String(item.name)} → ${String(item.system.mastery)}` : "none listed"}`,
+    `wielder entitled to that tag: ${
+      item
+        ? canUseWeaponMastery(actor, item, String(item.system.mastery))
+          ? "yes"
+          : "no — proficiency is not Weapon Mastery"
+        : "—"
+    }`,
     `cleave spent this turn: ${actor ? (cleaveSpent(actor) ? "yes" : "no") : "—"}`,
     `pending Slow/Vex: ${pendingDamage.length}`,
     `applied this fight: ${applied.size}`,

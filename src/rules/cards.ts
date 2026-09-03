@@ -28,6 +28,7 @@
 // automation off, and a card without the flags needs the native reading even in a world that has it.
 
 import { log } from "../constants";
+import { canUseWeaponMastery } from "../system/dnd5e-masteries";
 
 /** A target as dnd5e records it on a message: `{name, img, uuid, ac}`, ac null under total cover. */
 export interface CardTarget {
@@ -223,15 +224,22 @@ export function activityOf(message: any, item: any): any {
 /**
  * The weapon mastery in use, if any.
  *
- * dnd5e copies the chosen mastery onto its own attack message at `flags.dnd5e.roll.mastery`, which is
- * the authoritative reading. Under midi that separate message is never created, so the weapon's own
- * mastery property is the fallback — best-effort, and only trusted as far as being a string.
+ * dnd5e copies the chosen mastery onto its own attack message at `flags.dnd5e.roll.mastery`.
+ * The weapon's own `system.mastery` is the fallback when that flag is absent (auto-roll,
+ * midi). Neither is enough: the tag sits on every copy of the item, and a leftover flag
+ * can name a property the wielder has no feature for. `canUseWeaponMastery` is the gate.
+ * Pass the wielder when you already have them; otherwise the speaker token's actor is used.
  */
-export function masteryOf(message: any, item: any): string {
-  const flagged = String(message?.flags?.dnd5e?.roll?.mastery ?? "");
-  if (flagged) return flagged;
-  const declared = item?.system?.mastery;
-  return typeof declared === "string" ? declared : "";
+export function masteryOf(message: any, item: any, actor?: any): string {
+  const flagged = String(message?.flags?.dnd5e?.roll?.mastery ?? "")
+    .trim()
+    .toLowerCase();
+  const declared =
+    typeof item?.system?.mastery === "string" ? String(item.system.mastery).trim().toLowerCase() : "";
+  const claimed = flagged || declared;
+  if (!claimed) return "";
+  const wielder = actor ?? speakerToken(message?.speaker)?.actor;
+  return canUseWeaponMastery(wielder, item, claimed) ? claimed : "";
 }
 
 /** Damage types on a message, one per roll — a DamageRoll carries exactly one. */

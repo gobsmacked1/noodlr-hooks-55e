@@ -29,6 +29,7 @@ import {
   readHits,
   readSave,
   rollType,
+  speakerToken,
   targetsOf,
   tokenFromActorUuid,
 } from "./cards";
@@ -150,7 +151,7 @@ function paintAttack(message: any, html: HTMLElement): void {
     reading.hits.length > 0 ? true : reading.missed.length > 0 ? false : null;
   const kind = showResult ? attackKind(face, connected) : "plain";
   const item = itemOf(message);
-  const mastery = masteryOf(message, item).toLowerCase();
+  const mastery = masteryOf(message, item, speakerToken(message?.speaker)?.actor).toLowerCase();
   const suffixes: string[] = [];
   if (showResult) {
     let grazeAmount: number | null = null;
@@ -192,7 +193,8 @@ function paintDamage(message: any, html: HTMLElement): void {
   if (!parts.length) return;
   const attack = attackMessageOf(message);
   const item = itemOf(attack ?? message);
-  const mastery = masteryOf(attack ?? message, item).toLowerCase();
+  const source = attack ?? message;
+  const mastery = masteryOf(source, item, speakerToken(source?.speaker)?.actor).toLowerCase();
   const hit = attackHitForDamage(message) === true;
   const dealt = combinedDamageTotal(message);
   const suffixes = damageMasterySuffixes(mastery, hit, Number.isFinite(dealt) ? dealt : 0).map((s) =>

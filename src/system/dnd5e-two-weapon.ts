@@ -11,7 +11,8 @@
 // has no place in an action ledger, which is why it appears nowhere below.
 //
 // THE NICK MASTERY changes the slot and nothing else: the extra attack becomes part of the Attack action
-// instead of costing the bonus action. Still once per turn.
+// instead of costing the bonus action. Still once per turn. Entitlement is `usableMastery` — the tag
+// on every dagger is not the feature.
 //
 // WHY THE LEDGER NEEDED TELLING. dnd5e models none of this. There is no off-hand activity, no bonus-
 // action variant of the weapon's attack, and nothing anywhere marks a swing as the second one — the
@@ -34,6 +35,7 @@
 // report about the module. The `light` counter in the ledger keeps it to one per turn either way.
 
 import { isDnd5e } from "./dnd5e-rewards";
+import { usableMastery } from "./dnd5e-masteries";
 
 /** What the Light property's extra attack costs this creature. */
 export type LightCost = "bonus" | "free";
@@ -46,26 +48,6 @@ function propertiesOf(item: any): Set<string> {
   if (raw instanceof Set) return raw as Set<string>;
   if (Array.isArray(raw)) return new Set(raw.map(String));
   return new Set<string>();
-}
-
-/**
- * Does this creature actually have the weapon's mastery, or is the field just sitting there?
- *
- * `system.mastery` is a plain string on every weapon that has one, whether or not the wielder is
- * entitled to use it — dnd5e gates it on `traits.weaponProf.mastery.value` containing the base item,
- * which is the same test its own `masteryOptions` getter makes (`data/item/weapon.mjs:328`). Without
- * this check every dagger in the world would carry Nick and the bonus action would never be charged.
- */
-function masteryInUse(actor: any, item: any): string {
-  const mastery = String(item?.system?.mastery ?? "");
-  if (!mastery) return "";
-  const base = String(item?.system?.type?.baseItem ?? "");
-  const entitled = actor?.system?.traits?.weaponProf?.mastery?.value;
-  if (base && entitled?.has?.(base)) return mastery;
-  // An extra mastery granted by a feature rather than by proficiency (Weapon Master's bonus list).
-  const bonus = actor?.system?.traits?.weaponProf?.mastery?.bonus;
-  if (Array.isArray(bonus) && bonus.includes(mastery)) return mastery;
-  return "";
 }
 
 /**
@@ -85,5 +67,5 @@ export function lightExtraAttackCost(actor: any, item: any, activity: any): Ligh
   const attackType = String(activity?.attack?.type?.value ?? "");
   if (attackType === "ranged") return null;
 
-  return masteryInUse(actor, item) === "nick" ? "free" : "bonus";
+  return usableMastery(actor, item) === "nick" ? "free" : "bonus";
 }

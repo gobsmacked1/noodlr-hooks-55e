@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.49
+
+**The tag on the weapon is not Weapon Mastery.** The 2024 sentence is:
+"This weapon has the following mastery property. To use this property,
+you must have a feature that lets you use it." Proficiency is not that
+feature. A Monk who is proficient with a quarterstaff, shortbow, dagger,
+and spear was getting Topple, Vex, Nick, and Sap because those words
+sit on the items. They now fire only when the wielder's **Weapon
+Mastery** list includes that weapon (character sheet → Details → the
+cog next to Weapons). A leftover mastery stamp on an old chat card is
+ignored the same way. Weapon Master extras still apply on a weapon
+already on that list. An NPC with no list at all still uses the tag
+printed on that attack (how the 2024 Monster Manual encodes it); an
+empty list is a stated none. `noodlrHooks.surveyMasteries()` now says
+whether the selected wielder is entitled.
+
 ## 0.7.48
 
 **A punch from across the room is refused.** dnd5e stores reach and range

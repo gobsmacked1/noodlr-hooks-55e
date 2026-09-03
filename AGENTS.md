@@ -4755,6 +4755,20 @@ Cleave's modifier cut is stamped on the extra-attack's damage card and subtracte
 `dnd5e.preCalculateDamage`, so a player pressing Apply still loses the positive
 ability modifier. `noodlrHooks.surveyMasteries()`.
 
+**The tag on the weapon is not the feature (2026-09-03).** RAW: *"This weapon has the
+following mastery property. To use this property, you must have a feature that lets you
+use it."* Proficiency is not that feature. The Monk vs Beholder fight applied Topple
+on the quarterstaff, Vex on the shortbow, Nick on the dagger, and Sap on the spear
+because `masteryOf` trusted `item.system.mastery` / a leftover `flags.dnd5e.roll.mastery`
+and never asked the wielder. Nick already gated on
+`traits.weaponProf.mastery.value` containing `type.baseItem` — that is dnd5e's own
+`masteryOptions` test. `canUseWeaponMastery` is now the one gate for all eight
+(labels, Graze, Push, Sap/Topple/Cleave/Slow/Vex, Nick). Characters always need the
+list. NPCs whose sheet has **no** list are the 2024 MM encoding (mastery printed on
+that attack, stored only on the item). An empty list is a stated none. Weapon Master
+`bonus` extras only apply on a weapon already in `value`. Do not treat
+`weaponProf.value` (proficiency) as mastery.
+
 ### Compact cards, and the Bloodied status
 
 - **`compactCards` is CLIENT-scoped and lives in Foundry's own settings list**, beside `debugLogging`

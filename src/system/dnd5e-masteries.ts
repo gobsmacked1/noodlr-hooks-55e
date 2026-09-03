@@ -8,6 +8,17 @@
 // Authority on which mastery fired is `flags.dnd5e.roll.mastery` (see `masteryOf` in
 // `rules/cards.ts`). A weapon can be mastered and the mastery declined on the dialog.
 //
+// THE TAG ON THE WEAPON IS NOT THE FEATURE. RAW: "This weapon has the following mastery
+// property. To use this property, you must have a feature that lets you use it." Proficiency
+// is not that feature. dnd5e's own `masteryOptions` getter (`data/item/weapon.mjs`) only
+// offers the dialog when `traits.weaponProf.mastery.value` contains the weapon's
+// `type.baseItem`. Nick already made that test; the other seven were reading the tag
+// (or a leftover `flags.dnd5e.roll.mastery`) and applying it to anyone holding the item.
+// `canUseWeaponMastery` is the one gate. Characters always need the list. NPCs whose
+// sheet has no list at all are the 2024 MM encoding — mastery is printed on that attack
+// and stored only on the item — so the native tag is their grant. An empty list is a
+// stated "none", not a missing field.
+//
 // 2024 PHB Appendix D, read from the journal pages rather than from memory:
 //   Sap    — hit → Disadvantage on its next attack before the start of YOUR next turn.
 //   Slow   — hit AND deal damage → you CAN reduce Speed by 10 (does not stack past −10)
@@ -114,4 +125,53 @@ export function movementKeysOf(actor: any): string[] {
 
 export function slowAmount(): number {
   return -10;
+}
+
+function hasKey(collection: unknown, key: string): boolean {
+  if (!key) return false;
+  if (collection instanceof Set) return collection.has(key);
+  if (Array.isArray(collection)) return collection.map(String).includes(key);
+  return false;
+}
+
+function isPlayerCharacter(actor: any): boolean {
+  return String(actor?.type ?? "") === "character";
+}
+
+/**
+ * May this creature use this mastery on this weapon?
+ *
+ * `claimed` is the property on the card or the item (`topple`, `vex`, …). The weapon's
+ * own `system.mastery` is what they get from mastering the base item; `mastery.bonus`
+ * is the Weapon Master extras, and those only apply on a weapon they already master —
+ * the same pairing dnd5e's dialog uses. Fail closed: no actor, no base item, or an
+ * unreadable list is a no.
+ */
+export function canUseWeaponMastery(actor: any, item: any, claimed: string): boolean {
+  const key = String(claimed ?? "")
+    .trim()
+    .toLowerCase();
+  if (!key || !actor) return false;
+  const native = String(item?.system?.mastery ?? "")
+    .trim()
+    .toLowerCase();
+  const base = String(item?.system?.type?.baseItem ?? "").trim();
+  if (!base) return false;
+
+  const pack = actor.system?.traits?.weaponProf?.mastery;
+  const listed = pack?.value;
+  if (isPlayerCharacter(actor) || listed != null) {
+    if (!hasKey(listed, base)) return false;
+    if (key === native) return true;
+    return hasKey(pack?.bonus, key);
+  }
+  return key === native && Boolean(native);
+}
+
+/** The weapon's printed mastery, or "" if this wielder is not entitled to it. */
+export function usableMastery(actor: any, item: any): string {
+  const native = String(item?.system?.mastery ?? "")
+    .trim()
+    .toLowerCase();
+  return canUseWeaponMastery(actor, item, native) ? native : "";
 }

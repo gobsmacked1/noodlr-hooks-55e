@@ -37,7 +37,7 @@ export interface Graze {
  * bludgeoning" would be noise on every miss.
  */
 export function grazeDamage(attack: any, item: any, activity: any): Graze | null {
-  if (masteryOf(attack, item) !== "graze") return null;
+  if (masteryOf(attack, item, activity?.actor) !== "graze") return null;
 
   const ability = String(activity?.ability ?? "");
   if (!ability) return null;
