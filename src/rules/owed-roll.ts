@@ -28,7 +28,6 @@ import { isPrimaryGM, isRollerFor, rollerForActor } from "../util/gm";
 import { promptChoice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
 import { isAutoSavesEnabled } from "../settings";
-import { midiOwnsSaves } from "../system/dnd5e-damage";
 import {
   activityOf,
   itemOf,
@@ -454,7 +453,6 @@ async function performOwedRoll(
 
 async function maybeAskCheck(message: any): Promise<void> {
   if (!isAutoSavesEnabled()) return;
-  if (midiOwnsSaves()) return;
   const dnd5e = message?.flags?.dnd5e ?? {};
   if (dnd5e.messageType || !dnd5e.activity) return;
   const item = itemOf(message);

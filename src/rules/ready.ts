@@ -49,7 +49,7 @@ import { isReadyEnabled } from "../settings";
 import { affordable, payBill, turnBill } from "./economy/bill";
 import { clearNextUse } from "./economy/enforce";
 import { hasReaction, spend } from "./economy/ledger";
-import { canReact, alive, notifyMidi } from "./offer";
+import { canReact, alive } from "./offer";
 import {
   cannedTriggers,
   forcedReady,
@@ -586,7 +586,6 @@ async function releaseHere(
 
   if (combatant) {
     spend(actor, game.combat, combatant, "reaction", false);
-    notifyMidi(actor);
   }
 
   if (record.move) {

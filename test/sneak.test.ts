@@ -259,23 +259,6 @@ test("nothing is refused when the offer is off", () => {
   assert.equal(sneakClaimedNatively(rule("damage"), { ...FEATURE, actor: CHARACTER }), null);
 });
 
-test("Chris's Premades outranks the switch, because its macro deals the dice either way", () => {
-  settings["combat.sneak.pc"] = false;
-  (globalThis as any).game.modules = new Map([
-    ["chris-premades", { active: true }],
-    ["midi-qol", { active: true }],
-  ]);
-  const claimed = {
-    ...FEATURE,
-    actor: CHARACTER,
-    flags: { "chris-premades": { info: { identifier: "sneakAttack" } } },
-  };
-  assert.match(String(sneakClaimedNatively(rule("damage"), claimed)), /Chris's Premades/);
-
-  // And a feature it never touched is still ours to refuse.
-  assert.equal(sneakClaimedNatively(rule("damage"), { ...FEATURE, actor: CHARACTER }), null);
-});
-
 // Both readers of the refusal — the capability sheet and `surveyCapabilities` — go through one
 // function, because they did not and disagreed. The console asked `duplicatesItemDamage` alone, so a
 // live rogue's compiled Sneak Attack was badged in the window and printed clean in the console from the

@@ -13,8 +13,6 @@ import { speakerFor } from "../util/speaker";
 import { announceRuling } from "../integration/contract";
 import { isConditionAutomationEnabled } from "../settings";
 import {
-  ac5eOwnsConditions,
-  ac5eOwnsDodging,
   attackIsMelee,
   attackModifiers,
   autoFailsSave,
@@ -22,8 +20,6 @@ import {
   hasStatus,
   isDodging,
   isIncapacitated,
-  rangedNearbyFoeOwned,
-  visibilityAttackRulesOwned,
 } from "../system/dnd5e-conditions";
 import { sightModifiers } from "./unseen";
 import { isDnd5e } from "../system/dnd5e-rewards";
@@ -37,18 +33,11 @@ import {
 } from "./crit";
 
 function enabled(): boolean {
-  return isDnd5e() && isConditionAutomationEnabled() && !ac5eOwnsConditions();
+  return isDnd5e() && isConditionAutomationEnabled();
 }
 
-/**
- * Dodge is gated separately, because the two stand-asides are not the same size.
- *
- * `ac5eOwnsConditions()` is true at AC5e's stock settings while its Dodge entry is switched off, so
- * sharing one gate would hand the rule to a module that has been told not to enforce it. See
- * `ac5eOwnsDodging()` for the settings and the line numbers.
- */
 function dodgeEnabled(): boolean {
-  return isDnd5e() && isConditionAutomationEnabled() && !ac5eOwnsDodging();
+  return isDnd5e() && isConditionAutomationEnabled();
 }
 
 function tokenCenter(token: any): { x: number; y: number; elev: number } | null {
@@ -204,8 +193,6 @@ function applyAttackFlags(config: any): void {
       attackerToken: controlledTokenFor(attacker),
       targetToken: target?.token,
       melee,
-      skipVisibility: visibilityAttackRulesOwned(),
-      skipCrowding: rangedNearbyFoeOwned(),
     });
     mods.advantage.push(...geometry.advantage);
     mods.disadvantage.push(...geometry.disadvantage);
@@ -516,10 +503,6 @@ export function surveyConditions(): unknown {
     enabled: enabled(),
     dodgeEnabled: dodgeEnabled(),
     settingOn: isConditionAutomationEnabled(),
-    ac5eOwns: ac5eOwnsConditions(),
-    ac5eOwnsDodge: ac5eOwnsDodging(),
-    visibilityOwnedElsewhere: visibilityAttackRulesOwned(),
-    rangedNearbyOwnedElsewhere: rangedNearbyFoeOwned(),
     attackerDodging: actor ? isDodging(actor) : null,
     targetDodging: target?.actor ? isDodging(target.actor) : null,
     system: String((game as any).system?.id ?? ""),

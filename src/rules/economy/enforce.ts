@@ -30,7 +30,7 @@ import { log } from "../../constants";
 import { speakerFor } from "../../util/speaker";
 import { getEconomyMode, isConditionAutomationEnabled } from "../../settings";
 import { shouldAutomate } from "../../tactics/registry";
-import { ac5eOwnsIncapacitatedUse, isIncapacitated } from "../../system/dnd5e-conditions";
+import { isIncapacitated } from "../../system/dnd5e-conditions";
 import { isDashActivity } from "../../system/dnd5e-dash";
 import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
@@ -41,6 +41,7 @@ import { interceptStabilizeActivity } from "../dying";
 import { interceptInfluenceActivity } from "../influence";
 import { holdForCounterspell, useReplay } from "../counterspell";
 import { captureReadied, interceptReadyActivity } from "../ready";
+import { gateActivityRange } from "../attack-range";
 import { check, lightSwings, slotFor, spend, takeDash, takeLightSwing, type Slot } from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
@@ -171,13 +172,9 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   // its one action on a swing that should never have started. Runs outside combat too — the
   // condition does not care whether initiative is up.
   //
-  // This survives the AC5e stand-down that switches the rest of the condition rules off, because
-  // AC5e's own refusal is gated behind a setting that ships disabled. Ours is the only one at stock
-  // settings; it steps aside only once the GM has asked AC5e to enforce.
   if (
     isDnd5e() &&
     isConditionAutomationEnabled() &&
-    !ac5eOwnsIncapacitatedUse() &&
     isIncapacitated(actor) &&
     slotFor(activity?.activation?.type)
   ) {
@@ -202,6 +199,10 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   if (interceptStabilizeActivity(activity)) return false;
   if (interceptInfluenceActivity(activity)) return false;
   if (interceptReadyActivity(activity)) return false;
+
+  // Reach is a physical fact, not an action-economy one. Before `if (!slot)` so an empty-activation
+  // Unarmed Strike enricher is still checked. Fail-open (no token / no target) lives inside the gate.
+  if (!gateActivityRange(activity, usageConfig, messageConfig, isAutomating())) return false;
 
   const slot = slotFor(activity?.activation?.type);
   if (!slot) return true;

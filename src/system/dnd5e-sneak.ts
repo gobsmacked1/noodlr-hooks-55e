@@ -28,7 +28,6 @@ import { isIncapacitated } from "./dnd5e-conditions";
 import { weaponDamageType } from "./dnd5e-damage";
 import { partFormula } from "../capability/duplicate";
 import { separation } from "../rules/unseen";
-import { moduleActive } from "../util/modules";
 
 /** How far an ally may stand from the target and still qualify, in scene units. */
 export const ALLY_REACH = 5;
@@ -65,42 +64,6 @@ export function sneakFeature(actor: any): any {
   return null;
 }
 
-/**
- * Could Chris's Premades be automating Sneak Attack anywhere in this world?
- *
- * The module-wide half, for the settings badge, which has no creature in hand. Deliberately weaker than
- * `cprAutomatesSneak` and the note beside it says so: the real answer is per rogue.
- */
-export function cprMaySneak(): boolean {
-  return moduleActive("chris-premades") && moduleActive("midi-qol");
-}
-
-/**
- * Does Chris's Premades already automate THIS creature's Sneak Attack?
- *
- * Per-item rather than per-module, the same shape as `alreadyAutomated()` in `rules/forced.ts`, because
- * that is how CPR works: `sneakAttack.mjs` is a `roll` macro on the `actorDamageRollBonuses` pass, bound
- * to the feature by CPR's own flags, so a world may run CPR with a dozen automated items and a rogue
- * whose Sneak Attack it never touched. Standing aside module-wide would leave that rogue with nothing.
- *
- * Midi is required as well because every step of theirs goes through a Midi workflow —
- * `workflow.hitTargets`, `workflowUtils.bonusDamage` — so with midi absent their macro cannot fire at
- * all, and deferring to an inert automation would be the failure the ownership resolver exists to
- * prevent. Same conjunction, same reasoning, as `gambitsOwnsBarbs`.
- *
- * Note that this is NOT covered by the midi damage stand-aside. CPR's macro adds bonus damage to midi's
- * own damage roll, which happens whether or not `autoApplyDamage` is on — so a table running midi at
- * stock settings has our damage layer live AND theirs claiming Sneak Attack, which is precisely the
- * double-ask this guard exists for.
- */
-export function cprAutomatesSneak(feature: any): boolean {
-  if (!feature || !cprMaySneak()) return false;
-  if (feature.flags?.["chris-premades"]?.info?.identifier) return true;
-  for (const activity of feature.system?.activities ?? []) {
-    if (activity?.flags?.cat?.macros) return true;
-  }
-  return false;
-}
 
 /**
  * The dice, as a formula ready to hand to `Roll`.

@@ -29,8 +29,8 @@ import { isDnd5e } from "../system/dnd5e-rewards";
 import { isConditionAutomationEnabled } from "../settings";
 import { isPrimaryGM } from "../util/gm";
 
-// Deliberately NOT `ac5eOwnsDodging()`. That gate decides who reads the status; this file decides
-// whether the status is true, and nobody else does that at all.
+// Expiry is bookkeeping, not a rules opinion: the PHB item carries no duration, so a round-one
+// Dodge would still be lit in round nine unless somebody clears it.
 function enabled(): boolean {
   return isDnd5e() && isConditionAutomationEnabled();
 }

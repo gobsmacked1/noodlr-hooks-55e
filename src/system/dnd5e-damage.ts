@@ -1,4 +1,4 @@
-// Applying damage the way dnd5e applies it, and knowing when to let midi do it instead.
+// Applying damage the way dnd5e applies it.
 //
 // Everything that knows a dnd5e path or method name lives here rather than in `rules/damage.ts`, which
 // is the same fence `dnd5e-dying.ts` and `dnd5e-concentration.ts` sit behind: a second game system
@@ -11,51 +11,12 @@
 // the system already owns — and it would be invisible, because a wrong number looks exactly like a
 // right one. Our job is to decide WHO takes the roll and to press the button.
 
-import { isDnd5e } from "./dnd5e-rewards";
-import { midiConfig, midiOn } from "../util/modules";
 
 /** Hit points as they stood before we touched them, and enough to put them back. */
 export interface HpSnapshot {
   actorUuid: string;
   value: number;
   temp: number;
-}
-
-/**
- * Is midi applying damage itself?
- *
- * `autoApplyDamage` is the switch, and it defaults to `"none"` — so on a stock midi install this is
- * false and we still do the work, which is correct: a table that installed midi and left it alone is a
- * table where nothing applies damage. Its non-`none` values distinguish whether saves and the tray are
- * shown, and all of them mean midi writes the hit points.
- *
- * Read through `midiConfig()` (the live object, not the stored setting) for the reason that helper
- * exists: a GM who changed the switch without reloading has a stale stored value.
- */
-export function midiOwnsDamage(): boolean {
-  if (!isDnd5e()) return false;
-  const settings = midiConfig();
-  if (!settings) return false;
-  return midiOn(settings.autoApplyDamage);
-}
-
-/**
- * Is midi deciding what saving throws were worth?
- *
- * `autoCheckSaves` is the switch and it also defaults to `"none"`, so a stock install decides nothing and
- * we do the work. When it is on, midi rolls the saves, compares them and writes `failedSaveUuids` to its
- * card — a real verdict rather than a reconstruction of one — and our own save layer stands down whole,
- * because two answers to "did that creature save" is a race whichever of them is right.
- *
- * Separate from `midiOwnsDamage` on purpose: they are separate settings and either can be on alone. A
- * table with saves checked and damage on manual wants midi's verdict and our button-free application, and
- * conflating the two would give it neither.
- */
-export function midiOwnsSaves(): boolean {
-  if (!isDnd5e()) return false;
-  const settings = midiConfig();
-  if (!settings) return false;
-  return midiOn(settings.autoCheckSaves);
 }
 
 /** The hit-point object dnd5e keeps, or null when the sheet has none (a vehicle, a group). */

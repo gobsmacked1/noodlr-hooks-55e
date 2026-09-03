@@ -25,7 +25,6 @@
 
 import { effectModes } from "../capability/timed";
 import { MODULE_ID } from "../constants";
-import { moduleActive } from "../util/modules";
 
 export type AuraAudience = "allies" | "enemies" | "all";
 
@@ -127,26 +126,6 @@ export const OCCUPYING_IDENTIFIERS = new Set(["spirit-guardians"]);
 
 export function knownAuraOf(identifier: string): KnownAura | null {
   return KNOWN_BY_ID.get(String(identifier ?? "").toLowerCase()) ?? null;
-}
-
-/** Another module is already copying aura AEs. Two copies is a stacked bonus, not a fallback. */
-export function auraModuleOwns(): { by: string; note: string } | null {
-  if (moduleActive("auraeffects")) {
-    return {
-      by: "Aura Effects",
-      note:
-        "It writes real Active Effects onto anyone who enters its Regions. Standing aside so a " +
-        "Paladin's save bonus is not applied twice.",
-    };
-  }
-  if (moduleActive("ActiveAuras")) {
-    return {
-      by: "Active Auras",
-      note:
-        "DDB-imported auras carry its flags. It already copies those effects onto nearby tokens.",
-    };
-  }
-  return null;
 }
 
 export function getPath(data: unknown, path: string): unknown {

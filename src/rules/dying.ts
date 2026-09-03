@@ -2,7 +2,7 @@
 //
 // Stock dnd5e floors hit points at zero and never applies Unconscious, Dead, Defeated, or death-save
 // failures from damage. Instant death (excess ≥ max HP) is prose only. This layer closes that gap
-// via dnd5e's own applyDamage hooks — no patching, and we stand aside when midi's Add Dead is on.
+// via dnd5e's own applyDamage hooks — no patching. Midi QoL is not a supported install.
 //
 // Register on every client: the updating user's client is the one that writes (same gate as bloodied).
 
@@ -22,7 +22,6 @@ import {
   deathFailuresFromDamage,
   hpSnapshot,
   isInstantDeath,
-  midiOwnsDying,
   usesDeathSaves,
 } from "../system/dnd5e-dying";
 import { isDnd5e } from "../system/dnd5e-rewards";
@@ -68,12 +67,12 @@ const UNDO_CAP = 40;
  * table that wants death saves for the party and a clean kill for the mooks is configuring the victim.
  */
 function enabled(subject: unknown): boolean {
-  return isDnd5e() && isDyingAutomationEnabled(subject) && !midiOwnsDying();
+  return isDnd5e() && isDyingAutomationEnabled(subject);
 }
 
 /** For registration and diagnostics, where there is no creature yet. */
 function enabledAtAll(): boolean {
-  return isDnd5e() && enabledForEither(COMBAT_SETTINGS.dying) && !midiOwnsDying();
+  return isDnd5e() && enabledForEither(COMBAT_SETTINGS.dying);
 }
 
 function actorKey(actor: any): string {
@@ -767,7 +766,6 @@ export function surveyDying(): unknown {
       npc: isDyingAutomationEnabled({ type: "npc" }),
       pc: isDyingAutomationEnabled({ type: "character" }),
     },
-    midiOwns: midiOwnsDying(),
     honorImportantNpc: honorImportantNpcDeathSaves(),
     selected: actor?.name ?? null,
     type: actor?.type ?? null,

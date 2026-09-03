@@ -19,7 +19,6 @@
 
 import { log } from "../constants";
 import { readFlag } from "../util/flags";
-import { moduleActive } from "../util/modules";
 import { slotAvailable, spendsSlot } from "./dnd5e-spells";
 
 /** The spell's own range, in feet. Read from the item where possible; this is the printed fallback. */
@@ -85,26 +84,6 @@ export function counterableCast(activity: any): CounterableCast | null {
   }
 
   return null;
-}
-
-/**
- * Does Gambit's Premades own this rule at this table?
- *
- * Its `counterspell2024.js` is a complete and careful implementation — 60 feet, enemies only, sight, the
- * reaction, the V/S/M test, a timed dialog, and the counter-the-counterspell chain — so where it runs, ours
- * must not. Two windows on one cast would ask twice and could abort it twice.
- *
- * MIDI IS PART OF THE TEST, and that is the whole point of checking rather than assuming. Their entry point
- * is `MidiQOL.Workflow.getWorkflow()` and every step routes through `MidiQOL.socket()`, so with midi absent
- * their automation cannot fire at all — and standing aside for an installed-but-inert module would leave
- * Counterspell unimplemented while a settings row claimed somebody had it.
- *
- * Worth recording what their approach confirms about ours: they abort midi's workflow AFTER the cast and then
- * REFUND the slot by replaying `flags.dnd5e.use.consumed` in reverse. That is the only option available once
- * consumption has happened, and it is exactly what stopping the cast at `preUseActivity` avoids.
- */
-export function gambitsOwnsCounterspell(): boolean {
-  return moduleActive("gambits-premades") && moduleActive("midi-qol");
 }
 
 /** Is this the Counterspell spell itself? Identifier first, then the name, as every table here does. */

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.48
+
+**A punch from across the room is refused.** dnd5e stores reach and range
+and never stops the use — Foundry flashes an error and the activity
+resolves anyway. New Combat switch **Refuse attacks that cannot reach**
+(`combat.attackRange`, default on). Melee uses the weapon's reach, not
+its thrown range. A 2024 Flurry of Blows (utility, range Self, target a
+creature) is checked the same way as a swing. Players see a short
+warning that names nobody. The GM is told the numbers and allowed.
+Automated creatures are refused. `noodlrHooks.surveyAttackRange()`.
+
+**Leftover stand-asides for other combat modules are gone.** Midi QoL,
+Chris's Premades, Gambit's Premades, Automated Conditions 5e, Aura
+Effects, Active Auras, and Rideable no longer switch any of our rules
+off. Those packages are incompatible — disable them. We always enforce
+what we own. The one remaining stand-aside is dnd5e's own Auto-recharge
+(two d6s on a failure would let the second succeed). The **Alongside
+Midi QoL** preset is removed; use Narrate only if you want none of this.
+Advisories still name a live midi Check Range or an unverified wm5e
+conflict so two referees are visible.
+
 ## 0.7.47
 
 **The remaining 2024 weapon masteries now apply.** v0.7.46 put Cleave,

@@ -35,7 +35,6 @@ import {
   concentrationDC,
   concentrationLabels,
   isConcentrating,
-  midiOwnsConcentration,
   readVerdict,
   systemTracksConcentration,
   type SaveVerdict,
@@ -46,22 +45,12 @@ const ending = new Set<string>();
 
 /** Is this layer running for the creature holding the spell? Per audience. */
 function enabled(subject: unknown): boolean {
-  return (
-    isDnd5e() &&
-    isConcentrationAutomationEnabled(subject) &&
-    systemTracksConcentration() &&
-    !midiOwnsConcentration()
-  );
+  return isDnd5e() && isConcentrationAutomationEnabled(subject) && systemTracksConcentration();
 }
 
 /** For diagnostics, where there may be no creature selected. */
 function enabledAtAll(): boolean {
-  return (
-    isDnd5e() &&
-    enabledForEither(COMBAT_SETTINGS.concentration) &&
-    systemTracksConcentration() &&
-    !midiOwnsConcentration()
-  );
+  return isDnd5e() && enabledForEither(COMBAT_SETTINGS.concentration) && systemTracksConcentration();
 }
 
 function actorKey(actor: any): string {
@@ -309,7 +298,6 @@ export function surveyConcentration(): unknown {
       pc: isConcentrationAutomationEnabled({ type: "character" }),
     },
     systemTracking: systemTracksConcentration(),
-    midiOwns: midiOwnsConcentration(),
     selected: actor?.name ?? null,
     concentrating: actor ? isConcentrating(actor) : null,
     on: actor ? concentrationLabels(actor) : [],

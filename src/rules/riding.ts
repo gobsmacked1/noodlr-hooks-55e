@@ -1,7 +1,7 @@
 // Token riding — sit on a larger creature, follow it, hop off.
 //
-// Eligibility, mount / dismount, follow after the mount moves, half-Speed stamp, stand aside
-// for Rideable. Several riders share a mount when seats (half the token footprint) and remaining
+// Eligibility, mount / dismount, follow after the mount moves, half-Speed stamp.
+// Several riders share a mount when seats (half the token footprint) and remaining
 // carry weight both fit. Parked: Dash/Disengage/Dodge-only on a controlled mount, falling-off
 // saves, opportunity-attack "you or the mount", drag-onto-token automount.
 //
@@ -33,7 +33,6 @@ import {
   mountCostFeet,
   mountCostFromStamp,
   registerRidingStatus,
-  rideableOwns,
   ridingBadgePayload,
   seatCapacityFromSquares,
   seatCellCenter,
@@ -77,7 +76,6 @@ function info(key: string, data?: Record<string, string>): void {
 
 function refuseKey(reason: MountRefuse): string {
   const map: Record<MountRefuse, string> = {
-    rideable: "NOODLRHOOKS.General.Riding.Rideable",
     same: "NOODLRHOOKS.General.Riding.Same",
     "already-riding": "NOODLRHOOKS.General.Riding.AlreadyRiding",
     occupied: "NOODLRHOOKS.General.Riding.Occupied",
@@ -218,7 +216,7 @@ function seatOf(
 export function syncRiderVisuals(mountToken: any): void {
   const doc = mountToken?.document ?? mountToken;
   const id = String(doc?.id ?? "");
-  if (!id || rideableOwns() || !isRidingEnabled()) return;
+  if (!id || !isRidingEnabled()) return;
   for (const rider of ridersOf(id)) {
     const seat = seatOf(doc, rider, true);
     const obj = rider?.object;
@@ -306,7 +304,6 @@ async function stripBadge(actor: any): Promise<void> {
 function stayInput(rider: any, mount: any) {
   const others = ridersOf(String(mount.id)).filter((d) => d.id !== rider.id);
   return {
-    rideableActive: rideableOwns(),
     riderId: String(rider.id),
     mountId: String(mount.id),
     ridingOf: ridingMap(),
@@ -409,10 +406,6 @@ export async function mountTokens(
   opts?: { force?: boolean },
 ): Promise<boolean> {
   if (!isRidingEnabled() && !opts?.force) return false;
-  if (rideableOwns()) {
-    notify("NOODLRHOOKS.General.Riding.Rideable");
-    return false;
-  }
   const riderDoc = rider?.document ?? rider;
   const mountDoc = mount?.document ?? mount;
   if (!riderDoc || !mountDoc) return false;
@@ -558,7 +551,7 @@ async function runRidingFit(): Promise<void> {
 }
 
 export async function dropUnfitRiders(): Promise<number> {
-  if (!isRidingEnabled() || rideableOwns()) return 0;
+  if (!isRidingEnabled()) return 0;
   if (!isPrimaryGM()) return 0;
   let n = 0;
   for (const rider of allTokenDocs()) {
@@ -584,7 +577,7 @@ export async function dropAllRidersOf(
   mount: any,
   opts?: { requireGm?: boolean },
 ): Promise<number> {
-  if (!isRidingEnabled() || rideableOwns()) return 0;
+  if (!isRidingEnabled()) return 0;
   if (opts?.requireGm !== false && !isPrimaryGM()) return 0;
   const mountDoc = mount?.document ?? mount;
   const id = String(mountDoc?.id ?? "");
@@ -654,7 +647,6 @@ export function registerRidingWatch(): void {
 
   Hooks.on("preMoveToken", (doc: any, movement: any, operation: any) => {
     if (!isRidingEnabled()) return;
-    if (rideableOwns()) return;
     if (operation?.noodlrRiding === "follow") return;
     if (!ridingOn(doc)) return;
     const method = String(movement?.method ?? "");
@@ -664,7 +656,7 @@ export function registerRidingWatch(): void {
   });
 
   Hooks.on("updateToken", (doc: any, changed: any, operation: any) => {
-    if (!isRidingEnabled() || rideableOwns()) return;
+    if (!isRidingEnabled()) return;
     if (operation?.noodlrRiding === "follow") return;
     if (
       revertDumpsRiders({
@@ -713,7 +705,7 @@ export function registerRidingWatch(): void {
   });
 
   Hooks.on("renderTokenHUD", (app: any, html: any) => {
-    if (!isRidingEnabled() || rideableOwns()) return;
+    if (!isRidingEnabled()) return;
     const token = app?.object ?? app?.token;
     const doc = token?.document ?? token;
     if (!doc) return;
@@ -788,7 +780,6 @@ export function surveyRiding(): unknown {
   const docs = allTokenDocs();
   const lines = [
     `riding: ${isRidingEnabled() ? "on" : "off"}` +
-      (rideableOwns() ? " — standing aside for Rideable" : "") +
       ` — poll ${RIDING_FIT_POLL_MS / 1000}s — ${docs.length} token(s)`,
   ];
   const seen = new Set<string>();

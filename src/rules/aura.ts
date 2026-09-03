@@ -32,7 +32,6 @@ import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   type AuraSource,
   auraDominates,
-  auraModuleOwns,
   AURA_HOST_FLAG,
   AURA_SHOW_ICON_ALWAYS,
   AURA_STATUS_IMG,
@@ -201,7 +200,7 @@ function ownTransferredStrengths(actor: any): Record<string, number> {
 
 function desiredForScene(): Map<string, Desired[]> {
   const wanted = new Map<string, Desired[]>();
-  if (!isAurasEnabled() || auraModuleOwns() || !isDnd5e()) return wanted;
+  if (!isAurasEnabled() || !isDnd5e()) return wanted;
   for (const token of tokensOnScene()) {
     const actor = token.actor;
     if (sourceIsSuppressed(actor)) continue;
@@ -645,10 +644,8 @@ export function registerAuraWatch(): void {
 export function surveyAuras(): unknown {
   const tokens = tokensOnScene();
   const lines: string[] = [];
-  const owned = auraModuleOwns();
   lines.push(
     `auras: ${isAurasEnabled() ? "on" : "off"}` +
-      (owned ? ` — standing aside for ${owned.by}` : "") +
       ` — poll ${AURA_POLL_MS / 1000}s — ${tokens.length} token(s)`,
   );
   for (const token of tokens) {

@@ -1,15 +1,13 @@
-// Four starting points, so a table does not have to read eighteen hints to get going.
+// Three starting points, so a table does not have to read eighteen hints to get going.
 //
 // A preset writes settings and nothing else — no hidden mode, no state of its own. After applying one
 // every switch is still individually editable, and the window simply stops naming a preset once the
 // values stop matching one. That is deliberate: a preset that remembered it had been chosen would
 // eventually disagree with the settings it supposedly describes.
 //
-// "Alongside Midi QoL" is the one worth explaining. Two of these rules already stand aside from midi
-// at runtime, so that profile could have been left empty and would have behaved identically. It sets
-// them off explicitly anyway, because the entire complaint this window exists to answer is that a
-// silent stand-aside leaves a switch reading ON while nothing happens. A GM running midi should be
-// able to SEE that concentration is midi's.
+// There is no "alongside Midi QoL" profile. Midi, Chris's Premades, Gambit's and Automated
+// Conditions 5e are incompatible — we always enforce the rules we own. A table that wants none of
+// that uses Narrate only.
 
 import {
   COMBAT_SETTINGS,
@@ -40,6 +38,7 @@ const ALL_RULES = {
   [C.forced]: true,
   [C.masteries]: true,
   [C.movement]: true,
+  [C.attackRange]: true,
   [C.stealth]: true,
   [C.surprise]: true,
   [C.invisBreak]: true,
@@ -93,21 +92,6 @@ export const PRESETS: Preset[] = [
       [C.automation]: "full",
       [C.economy]: "block",
       [C.autoEngage]: true,
-    },
-  },
-  {
-    id: "midi",
-    label: "Alongside Midi QoL",
-    blurb:
-      "Keep the rules midi genuinely leaves alone — forced movement, the Speed budget and Dash, hiding " +
-      "and surprise, jumping and Influence — and hand it the two it owns. Dying and concentration are " +
-      "switched off here rather than left to stand aside quietly, so the split is visible.",
-    values: {
-      ...ALL_RULES,
-      [C.dying]: false,
-      [C.concentration]: false,
-      [C.automation]: "off",
-      [C.economy]: "warn",
     },
   },
 ];

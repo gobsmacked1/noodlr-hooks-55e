@@ -16,7 +16,6 @@
 // the sheet says, because the reaction is used through the ordinary activity pipeline.
 
 import { hasFlag } from "../util/flags";
-import { moduleActive } from "../util/modules";
 import { slotAvailable, spendsSlot } from "./dnd5e-spells";
 
 /** The spell's own range, in feet. Read from the item where possible; this is the printed fallback. */
@@ -78,24 +77,4 @@ export function barbsReady(actor: any): BarbsReady | null {
  */
 export function forcedBarber(actor: any): boolean {
   return hasFlag(actor, "d20Reaction");
-}
-
-/**
- * Does Gambit's Premades own this rule at this table?
- *
- * `silveryBarbs.js` is a complete implementation of both halves — the reroll for attacks and for saves, the
- * ally who gains Advantage, the timed dialog — so where it runs, ours must not. Two windows on one success
- * would ask twice and could reroll twice.
- *
- * MIDI IS PART OF THE TEST, exactly as with Counterspell: their first line is
- * `MidiQOL.Workflow.getWorkflow()` and every step routes through `MidiQOL.socket()`, so with midi absent
- * their automation cannot fire at all — and standing aside for an installed-but-inert module would leave
- * the spell unimplemented while a settings row claimed somebody had it.
- *
- * Worth recording what their approach confirms about ours: they reroll `1d20 + (total - dice[0].total)` and
- * keep it only when the new total is lower. That is the same arithmetic as ours, derived independently,
- * which is reassuring about the one piece of this that has to be exactly right.
- */
-export function gambitsOwnsBarbs(): boolean {
-  return moduleActive("gambits-premades") && moduleActive("midi-qol");
 }

@@ -28,8 +28,6 @@
 //
 // This file is the rule table. The hook engine that uses it lives in `rules/concentration.ts`.
 
-import { midiConfig, midiOn } from "../util/modules";
-import { isDnd5e } from "./dnd5e-rewards";
 import { hasStatus } from "./dnd5e-conditions";
 import { rulesVersion } from "./dnd5e-stealth";
 
@@ -136,26 +134,6 @@ export function breaksConcentration(actor: any): "dead" | "incapacitated" | "zer
   const hp = Number(actor?.system?.attributes?.hp?.value);
   if (Number.isFinite(hp) && hp <= 0) return "zero";
   return null;
-}
-
-/**
- * Is midi-qol handling concentration, so that we must not?
- *
- * Midi's `doConcentrationCheck` is `"chat"` by default, which posts its own request card in place of
- * the system's, and its `dnd5e.rollConcentration` listener ends concentration on a failure when
- * `removeConcentration` is on (also the default). So midi already owns the verdict; what it does not
- * do is press the button either.
- *
- * We stand aside from the whole feature rather than adding only the missing half, and the reason is
- * ordering rather than politeness. Suppressing the stock prompt means writing
- * `options.dnd5e.concentrationCheck = false` during `preUpdateActor` — and midi writes that same
- * property from its own `preUpdateActor` handler (`Hooks.ts:237`). Whichever registers last wins,
- * which is not a thing to build a rule on. Setting midi's concentration handling to "None" hands the
- * whole job here.
- */
-export function midiOwnsConcentration(): boolean {
-  if (!isDnd5e()) return false;
-  return midiOn(midiConfig()?.doConcentrationCheck);
 }
 
 /** The system's own master switch. With it off, there is no concentration to maintain. */

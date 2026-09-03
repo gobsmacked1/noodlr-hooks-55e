@@ -5,8 +5,8 @@
 //
 // TWO CALLERS, ONE PROMISE. Auto-damage (`damage.ts` / `saves.ts`) awaits this
 // so the HP write sees the new totals. The chat hook offers the same window
-// when that layer is off (or midi owns damage) so a human Apply sees the new
-// number. `inflight` / `done` make the two one offer.
+// when that layer is off so a human Apply sees the new number. `inflight` /
+// `done` make the two one offer.
 //
 // ORDER ON THE CARD: self first (reroll), then Cutting Words (subtract).
 // A subtracted die that is then rerolled would spend a Reaction to change a
@@ -18,7 +18,6 @@
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
 import { adjustUses } from "../capability/primitives";
 import { enabledForEither, isDiceModsEnabled } from "../settings";
-import { midiOwnsDamage } from "../system/dnd5e-damage";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { rerollDamageDice } from "../system/dnd5e-reroll";
 import {
@@ -99,7 +98,7 @@ async function considerPosted(message: any): Promise<void> {
 }
 
 function autoDamageLayerRuns(): boolean {
-  return !midiOwnsDamage() && enabledForEither(COMBAT_SETTINGS.autoDamage);
+  return enabledForEither(COMBAT_SETTINGS.autoDamage);
 }
 
 /**

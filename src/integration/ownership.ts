@@ -1,24 +1,21 @@
 // Who is enforcing this rule right now?
 //
-// Every stand-aside in this module is a silent one. `ac5eOwnsConditions()` switches the whole
-// condition layer off, `midiOwnsConcentration()` hands concentration to midi, Gambit's takes
-// opportunity attacks — and in each case our own setting still reads `true` in the settings list,
-// because the setting means "we would like to do this" and the stand-aside decides whether we
-// actually do. A GM has no way to tell those apart, and the failure looks exactly like the module
-// being broken: the switch is on and nothing happens.
+// On a supported install that is this module or the dnd5e system. Community packages that used to
+// claim the same rules (Midi QoL, Chris's Premades, Gambit's, Automated Conditions 5e) are
+// incompatible — we do not stand aside for them. The one remaining stand-aside is dnd5e's own
+// Auto-recharge: two d6s on a failure would let the second succeed.
 //
 // This is the single place that answers the question, and the rule is that it must READ the same
-// predicates the enforcement paths read rather than restate their conditions. A resolver with its own
-// copy of "is AC5e on" would drift, and it would drift into telling the GM the opposite of the truth,
-// which is worse than not telling them at all.
+// predicates the enforcement paths read rather than restate their conditions.
 //
 // Three ideas, kept apart on purpose:
 //
-//   * OWNERSHIP — for one rule area, who acts: us, another module, the system, or nobody. This is
-//     what a settings row needs to show beside its checkbox.
+//   * OWNERSHIP — for one rule area, who acts: us, the system, or nobody. This is what a settings
+//     row needs to show beside its checkbox.
 //   * ADVISORIES — cross-cutting conditions that are nobody's rule area but change what the GM sees
 //     at the table. Midi's live range check is the important one: it cancels an item use with only a
-//     log line, which is indistinguishable from our automation failing to fire.
+//     log line, which is indistinguishable from our automation failing to fire. The advice there is
+//     to disable midi, not to turn us off.
 //   * CONFLICTS — two packages that will both act on one event. Not a stand-aside, because standing
 //     aside needs certainty and these are suspicions; the GM is told and decides.
 
@@ -31,25 +28,10 @@ import {
   audienceKey,
 } from "../constants";
 import { AUDIENCES, type Audience } from "../util/audience";
-import {
-  ac5eOwnsConditions,
-  ac5eOwnsIncapacitatedUse,
-  rangedNearbyFoeOwned,
-  visibilityAttackRulesOwned,
-} from "../system/dnd5e-conditions";
-import { midiOwnsConcentration } from "../system/dnd5e-concentration";
-import { midiOwnsDying } from "../system/dnd5e-dying";
-import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
-import { midiPromptsReactions } from "../system/dnd5e-reactions";
-import { gambitsOwnsCounterspell } from "../system/dnd5e-counterspell";
-import { gambitsOwnsBarbs } from "../system/dnd5e-barbs";
-import { cprMaySneak } from "../system/dnd5e-sneak";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
 import { getAutoRecharge } from "../settings";
 import { systemOwnsRecharge } from "../rules/recharge";
-import { auraModuleOwns } from "../system/dnd5e-auras";
-import { rideableOwns } from "../system/dnd5e-riding";
 
 /** Who acts on a rule when its trigger fires. */
 export type Owner =
@@ -114,9 +96,6 @@ function settingOn(key: string): boolean {
   }
 }
 
-const AC5E_NAME = "Automated Conditions 5e";
-const MIDI_NAME = "Midi QoL";
-
 /**
  * Every rule area with an owner worth naming.
  *
@@ -126,193 +105,23 @@ const MIDI_NAME = "Midi QoL";
  * prevent.
  */
 const AREAS: Area[] = [
-  {
-    id: "conditions",
-    setting: COMBAT_SETTINGS.conditions,
-    contender: () =>
-      ac5eOwnsConditions()
-        ? {
-            by: AC5E_NAME,
-            note:
-              "Its Automate Statuses setting is on, and it covers everything this does plus " +
-              "attacker Prone, Restrained, Invisible and Grappled. Both of us acting would be a " +
-              "race, not a stack, so this module stands down entirely.",
-          }
-        : null,
-  },
-  {
-    id: "incapacitated",
-    setting: COMBAT_SETTINGS.conditions,
-    contender: () =>
-      ac5eOwnsIncapacitatedUse()
-        ? {
-            by: AC5E_NAME,
-            note:
-              "Its Auto Armor / Spell Use setting is no longer off, so it refuses activity use by " +
-              "Incapacitated creatures. Note this is separate from Automate Statuses: at stock " +
-              "settings it is off and this module does the refusing.",
-          }
-        : null,
-  },
-  {
-    id: "unseen",
-    setting: COMBAT_SETTINGS.conditions,
-    contender: () =>
-      visibilityAttackRulesOwned()
-        ? {
-            by: AC5E_NAME,
-            note:
-              "Its Visibility Checks setting is on — it ships on — so it already ticks Advantage for " +
-              "an unseen attacker and Disadvantage against an unseen target. If Midi QoL's " +
-              "invisibility optional rule is live instead, AC5e defers to midi and so do we.",
-          }
-        : null,
-  },
-  {
-    id: "rangedNearby",
-    setting: COMBAT_SETTINGS.conditions,
-    contender: () =>
-      rangedNearbyFoeOwned()
-        ? {
-            by: AC5E_NAME,
-            note:
-              "Its Ranged Nearby Foes range check has been ticked, or Midi QoL's Optional Rules are " +
-              "enabled with Nearby Foe on. Both ship off, so seeing this means somebody chose it.",
-          }
-        : null,
-  },
-  {
-    id: "autoDamage",
-    setting: COMBAT_SETTINGS.autoDamage,
-    contender: () =>
-      midiOwnsDamage()
-        ? {
-            by: MIDI_NAME,
-            note:
-              "Its Auto Apply Damage is not None, so it writes the hit points. Note that it ships as " +
-              "None: seeing this means somebody chose it, and NOT seeing it on a table with midi " +
-              "installed means midi is applying nothing.",
-          }
-        : null,
-  },
-  {
-    id: "autoSaves",
-    setting: COMBAT_SETTINGS.autoSaves,
-    contender: () =>
-      midiOwnsSaves()
-        ? {
-            by: MIDI_NAME,
-            note:
-              "Its Auto Check Saves is not None, so it rolls the saves and decides them, writing the " +
-              "verdict to its own card. That is a real answer rather than a reconstruction of one, so we " +
-              "stand aside whole. It also ships as None.",
-          }
-        : midiOwnsDamage()
-          ? {
-              by: MIDI_NAME,
-              note:
-                "It is applying the damage, so there is nothing left for a save to settle here even " +
-                "though it is not deciding the saves themselves.",
-            }
-          : null,
-  },
+  { id: "conditions", setting: COMBAT_SETTINGS.conditions },
+  { id: "incapacitated", setting: COMBAT_SETTINGS.conditions },
+  { id: "unseen", setting: COMBAT_SETTINGS.conditions },
+  { id: "rangedNearby", setting: COMBAT_SETTINGS.conditions },
+  { id: "attackRange", setting: COMBAT_SETTINGS.attackRange },
+  { id: "autoDamage", setting: COMBAT_SETTINGS.autoDamage },
+  { id: "autoSaves", setting: COMBAT_SETTINGS.autoSaves },
   { id: "templateLifetime", setting: COMBAT_SETTINGS.templateLifetime },
-  {
-    id: "reactionPrompts",
-    setting: COMBAT_SETTINGS.reactionPrompts,
-    contender: () =>
-      midiPromptsReactions()
-        ? {
-            by: MIDI_NAME,
-            note:
-              "Its Do Reactions is not None, so it already prompts when a creature is hit or damaged — " +
-              "and unlike most midi mechanics that one ships ON. We keep the departure trigger, which " +
-              "midi declares and never fires, so opportunity attacks are still offered here. Set Do " +
-              "Reactions and GM Do Reactions to None to hand the whole surface over.",
-          }
-        : null,
-  },
-  {
-    id: "counterspell",
-    setting: COMBAT_SETTINGS.counterspell,
-    contender: () =>
-      gambitsOwnsCounterspell()
-        ? {
-            by: "Gambit's Premades",
-            note:
-              "Its 2024 Counterspell automation is complete — 60 feet, enemies only, sight, the reaction, " +
-              "and the counter-a-counterspell chain — and it runs through Midi QoL, which is installed. " +
-              "Two windows on one cast would ask twice, so this stands aside. Note that it fires only for " +
-              "creatures carrying its own Counterspell item; ours reads whatever Counterspell is on the sheet.",
-          }
-        : null,
-  },
-  {
-    id: "barbs",
-    setting: COMBAT_SETTINGS.barbs,
-    contender: () =>
-      gambitsOwnsBarbs()
-        ? {
-            by: "Gambit's Premades",
-            note:
-              "Its Silvery Barbs automation covers both halves of the spell — the reroll and the ally who " +
-              "gains Advantage — and it runs through Midi QoL, which is installed. Two windows on one " +
-              "success would ask twice and could reroll twice. Ours automates the reroll only; the " +
-              "Advantage half is whatever your copy of the spell carries as an effect.",
-          }
-        : null,
-  },
-  {
-    id: "sneak",
-    setting: COMBAT_SETTINGS.sneak,
-    contender: () =>
-      cprMaySneak()
-        ? {
-            by: "Chris's Premades",
-            note:
-              "Its Sneak Attack macro adds the dice on Midi QoL's damage-bonus pass, and both are " +
-              "installed. That runs whether or not midi is applying damage, so this stands aside " +
-              "PER ROGUE — a creature whose feature CPR has claimed is skipped, and one it never " +
-              "touched is still offered. Theirs also reads the 2014 ally clause (an enemy of the " +
-              "target) where ours reads the printed 2024 one (one of your allies).",
-          }
-        : null,
-  },
-  {
-    id: "diceMods",
-    setting: COMBAT_SETTINGS.diceMods,
-    // Nobody else offers Heroic Inspiration / Indomitable / Stroke of Luck as one after-fail window,
-    // Piercer / Empowered Spell on a damage card, or the Lucky feat as a with-roll hold. Halfling
-    // Luck is the system's (r1=1) and is not in either offer, so there is no contender to name.
-    contender: () => null,
-  },
-  {
-    id: "dying",
-    setting: COMBAT_SETTINGS.dying,
-    contender: () =>
-      midiOwnsDying()
-        ? {
-            by: MIDI_NAME,
-            note:
-              "One of its Add Dead, Dead Condition or Unconscious Condition mechanics is on, so it " +
-              "writes the status at 0 HP. Standing aside stops a creature being Unconscious and " +
-              "Dead at once. Midi does not roll death saves either way.",
-          }
-        : null,
-  },
+  { id: "reactionPrompts", setting: COMBAT_SETTINGS.reactionPrompts },
+  { id: "counterspell", setting: COMBAT_SETTINGS.counterspell },
+  { id: "barbs", setting: COMBAT_SETTINGS.barbs },
+  { id: "sneak", setting: COMBAT_SETTINGS.sneak },
+  { id: "diceMods", setting: COMBAT_SETTINGS.diceMods },
+  { id: "dying", setting: COMBAT_SETTINGS.dying },
   {
     id: "concentration",
     setting: COMBAT_SETTINGS.concentration,
-    contender: () =>
-      midiOwnsConcentration()
-        ? {
-            by: MIDI_NAME,
-            note:
-              "Its Concentration Check is not None, so it owns the verdict. Set it to None to hand " +
-              "concentration to this module. Note midi does not press the save button either — with " +
-              "its default of Chat it auto-rolls, which is why this is ownership rather than a gap.",
-          }
-        : null,
     fallback: () =>
       systemTracksConcentration()
         ? null
@@ -321,50 +130,13 @@ const AREAS: Area[] = [
             note: "The dnd5e system's own concentration tracking is disabled, so there is nothing to break.",
           },
   },
-  {
-    id: "repeatSaves",
-    setting: COMBAT_SETTINGS.repeatSaves,
-    // No contender, and that is the finding rather than an omission. Midi CAN express a save-ends
-    // clause, but only through `flags.midi-qol.OverTime` on an item that was authored with one — which
-    // in practice means DDB imports and nothing else — so it owns particular effects rather than the
-    // rule. The stand-aside is therefore per effect, inside `rules/repeat-save.ts`, and cannot be
-    // stated here: this table answers "who enforces this rule", and for this one the answer is nobody.
-    fallback: () => null,
-  },
+  { id: "repeatSaves", setting: COMBAT_SETTINGS.repeatSaves },
   {
     id: "opportunity",
     setting: COMBAT_SETTINGS.forced,
     enabled: () => true, // Opportunity attacks are not behind a switch of ours.
-    contender: () =>
-      gambitsOwnsOpportunity()
-        ? {
-            by: "Gambit's Premades",
-            note:
-              "It places a Region per combatant and reacts to departures. Two implementations means " +
-              "the party is hit twice for one move, so this module defers. Midi does NOT automate " +
-              "opportunity attacks despite appearances — its moved-reaction trigger is never fired.",
-          }
-        : null,
   },
-  {
-    id: "forced",
-    setting: COMBAT_SETTINGS.forced,
-    contender: () => {
-      // Per-item rather than wholesale: both premades collections mark the specific documents they
-      // drive, so they own a dozen items each and this module owns the rest. Reported as ours,
-      // with the caveat, because "owned by Chris's Premades" would misdescribe every other item.
-      const rivals = [
-        moduleActive("chris-premades") ? "Chris's Premades" : null,
-        moduleActive("gambits-premades") ? "Gambit's Premades" : null,
-      ].filter(Boolean);
-      return rivals.length
-        ? {
-            by: "shared",
-            note: `Items marked by ${rivals.join(" or ")} are left to it; everything else is handled here.`,
-          }
-        : null;
-    },
-  },
+  { id: "forced", setting: COMBAT_SETTINGS.forced },
   { id: "masteries", setting: COMBAT_SETTINGS.masteries },
   { id: "movement", setting: COMBAT_SETTINGS.movement },
   { id: "economy", setting: COMBAT_SETTINGS.economy, enabled: (key) => economyOn(key) },
@@ -374,29 +146,10 @@ const AREAS: Area[] = [
   { id: "jump", setting: GENERAL_SETTINGS.jump },
   { id: "influence", setting: GENERAL_SETTINGS.influence },
   { id: "interactReach", setting: GENERAL_SETTINGS.interactReach },
-  {
-    id: "auras",
-    setting: GENERAL_SETTINGS.auras,
-    contender: () => {
-      const other = auraModuleOwns();
-      return other ? { by: other.by, note: other.note } : null;
-    },
-  },
+  { id: "auras", setting: GENERAL_SETTINGS.auras },
   { id: "sheetPace", setting: GENERAL_SETTINGS.sheetPace },
   { id: "modeTraverse", setting: GENERAL_SETTINGS.modeTraverse },
-  {
-    id: "riding",
-    setting: GENERAL_SETTINGS.riding,
-    contender: () =>
-      rideableOwns()
-        ? {
-            by: "Rideable",
-            note:
-              "Rideable is active, so this module will not mount, follow, or veto a rider's walk. " +
-              "Two riding layers on one token fight.",
-          }
-        : null,
-  },
+  { id: "riding", setting: GENERAL_SETTINGS.riding },
   {
     id: "recharge",
     setting: COMBAT_SETTINGS.autoRecharge,
@@ -435,11 +188,6 @@ function systemTracksConcentration(): boolean {
   } catch {
     return true;
   }
-}
-
-function gambitsOwnsOpportunity(): boolean {
-  if (!moduleActive("gambits-premades")) return false;
-  return moduleSetting("gambits-premades", "Opportunity Attack") !== false;
 }
 
 /** Is this rule configured separately for each side? */
@@ -557,12 +305,12 @@ export function advisories(): Advisory[] {
     if (midiOn(range)) {
       out.push({
         level: "warn",
-        title: "Midi QoL is enforcing weapon range",
+        title: "Midi QoL is not compatible — disable it",
         detail:
-          `Its Check Range is "${String(range)}", which is live at stock settings — it is read ` +
-          "through a path that ignores midi's own Optional Rules master switch. An out-of-range use " +
-          "is cancelled with only a log line, which looks exactly like this module failing to act. " +
-          "Check this first when an item use does nothing at all.",
+          `Its Check Range is "${String(range)}", live at stock, and it cancels an out-of-range ` +
+          "use with only a log line. This module already refuses that use itself. Running both " +
+          "is an unsupported install: disable Midi QoL (and the rest of the automation stack " +
+          "named in the README) rather than trying to share the rule.",
       });
     }
     const walls = midi.optionalRules?.wallsBlockRange ?? midi.wallsBlockRange;
@@ -647,42 +395,31 @@ function capabilityAdvisories(): Advisory[] {
     // one-line reads.
     if (!settingOn(SETTINGS.compileCapabilities)) return out;
     const damages = AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.autoDamage, a)));
-    if (!damages || midiOwnsDamage()) {
+    if (!damages) {
       out.push({
         level: "warn",
         title: "Compiled on-hit rules will not fire",
-        detail: midiOwnsDamage()
-          ? "Midi QoL is applying damage, so this module never reads whether an attack connected — and " +
-            "that reading is what dispatches a compiled ability's on-hit and on-miss rules. They stay " +
-            "bound and inert. Everything else a compiled ability does (turn start and end, damage " +
-            "taken, dropping to 0, rests, standing facts) is unaffected."
-          : "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
-            "is what dispatches a compiled ability's on-hit and on-miss rules. A bite compiled to " +
-            "poison the creature it hits will not fire. Compiled on-attack-roll rules still fire; " +
-            "they read the chat card, not the hit verdict. Turn triggers, damage-taken, rests and " +
-            "standing facts are unaffected.",
+        detail:
+          "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
+          "is what dispatches a compiled ability's on-hit and on-miss rules. A bite compiled to " +
+          "poison the creature it hits will not fire. Compiled on-attack-roll rules still fire; " +
+          "they read the chat card, not the hit verdict. Turn triggers, damage-taken, rests and " +
+          "standing facts are unaffected.",
       });
     }
-    // Independent of the on-hit coupling: save resolution stands down when auto-saves is off OR
-    // when midi owns saves or damage (`rules/saves.ts` `active()`). Hold Person restrain rides on
-    // that layer, so either switch takes it with it. Two advisories rather than one, because a
+    // Independent of the on-hit coupling: save resolution stands down when auto-saves is off.
+    // Hold Person restrain rides on that layer. Two advisories rather than one, because a
     // table can have auto-damage on and auto-saves off.
     const saves = settingOn(COMBAT_SETTINGS.autoSaves);
-    if (!saves || midiOwnsSaves() || midiOwnsDamage()) {
+    if (!saves) {
       out.push({
         level: "warn",
         title: "Compiled on-save rules will not fire",
         detail:
-          midiOwnsSaves() || midiOwnsDamage()
-            ? "Midi QoL is resolving saves or applying damage, so this module never reads whether a " +
-              "save succeeded — and that reading is what dispatches a compiled ability's on-save-" +
-              "failed and on-save-succeeded rules. They stay bound and inert. A Hold Person compiled " +
-              "to restrain on a failed save will not fire. Turn triggers, rests and standing facts " +
-              "are unaffected."
-            : "Automatic saves are off, so nothing reads whether a save succeeded — and that reading " +
-              "is what dispatches a compiled ability's on-save-failed and on-save-succeeded rules. A " +
-              "Hold Person compiled to restrain on a failed save will not fire. Turn triggers, rests " +
-              "and standing facts are unaffected.",
+          "Automatic saves are off, so nothing reads whether a save succeeded — and that reading " +
+          "is what dispatches a compiled ability's on-save-failed and on-save-succeeded rules. A " +
+          "Hold Person compiled to restrain on a failed save will not fire. Turn triggers, rests " +
+          "and standing facts are unaffected.",
       });
     }
   } catch {
@@ -707,19 +444,15 @@ function sneakAdvisories(): Advisory[] {
   try {
     if (!AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.sneak, a)))) return out;
     const damages = AUDIENCES.some((a) => settingOn(audienceKey(COMBAT_SETTINGS.autoDamage, a)));
-    if (damages && !midiOwnsDamage()) return out;
+    if (damages) return out;
     out.push({
       level: "warn",
       title: "Sneak Attack will never be offered",
-      detail: midiOwnsDamage()
-        ? "Midi QoL is applying damage, so this module never reads whether an attack connected — and " +
-          "that reading is what decides whether a hit qualifies. Chris's Premades implements Sneak " +
-          "Attack on midi's damage-bonus pass, so with both installed a rogue whose feature it has " +
-          "claimed is already covered; one it has not is offered by nobody."
-        : "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
-          "is what decides whether a hit qualifies for Sneak Attack. The switch is on and no rogue " +
-          "will ever be asked. Pressing the feature from the sheet still works exactly as it always " +
-          "did.",
+      detail:
+        "Automatic damage is off, so nothing reads whether an attack connected — and that reading " +
+        "is what decides whether a hit qualifies for Sneak Attack. The switch is on and no rogue " +
+        "will ever be asked. Pressing the feature from the sheet still works exactly as it always " +
+        "did.",
     });
   } catch {
     // Reading a setting is not worth taking the advisory list down for.
@@ -895,15 +628,6 @@ export function conflicts(): Advisory[] {
         "mid-resolution. On an automated creature that races this module's own advance, so a slow " +
         "turn can be skipped or double-advanced. Turning off its Run for NPCs scopes the timer to " +
         "players and removes the conflict entirely.",
-    });
-  }
-
-  if (moduleActive("gambits-premades") && !gambitsOwnsOpportunity()) {
-    out.push({
-      level: "info",
-      title: "Gambit's Premades is installed with opportunity attacks off",
-      detail:
-        "This module is handling them. Turning Gambit's back on hands them over automatically.",
     });
   }
 

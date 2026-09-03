@@ -32,7 +32,7 @@ import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
 import { speakerFor } from "../util/speaker";
 import { isBarbsEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
-import { barbsReady, gambitsOwnsBarbs, type BarbsReady } from "../system/dnd5e-barbs";
+import { barbsReady, type BarbsReady } from "../system/dnd5e-barbs";
 import { rerollLower, type Reroll } from "../system/dnd5e-reroll";
 import { hasReaction } from "./economy/ledger";
 import { offerReaction } from "./offer";
@@ -87,9 +87,6 @@ const UNTOUCHED: Spoiled = { taken: false, fails: false };
 function active(actor: any): boolean {
   if (!isDnd5e()) return false;
   if (!isBarbsEnabled(actor)) return false;
-  // Gambit's Premades implements both halves of this spell wherever midi is there to carry it. Two windows on
-  // one success would ask twice and could reroll twice.
-  if (gambitsOwnsBarbs()) return false;
   return true;
 }
 
@@ -260,7 +257,6 @@ export function surveyBarbs(): unknown {
   return {
     setting: COMBAT_SETTINGS.barbs,
     enabled: actor ? isBarbsEnabled(actor) : null,
-    gambitsOwns: gambitsOwnsBarbs(),
     holding: holding.size,
     selected: actor
       ? {

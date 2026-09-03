@@ -30,12 +30,17 @@ system source, core Foundry source, and the relevant community modules before a 
 
 ## What it will not do
 
-It never re-implements work another module already does well. Where **midi-qol**, **Automated
-Conditions 5e**, **Gambit's Premades** or **Chris's Premades** is installed and configured to own a
-mechanic, this module detects that and stands aside rather than double-applying it. Nothing here is a
-dependency, and nothing here requires anything but Foundry and the D&D 5e system.
+It requires nothing but Foundry and the D&D 5e system. It also renders no visual or audio effects —
+those are somebody else's craft.
 
-It also renders no visual or audio effects. Those are somebody else's craft.
+**Midi QoL is not compatible.** Neither are the other combat-automation packages this module was
+written to replace: Chris's Premades, Gambit's Premades, and Automated Conditions 5e. Disable them.
+DDB Importer should ingest with Midi / DAE automation flags off — that is how the supported worlds
+were rebuilt. This module already enforces the rules those packages own; running both is two
+referees on one table.
+
+It is fine to keep a clone of those modules on a research disk. It is not fine to host them beside
+this one.
 
 **Legendary Action refill is dnd5e's, and it is not RAW.** The 2024 Monster Manual
 (and the sentence dnd5e prints on the sheet) restores expended uses at the **start**

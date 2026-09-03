@@ -1,10 +1,9 @@
 // Noodlr Hooks 5.5e — entry point.
 //
 // A standalone rules-automation module for D&D 5e (2024). It depends on nothing, and everything it
-// does works with only Foundry and the dnd5e system installed. Where a mechanics module IS present it
-// stands aside rather than competing: midi-qol owns attack workflows and concentration when it is
-// configured to, Automated Conditions 5e owns condition math, Gambit's owns the opportunity attacks it
-// implements. Each of those checks lives beside the code it guards.
+// does works with only Foundry and the dnd5e system installed. Midi QoL, Chris's Premades, Gambit's
+// Premades and Automated Conditions 5e are incompatible — disable them. We do not stand aside for
+// them. The one remaining stand-aside is dnd5e's own Auto-recharge.
 //
 // Four folders, and the split is the plan for a second game system rather than tidiness:
 //
@@ -59,6 +58,7 @@ import { registerReady, registerReadyExpiry, surveyReady } from "./rules/ready";
 import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
+import { surveyAttackRange } from "./rules/attack-range";
 import { registerMasteries, surveyMasteries } from "./rules/masteries";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerStreamlineCards } from "./rules/streamline-cards";
@@ -161,6 +161,7 @@ export interface NoodlrHooksApi {
   surveyPerception(): Promise<Record<string, unknown>>;
   surveyEconomy(): Record<string, unknown>;
   surveyMovement(): unknown;
+  surveyAttackRange(): unknown;
   surveyForced(): unknown;
   surveyMasteries(): unknown;
   surveyDamage(): unknown;
@@ -297,6 +298,8 @@ const api: NoodlrHooksApi = {
   surveyEconomy: () => surveyEconomy(),
   /** How far each combatant has moved this turn against its Speed. */
   surveyMovement: () => surveyMovement(),
+  /** Whether a use can reach its current targets, and who else already enforces range. */
+  surveyAttackRange: () => surveyAttackRange(),
   /** Which push/pull rules are recognised on the selected creature, and whether the layer is live. */
   surveyForced: () => surveyForced(),
   /** Whether Sap / Slow / Topple / Vex / Cleave are applying, and the selected creature's state. */
@@ -358,7 +361,7 @@ const api: NoodlrHooksApi = {
   /** Copy items and coin picked up in a Wild Shape onto the original. Safe to call twice. */
   carryFormLoot: (actor) => carryFormLoot(actor),
   discardFormLeftovers: (actor) => discardFormLeftovers(actor),
-  /** Who is riding whom, and whether Rideable has the layer. */
+  /** Who is riding whom. */
   surveyRiding: () => surveyRiding(),
   /** Mount every selected token onto the current target. */
   mount: () => mountSelected(),

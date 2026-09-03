@@ -49,6 +49,14 @@ export const COMBAT_SETTINGS = {
   economy: "combat.economy",
   /** Whether a creature's Speed caps how far a player can drag it in a turn. */
   movement: "combat.movement",
+  /**
+   * Whether a use that cannot reach its target is refused.
+   *
+   * Not split by audience: range is a physical fact. The GM is warned and allowed (staging);
+   * players and automated creatures are refused. We always enforce when on — Midi is not
+   * a supported install, so this layer does not stand aside for it.
+   */
+  attackRange: "combat.attackRange",
   /** Whether pushes, pulls and shoves actually move the token they land on. */
   forced: "combat.forced",
   /** Whether Sap / Slow / Topple / Vex / Cleave apply themselves. Push stays on `forced`. */
@@ -256,9 +264,9 @@ export const SETTINGS = {
  *
  * This used to say the opposite, and the reasoning was sound as far as it went: sixteen checkboxes fit
  * a native list, and a GM installing a community module expects to find them there. What it missed is
- * that a native row can only show a setting's value, and several of these rules stand aside when
- * another module owns them — so the checkbox reads on while nothing happens, which is indistinguishable
- * from the module being broken. `apps/rules-config.ts` exists to show ownership beside the switch.
+ * that a native row can only show a setting's value, and a stand-aside (dnd5e's Auto-recharge is
+ * the remaining one) looks identical to the module being broken. `apps/rules-config.ts` exists to
+ * show ownership beside the switch.
  *
  * `debugLogging` is the exception and stays in the native list: client-scoped, not a rule, and it
  * should be findable without knowing which of three windows to open.

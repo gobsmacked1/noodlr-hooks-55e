@@ -1,15 +1,14 @@
 // Reading other modules' state, in one place.
 //
-// Every stand-aside in this module has to answer the same two questions — is that module active, and
+// Advisories and conflicts still have to answer the same two questions — is that module active, and
 // what is it configured to do — and each one used to answer them itself. Three copies of the midi
 // config lookup was the point at which that stopped being acceptable, because the lookup is not
 // obvious: midi exposes a live object through its global that is NOT always the same as the stored
 // setting, and reading only the stored setting misses a runtime change.
 //
 // Nothing here throws. A module we do not own may be absent, half-initialised, or storing a shape we
-// have never seen, and the correct answer in all three cases is "I could not tell" — which every
-// caller reads as "nobody else owns this", i.e. keep enforcing. Failing the other way would silently
-// switch our own rules off because another module's settings object had an unexpected key.
+// have never seen, and the correct answer in all three cases is "I could not tell". These helpers
+// never switch our rules off — they only name a live conflict so the GM can see two referees.
 
 /** Is a module installed AND enabled in this world? */
 export function moduleActive(id: string): boolean {
@@ -26,7 +25,7 @@ export function moduleActive(id: string): boolean {
  * Prefers `MidiQOL.configSettings()` over the stored world setting: midi mutates that object at
  * runtime, so a GM who changed a switch without reloading has a stored value that is already stale.
  * Falls back to the setting because the global does not exist until midi's own ready hook has run,
- * and our stand-asides are consulted from paths that can run earlier.
+ * and our advisories are consulted from paths that can run earlier.
  */
 export function midiConfig(): any | null {
   if (!moduleActive("midi-qol")) return null;

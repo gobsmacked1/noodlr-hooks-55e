@@ -232,13 +232,20 @@ const HOUSE: Page = {
           id: "rangedInMelee",
           label: "Ranged attack with a hostile within 5 feet",
           hint:
-            "Disadvantage, when that enemy can see you and is not Incapacitated. Both modules that " +
-            "have this rule ship it switched off — AC5e's range checks default to an empty set and " +
-            "midi's sits under Optional Rules — so at stock settings this is the only one running.",
+            "Disadvantage, when that enemy can see you and is not Incapacitated.",
           state: "live",
           setting: C.conditions,
           kind: "boolean",
           ownership: "rangedNearby",
+        },
+        {
+          id: "attackRange",
+          label: "NOODLRHOOKS.Combat.AttackRange.Name",
+          hint: "NOODLRHOOKS.Combat.AttackRange.Hint",
+          state: "live",
+          setting: C.attackRange,
+          kind: "boolean",
+          ownership: "attackRange",
         },
         {
           id: "vision",
@@ -455,15 +462,6 @@ const MECHANICS: Page = {
           state: "planned",
           today: "Midi QoL has free-hand checks.",
         },
-        {
-          id: "rangedMax",
-          label: "Ranged weapon maximum distance",
-          hint:
-            "Refusing or penalising a shot beyond long range. Note that if midi is installed this is " +
-            "already live and cancels the use quietly — see the advisory on the summary page.",
-          state: "planned",
-          today: "Midi QoL, and it is one of the few midi rules that is ON at stock settings.",
-        },
       ],
     },
     {
@@ -634,7 +632,7 @@ const SHARED_ROLLS: Section = {
     "Applying damage is built and lives in the next section, per side; a saving throw settling that damage " +
     "is here. What is still missing is rolling an attack for you, placing an area, and deciding who a " +
     "template caught — this module reads rolls off the chat log and acts on them, but it does not make " +
-    "them. Worth being clear about before you disable midi.",
+    "them.",
   rows: [
     {
       id: "autoAttack",

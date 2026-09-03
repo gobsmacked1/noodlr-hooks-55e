@@ -36,7 +36,7 @@ export interface ReactorSearch<T> {
   subjectToken: any;
   subjectActor: any;
   combat: any;
-  /** Which offer this is, so `offerable` can consult the right midi stand-aside. */
+  /** Which offer this is (departure vs incoming), for logging and the dialog. */
   trigger: ReactionTrigger;
   /** Can this creature do the thing at all? Returns the payload, or null. */
   ready: (actor: any) => T | null;

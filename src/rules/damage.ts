@@ -30,7 +30,6 @@ import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   applyDamageTo,
   hasHitPoints,
-  midiOwnsDamage,
   restoreHp,
   snapshotHp,
   type HpSnapshot,
@@ -125,7 +124,7 @@ export function registerDamageApplication(): void {
  */
 function active(): boolean {
   return (
-    isPrimaryGM() && isDnd5e() && enabledForEither(COMBAT_SETTINGS.autoDamage) && !midiOwnsDamage()
+    isPrimaryGM() && isDnd5e() && enabledForEither(COMBAT_SETTINGS.autoDamage)
   );
 }
 
@@ -137,8 +136,8 @@ async function consider(message: any, flags: any): Promise<void> {
   // Midi's own verdict, when it left one. Token uuids, and the real answer rather than a reconstruction.
   const fromMidi = midiHits(flags);
   if (fromMidi.length > 0) {
-    // No margins: midi records the verdict and not the arithmetic behind it, which costs nothing here
-    // because midi runs its own reaction window and this one stands aside whenever midi is applying damage.
+    // Token uuids from a midi-shaped card. Midi is not a supported install; this only reads flags
+    // if they happen to be on the message. No margins — the flag is a verdict, not the arithmetic.
     remember(message, { hits: fromMidi, missed: [], unresolved: [], margin: {} });
   }
 
@@ -750,7 +749,6 @@ export function surveyDamage(): unknown {
   return {
     running: active(),
     primaryGM: isPrimaryGM(),
-    midiOwns: midiOwnsDamage(),
     enabledFor: {
       npc: game.settings.get(MODULE_ID, `${COMBAT_SETTINGS.autoDamage}.npc`),
       pc: game.settings.get(MODULE_ID, `${COMBAT_SETTINGS.autoDamage}.pc`),

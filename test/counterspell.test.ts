@@ -4,7 +4,6 @@ import { beforeEach, test } from "node:test";
 import {
   counterableCast,
   counterspellReady,
-  gambitsOwnsCounterspell,
   isCounterspell,
   isCounterspellAction,
 } from "../src/system/dnd5e-counterspell";
@@ -24,9 +23,6 @@ import { slotAvailable } from "../src/system/dnd5e-spells";
 //      is "no", and it must be distinguishable from case 1.
 //   3. AN AT-WILL CASTER HAS NO POOL TO CHECK. Asked of `CONFIG.DND5E.spellcasting`, per the standing rule
 //      about never hardcoding what the system already states.
-//   4. GAMBIT'S OWNS THIS ONLY WHERE MIDI CARRIES IT. Its automation is entered from a midi Workflow, so
-//      standing aside for an installed-but-inert copy would leave Counterspell unimplemented while the
-//      settings row claimed somebody had it.
 
 beforeEach(() => {
   (globalThis as any).game = { system: { id: "dnd5e" }, modules: new Map() };
@@ -208,22 +204,4 @@ test("the flag is the escape hatch for a statblock whose slots cannot be read", 
   assert.equal(counterspellReady(actor), null);
   actor.flags = { "noodlr-hooks-55e": { counterspell: true } };
   assert.equal(counterspellReady(actor)?.dc, 15);
-});
-
-/* -------------------------------------------- */
-/*  Standing aside                               */
-/* -------------------------------------------- */
-
-function installed(...ids: string[]) {
-  (globalThis as any).game.modules = new Map(ids.map((id) => [id, { active: true }]));
-}
-
-test("Gambit's owns this only when midi is there to carry its workflow", () => {
-  assert.equal(gambitsOwnsCounterspell(), false, "neither installed");
-  installed("gambits-premades");
-  assert.equal(gambitsOwnsCounterspell(), false, "its automation cannot fire without midi");
-  installed("midi-qol");
-  assert.equal(gambitsOwnsCounterspell(), false, "midi alone counters nothing");
-  installed("gambits-premades", "midi-qol");
-  assert.equal(gambitsOwnsCounterspell(), true);
 });

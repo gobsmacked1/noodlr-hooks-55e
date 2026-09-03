@@ -41,7 +41,6 @@ import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   counterableCast,
   counterspellReady,
-  gambitsOwnsCounterspell,
   isCounterspell,
   type CounterableCast,
   type CounterspellReady,
@@ -87,9 +86,6 @@ export function useReplay(replay: Replay): void {
 function active(actor: any): boolean {
   if (!isDnd5e()) return false;
   if (!isCounterspellEnabled(actor)) return false;
-  // Gambit's Premades does this properly wherever midi is there to carry it. See that predicate for why
-  // midi is part of the test rather than an aside.
-  if (gambitsOwnsCounterspell()) return false;
   return true;
 }
 

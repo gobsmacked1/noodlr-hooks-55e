@@ -31,7 +31,6 @@ import {
 } from "../src/system/dnd5e-riding";
 
 const legal = {
-  rideableActive: false,
   riderId: "rider",
   mountId: "horse",
   ridingOf: {},
@@ -181,10 +180,6 @@ test("mount cost stamp is turn-keyed and stale is zero", () => {
 
 test("judgeMount names each refusal", () => {
   assert.deepEqual(judgeMount(legal), { ok: true });
-  assert.deepEqual(judgeMount({ ...legal, rideableActive: true }), {
-    ok: false,
-    reason: "rideable",
-  });
   assert.deepEqual(judgeMount({ ...legal, mountId: "rider" }), { ok: false, reason: "same" });
   assert.deepEqual(judgeMount({ ...legal, riderAlreadyOn: "other" }), {
     ok: false,
@@ -235,7 +230,6 @@ test("revert to original form dumps every rider; a mere shrink does not", () => 
 
 test("staying on a mount skips reach, Speed, and already-riding, but not size or seats", () => {
   const on = {
-    rideableActive: false,
     riderId: "rider",
     mountId: "horse",
     ridingOf: { rider: "horse" },

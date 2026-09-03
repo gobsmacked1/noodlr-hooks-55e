@@ -164,23 +164,6 @@ function chooseRule(rules: ForcedRule[]): ForcedRule | null {
   return ranked[0];
 }
 
-/**
- * Has another package already automated this item?
- *
- * Both premades collections leave a marker on the documents they drive, and two modules pushing for one
- * hit is worse than neither doing it. A name check, not a dependency: with neither installed, nothing
- * here changes.
- */
-function alreadyAutomated(item: any, activity: any): string | null {
-  if (activity?.flags?.cat?.macros && moduleActive("chris-premades")) {
-    return "Chris's Premades";
-  }
-  if (item?.flags?.["gambits-premades"]?.gpsUuid && moduleActive("gambits-premades")) {
-    return "Gambit's Premades";
-  }
-  return null;
-}
-
 function movedThisTurn(doc: any): number {
   let total = 0;
   for (const waypoint of doc?.movementHistory ?? []) {
@@ -306,11 +289,6 @@ async function examine(message: any, changedFlags: any): Promise<void> {
 async function fromMidi(message: any, midi: any): Promise<void> {
   const item = itemOf(message);
   const activity = activityOf(message, item);
-  const conflict = alreadyAutomated(item, activity);
-  if (conflict) {
-    log(`forced movement: leaving ${String(item?.name ?? "this item")} to ${conflict}`);
-    return;
-  }
 
   const pusherDoc =
     speakerToken(message?.speaker) ?? tokenFromActorUuid(String(midi?.sourceActorUuid ?? ""));
@@ -356,8 +334,6 @@ async function fromMidi(message: any, midi: any): Promise<void> {
 async function fromAttack(message: any): Promise<void> {
   const item = itemOf(message);
   const activity = activityOf(message, item);
-  const conflict = alreadyAutomated(item, activity);
-  if (conflict) return;
 
   const targets = hitTargets(message);
   if (targets.length === 0) return;
@@ -403,7 +379,6 @@ async function fromSave(message: any): Promise<void> {
 
   const item = itemOf(origin);
   const activity = activityOf(origin, item);
-  if (alreadyAutomated(item, activity)) return;
 
   const targetDoc = speakerToken(message?.speaker);
   if (!targetDoc) return;
@@ -436,7 +411,6 @@ async function fromDamage(message: any): Promise<void> {
 
   const item = itemOf(message);
   const activity = activityOf(message, item);
-  if (alreadyAutomated(item, activity)) return;
 
   const pusherDoc = speakerToken(message?.speaker);
   const rule = chooseRule(

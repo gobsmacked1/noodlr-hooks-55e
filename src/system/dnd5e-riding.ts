@@ -11,7 +11,6 @@
 
 import { MODULE_ID } from "../constants";
 import { sizeRank } from "./dnd5e-forced-movement";
-import { moduleActive } from "../util/modules";
 
 /** Unique status. Token HUD skips `hud: false`, same as the Paladin host badge and Wild Shape. */
 export const RIDING_STATUS_ID = "noodlr-mounted";
@@ -43,10 +42,6 @@ export function registerRidingStatus(): void {
   if (!Array.isArray(list)) return;
   if (list.some((s: any) => s?.id === RIDING_STATUS_ID)) return;
   list.push(ridingStatusEntry());
-}
-
-export function rideableOwns(): boolean {
-  return moduleActive("Rideable");
 }
 
 export function isOurRidingBadge(effect: any): boolean {
@@ -230,7 +225,6 @@ export function wouldLoop(
 }
 
 export type MountRefuse =
-  | "rideable"
   | "same"
   | "already-riding"
   | "occupied"
@@ -242,7 +236,6 @@ export type MountRefuse =
   | "speed";
 
 export interface MountJudgeInput {
-  rideableActive: boolean;
   riderId: string;
   mountId: string;
   riderAlreadyOn?: string;
@@ -266,7 +259,6 @@ export interface MountJudgeInput {
 export function judgeMount(
   input: MountJudgeInput,
 ): { ok: true } | { ok: false; reason: MountRefuse } {
-  if (input.rideableActive) return { ok: false, reason: "rideable" };
   if (input.riderId === input.mountId) return { ok: false, reason: "same" };
   if (input.riderAlreadyOn) return { ok: false, reason: "already-riding" };
   if (wouldLoop(input.riderId, input.mountId, input.ridingOf)) return { ok: false, reason: "loop" };

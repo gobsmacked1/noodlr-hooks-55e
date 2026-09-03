@@ -31,7 +31,6 @@
 
 import { MODULE_ID, log } from "../constants";
 import { rollerForActor } from "../util/gm";
-import { moduleActive, moduleSetting } from "../util/modules";
 import { promptChoice, type Choice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
 import { readActions, type CreatureAction } from "../tactics/actions";
@@ -40,7 +39,7 @@ import { hasReaction, spend } from "./economy/ledger";
 import { claimOffer, releaseOffer } from "./reaction-once";
 import { isReactionPromptEnabled } from "../settings";
 import { canReact, cannotReactReason } from "../system/dnd5e-conditions";
-import { acBoostOf, isPolearmWeapon, midiPromptsReactions } from "../system/dnd5e-reactions";
+import { acBoostOf, isPolearmWeapon } from "../system/dnd5e-reactions";
 import { counterspellReady, isCounterspell, isCounterspellAction } from "../system/dnd5e-counterspell";
 import { isSilveryBarbs } from "../system/dnd5e-barbs";
 import { readHp } from "../core/tracker";
@@ -104,20 +103,8 @@ export function registerReactionOffers(): void {
  * Kept here so both the reaction layer and the damage layer get one answer. `hasReaction` and the status
  * checks live with the caller, which already had them; this is only the "is anybody home" half.
  */
-export function offerable(actor: any, trigger: ReactionTrigger = "opportunity"): boolean {
+export function offerable(actor: any, _trigger: ReactionTrigger = "opportunity"): boolean {
   if (!isReactionPromptEnabled(actor)) return false;
-  // Midi prompts for "I was hit" and "I was damaged" at its stock settings, and for nothing else — not a
-  // departure, not an enter-reach, not a cast, not somebody else's good roll. Two dialogs for one hit is
-  // the double-ask this whole layer exists to avoid, so those two halves are its; the triggers it never
-  // dispatches stay ours.
-  if (
-    trigger !== "opportunity" &&
-    trigger !== "enter" &&
-    trigger !== "casting" &&
-    trigger !== "success" &&
-    midiPromptsReactions()
-  )
-    return false;
   const owner = rollerForActor(actor);
   if (owner) return true;
   // Nobody owns it, so it is the GM's to answer — provided one is connected to answer with.
@@ -201,7 +188,6 @@ async function settleOffer(request: OfferRequest): Promise<OfferAnswer> {
   // dialog), and a second trigger arriving in that window would otherwise find the reaction unspent and
   // offer it again. The ledger is turn-stamped, so an over-spend cannot leak into the next round.
   spend(actor, game.combat, combatant, "reaction", false);
-  notifyMidi(actor);
 
   const boost = acBoostOf(chosen.item, actor);
   // Read BEFORE the use, because using the spell spends the slot and a sheet mid-update is a bad place to
@@ -419,40 +405,6 @@ export function alive(actor: any): boolean {
 }
 
 export { canReact, cannotReactReason };
-
-/**
- * Mark the reaction spent in our ledger and, where midi is present, in midi's.
- *
- * Not for our own bookkeeping — the ledger is authoritative and works alone — but because midi skips any
- * reaction activity whose owner has spent their reaction, which makes its own prompt suppress itself
- * instead of asking a second time. Silently inert unless the table set midi's Enforce Reactions to All or
- * Display Only (its default is "none", verified in midi 14.0.11 source); harmless either way.
- */
-export function notifyMidi(actor: any): void {
-  const midi: any = (globalThis as any).MidiQOL;
-  if (!actor || typeof midi?.setReactionUsed !== "function") return;
-  try {
-    if (typeof midi.hasUsedReaction === "function" && midi.hasUsedReaction(actor)) return;
-    void Promise.resolve(midi.setReactionUsed(actor)).catch(() => {
-      /* best effort; our ledger has already recorded it */
-    });
-  } catch {
-    /* ditto */
-  }
-}
-
-/**
- * Has another module claimed opportunity attacks?
- *
- * Gambit's Premades implements them properly, and two modules both reacting means the party is hit twice
- * for one departure. It is the only current implementation I know of, and this is a name check rather than
- * a dependency: if it is absent, nothing here changes.
- */
-export function opportunityTaken(): boolean {
-  if (!moduleActive("gambits-premades")) return false;
-  // Unreadable (undefined) defers, because two attacks per departure is worse than none.
-  return moduleSetting("gambits-premades", "Opportunity Attack") !== false;
-}
 
 export function surveyOffers(): unknown {
   const token: any = (canvas as any)?.tokens?.controlled?.[0];

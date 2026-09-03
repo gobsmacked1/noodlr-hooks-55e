@@ -25,7 +25,6 @@
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
 import { enabledForEither, isDamageGateEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
-import { midiOwnsDamage } from "../system/dnd5e-damage";
 import { isPrimaryGM } from "../util/gm";
 import { originatingId, rollType } from "./cards";
 
@@ -117,7 +116,6 @@ export function gateActive(): boolean {
     if (!isDnd5e()) return false;
     if (!isDamageGateEnabled()) return false;
     if (!enabledForEither(COMBAT_SETTINGS.autoDamage)) return false;
-    if (midiOwnsDamage()) return false;
     return Boolean((game.users as any)?.activeGM);
   } catch {
     return false;
@@ -342,7 +340,6 @@ export function surveyGate(): unknown {
   return {
     running: gateActive(),
     enabled: isDamageGateEnabled(),
-    midiOwns: midiOwnsDamage(),
     activeGM: String((game.users as any)?.activeGM?.name ?? "— nobody —"),
     patienceSeconds: PATIENCE / 1000,
     relentedHere: relented.size,

@@ -27,7 +27,6 @@ import { promptChoice, type Choice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
 import { speakerFor } from "../util/speaker";
 import { enabledForEither, isAutoSavesEnabled, isDiceModsEnabled } from "../settings";
-import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { adjustUses } from "../capability/primitives";
 import {
@@ -186,18 +185,17 @@ async function considerPosted(message: any): Promise<void> {
   }
   if (kind !== "save") return;
   // When auto-saves is on, spoilAndResist asks AFTER Barbs. Asking here would spend
-  // Indomitable on a fail that Barbs then undoes. When that layer is off (or midi
-  // owns it), we are the only offer — skip midi so two layers do not rewrite one card.
-  // Cutting Words does not fire on saves (printed trigger is a damage roll or a made
-  // check / attack).
-  if (midiOwnsSaves() || isAutoSavesEnabled()) return;
+  // Indomitable on a fail that Barbs then undoes. When that layer is off we are the
+  // only offer. Cutting Words does not fire on saves (printed trigger is a damage
+  // roll or a made check / attack).
+  if (isAutoSavesEnabled()) return;
   const reading = readSave(message);
   if (reading.success !== false || reading.forced) return;
   await offerFor(message, "save");
 }
 
 function autoDamageLayerRuns(): boolean {
-  return !midiOwnsDamage() && enabledForEither(COMBAT_SETTINGS.autoDamage);
+  return enabledForEither(COMBAT_SETTINGS.autoDamage);
 }
 
 async function offerFor(message: any, kind: DiceKind): Promise<void> {

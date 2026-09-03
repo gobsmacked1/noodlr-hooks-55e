@@ -36,7 +36,6 @@
 // heard of.
 
 import { readFlag } from "../util/flags";
-import { midiConfig, midiOn } from "../util/modules";
 import { isDnd5e } from "./dnd5e-rewards";
 
 export interface OpportunityExemption {
@@ -182,26 +181,6 @@ export function acBoostOf(item: any, actor: any): AcReaction | null {
     return bonus > 0 ? { label: name || "a reaction", bonus } : null;
   }
   return null;
-}
-
-/**
- * Is midi already putting a reaction prompt in front of somebody?
- *
- * `doReactions` and `gmDoReactions` both default to `"all"`, so unlike almost every other midi mechanic
- * this one IS live on a stock install — which makes it the one place a second offer of ours would be an
- * actual double prompt rather than a theoretical one.
- *
- * Covers the two triggers midi dispatches, "I was hit" and "I was damaged", and NOT the departure. Midi
- * declares a `reactionmoved` / `isMoved` trigger type and dispatches it from none of its eleven
- * `doReactions` call sites, so an opportunity attack has never been offered by it and standing aside from
- * that half would leave the trigger unoffered by anybody. `rules/offer.ts` applies this per trigger for
- * exactly that reason.
- */
-export function midiPromptsReactions(): boolean {
-  if (!isDnd5e()) return false;
-  const settings = midiConfig();
-  if (!settings) return false;
-  return midiOn(settings.doReactions) || midiOn(settings.gmDoReactions);
 }
 
 function identifierOf(doc: any): string {

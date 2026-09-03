@@ -5,8 +5,6 @@
 // and damage-at-0 failures live only as journal prose. This file is the rule table; the engine is
 // `rules/dying.ts`.
 
-import { midiConfig, midiOn } from "../util/modules";
-import { isDnd5e } from "./dnd5e-rewards";
 
 /** Characters, player-owned creatures, and (when opted in) NPCs flagged `traits.important`. */
 export function usesDeathSaves(actor: any, honorImportantNpc: boolean): boolean {
@@ -67,17 +65,3 @@ export function deathFailuresFromDamage(critical: boolean): number {
   return critical ? 2 : 1;
 }
 
-/**
- * Midi already owns drop-to-0 statuses when its Add Dead / dead / unconscious mechanics are on
- * (all default `"none"`). Stand aside entirely so a creature is not Unconscious and Dead at once.
- */
-export function midiOwnsDying(): boolean {
-  if (!isDnd5e()) return false;
-  const settings = midiConfig();
-  if (!settings) return false;
-  return (
-    midiOn(settings.addDead) ||
-    midiOn(settings.midiDeadCondition) ||
-    midiOn(settings.midiUnconsciousCondition)
-  );
-}

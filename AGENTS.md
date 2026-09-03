@@ -19,20 +19,24 @@ rule. Together they are what shipped as noodlr v0.4.48.
 
 0. **No third-party module is ever a dependency.** Midi QoL is the case that prompted it: superb,
    widely installed, and repeatedly quiet for months at a stretch, so anything built on it strands the
-   table when it lapses. Learn from them, depend on none of them. Where a module IS present it may
-   raise fidelity — the item-use path routes through midi when it exists — but every feature must work
-   with nothing installed but Foundry and dnd5e. Prefer detection signals core cannot take away: token
-   position hooks and a hit-point decrease exist in every version; "the attack roll is about to
-   resolve" does not.
+   table when it lapses. Learn from them, depend on none of them. Every feature must work with nothing
+   installed but Foundry and dnd5e. Prefer detection signals core cannot take away: token position
+   hooks and a hit-point decrease exist in every version; "the attack roll is about to resolve" does
+   not.
 1. **Rules versus tactics.** This module may know **where the system keeps its numbers** and **which of
    a creature's options are worth considering**. Deciding "close with the wizard and swing the rusty
-   scimitar" is tactics and is ours. Working out whether the swing lands is the system's and midi's.
-   The planner picks a verb, an implement and a target; it never computes an attack roll, damage, a
-   save, a DC or a condition.
-2. **Mechanics belong to mechanics modules.** Where midi-qol, DAE, Chris's Premades, Gambit's or
-   Automated Conditions 5e already resolve something, stand aside rather than compete. Each stand-aside
-   check lives beside the code it guards, and every one of them was read from that module's source
-   rather than assumed.
+   scimitar" is tactics and is ours. Working out whether the swing lands is the system's — we apply
+   the damage and read the verdict; we never invent the die. The planner picks a verb, an implement
+   and a target; it never computes an attack roll, damage, a save, a DC or a condition.
+2. **We are the mechanics module on a supported install (amended 2026-09-03).** `_research` still
+   holds midi-qol, DAE, Chris's Premades, Gambit's and Automated Conditions 5e so we can read how a
+   rule is actually encoded. That is sage advice, not a coexistence product. **Operators are advised
+   those packages are incompatible** — disable them, and re-ingest DDB content with Midi / DAE
+   automation flags off. Do not add a new stand-aside, route, or special case that presumes a user
+   is hosting any of them. The leftover stand-asides that used to skip our rules when those
+   packages were present are gone (2026-09-03): we always enforce. Advisories still name a live
+   midi Check Range or an unverified wm5e conflict so the GM can see two referees, but nothing
+   here switches itself off for them. The one remaining stand-aside is dnd5e's own Auto-recharge.
 
 ## Layout, and why it is this shape
 
@@ -673,7 +677,7 @@ refused while we are dealing it, and the capability sheet says why.
  `adjudication: "gm"`**, so nothing doubles today. The model reading "once per turn, if you have Advantage"
  as a human's decision is the model being right. This is the guard for the release where a better doctrine
  makes one of them `engine` — which would otherwise be silent, because the only symptom is arithmetic.
-- **NOTHING IS REFUSED WHEN NEITHER WE NOR CHRIS'S PREMADES IS DEALING IT.** A table that switched the offer
+- **NOTHING IS REFUSED WHEN WE ARE NOT DEALING IT.** A table that switched the offer
  off and compiled the feature deliberately has exactly one thing dealing the dice, and refusing there would
  leave nothing dealing them — the failure that reads as the compiler having been paid for nothing. This is
  the allow direction, and it is the half a refusal predicate gets wrong.
@@ -682,12 +686,10 @@ refused while we are dealing it, and the capability sheet says why.
  `describe.ts` asks the same predicate statically, so it is a badge on the sheet rather than a line in a
  console somebody sees once. Same doctrine as the duplicate-damage refusal beside it.
 
-**Where it stands down, and all three say so.** Everything here is reached from `settleAttack`, which only
+**Where it stands down.** Everything here is reached from `settleAttack`, which only
 runs when this module applies damage — so with auto-damage off the switch reads ON and no rogue is ever
-asked. `sneakAdvisories()` reports that, and reports midi owning damage. Per rogue, `cprAutomatesSneak()`
-stands aside for Chris's Premades, whose macro adds the dice on midi's damage-bonus pass; the ownership
-resolver names it. **Chris's outranks our own switch** in `sneakClaimedNatively`, because its macro deals the
-dice whether our offer is on or off.
+asked. `sneakAdvisories()` reports that. There is no Chris's Premades stand-aside (removed 2026-09-03);
+CPR is incompatible and we always deal the dice when the offer is on.
 
 Three readings worth not re-deriving.
 
@@ -1441,19 +1443,21 @@ were not in August, because the hard half shipped for unrelated reasons:
    suffocation/starvation/extreme-environment clocks, and difficult terrain auto-placed from spell
    templates.
 
-**Check `ac5eOwnsConditions()` before building 1 through 4.** Automated Conditions 5e covers Invisible and
-visibility-aware Blinded already, and ships cover and range logic of its own that stands down only when
-midi is present. The stand-aside that exists for the condition matrix may cover part of this queue outright,
-and dual enablement is the silent-race failure documented below — measure before writing.
+**AC5e is incompatible (2026-09-03).** Do not add `ac5eOwnsConditions()` or any other community
+stand-aside before building the remaining queue. Those packages are not a supported install.
 
 ## A silent stand-aside is a bug report waiting to happen (v0.2.0, 2026-08-11)
 
-Every stand-aside in this module was written as a correctness measure and each one is right. Together
+**Community stand-asides are gone (2026-09-03).** The functions named below
+(`ac5eOwnsConditions`, `midiOwnsConcentration`, Gambit's OA gate) no longer exist. We always
+enforce. The ownership windows stay so a switch that is off, or dnd5e's Auto-recharge standing
+aside, still says so. The history is why those windows exist, not a list of gates that still fire.
+
+Every stand-aside in this module was written as a correctness measure and each one was right. Together
 they created a failure nobody had named: **the setting still reads ON while nothing happens.**
-`ac5eOwnsConditions()` switches the entire condition layer off, `midiOwnsConcentration()` hands
-concentration to midi, Gambit's takes opportunity attacks — and Foundry's native settings list can only
-show a value, never who is acting on it. At the table that is indistinguishable from the module being
-broken, and it is the single most likely thing to be reported as a bug in this repo.
+Foundry's native settings list can only show a value, never who is acting on it. At the table that is
+indistinguishable from the module being broken, and it is the single most likely thing to be reported
+as a bug in this repo.
 
 - **`src/integration/ownership.ts` is the one place that answers "who is enforcing this right now",
  and it must READ the enforcement predicates rather than restate their conditions.** A resolver with
@@ -1767,16 +1771,17 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     - **Midi does NOT automate opportunity attacks.** Its `reactionmoved`/`isMoved` trigger type is
       declared but never dispatched from any of the eleven `doReactions` call sites. Its `recordAOO`
       setting is bookkeeping only: it marks a reaction spent when *you* attack off-turn.
-    - **Gambit's Premades DOES**, via a Region per combatant, and is therefore a hard conflict — two
-      opportunity attacks per departure. Hence the stand-aside check in `reactions.ts`. chris-premades
-      implements no OA and registers no midi hooks, so it is safe. Gambit's is v13-only as of 2.1.44.
+    - **Gambit's Premades DOES**, via a Region per combatant — two opportunity attacks per
+      departure if both run. That stand-aside was removed 2026-09-03; Gambit's is incompatible.
+      chris-premades implements no OA. Gambit's is v13-only as of 2.1.44.
     - **Midi's reaction prompt cannot be answered programmatically** — `ReactionDialog` has no
       auto-select, and the only supported intervention is the awaited `midi-qol.ReactionFilter`. Do NOT
       cancel that hook and substitute your own Shield: midi only re-reads AC when the dialog returned a
       real result, so the attack resolves against the stale AC. Pre-empt earlier instead.
     - **`MidiQOL.setReactionUsed()` is a silent no-op unless `enforceReactions` is `"all"` or
-      `"displayOnly"`** (it defaults to `"none"`, and `"character"` does not cover NPCs). We call it
-      anyway, purely so midi's own prompt suppresses itself, and never rely on it — hence our own ledger.
+      `"displayOnly"`** (it defaults to `"none"`, and `"character"` does not cover NPCs). We used to
+      call it so midi's prompt would suppress itself. That notify is gone (2026-09-03); midi is
+      incompatible and our own ledger is the only spend we honour.
     - dnd5e 5.3.3 has **zero reaction tracking** and **no Disengage flag, item or status effect**; it is
       prose in stat blocks only. The community convention is an ActiveEffect literally named "disengage",
       which is what we match.
@@ -2474,23 +2479,13 @@ edits closed without saving are lost. Same trade `noodlr` makes.
  Setting midi's concentration handling to "None" hands the whole job to Noodlr. Diagnostics:
  `api.surveyConcentration()`.
 
-- **Automated Conditions 5e is a superset of the condition rules, so we defer to it (2026-08-07).** Read
- from its source, which is cloned at `C:\Project\_research\ac5e`; two audits sit in `_research\_audit\`
- (`ac5e-coexistence.md`, `ac5e-techniques.md`). Its `automateStatuses` setting (default **ON**) drives a
- table hooked to the same `preRollAttack` and `preRollSavingThrow` we use, covering everything in
- `dnd5e-conditions.ts` plus attacker Prone and Restrained disadvantage, Invisible, Grappled,
- visibility-aware Blinded and legacy Exhaustion. `ac5eOwnsConditions()` therefore switches our whole
- condition layer off when it is present and enabled — the same shape as the midi stand-asides, and the
- same thing AC5e itself does when midi owns range.
- - **The overlap is not benign just because advantage does not stack.** The two agree on the rule and
- disagree on the mechanism, which is what makes dual enablement a silent race: we cancel an auto-failed
- save with `return false`, AC5e rolls it against a forced DC of 999 with `criticalSuccess` pushed to 21
- (there is no `-99` anywhere in its source, despite the README); we force a critical on `rollAttack`
- after confirming the hit, AC5e sets `criticalSuccess = 1` on the damage roll up front. Whichever hook
- registers first wins, differently each time.
- - **The exception that must not be "tidied" into the same gate:** AC5e's refusal to let an Incapacitated
- creature use an activity is behind `autoArmorSpellUse`, which ships `"off"`. At stock settings it
- blocks nothing, so `enforce.ts` keeps ours and consults `ac5eOwnsIncapacitatedUse()` separately.
+- **Automated Conditions 5e is a superset of the condition rules — and is incompatible (amended
+ 2026-09-03).** Read from its source, cloned at `C:\Project\_research\ac5e`; two audits sit in
+ `_research\_audit\` (`ac5e-coexistence.md`, `ac5e-techniques.md`). Its `automateStatuses` setting
+ (default **ON**) drives a table hooked to the same `preRollAttack` and `preRollSavingThrow` we use.
+ Dual enablement is a silent race (we cancel an auto-failed save with `return false`; AC5e rolls
+ against DC 999). **We do not stand aside.** Operators disable AC5e. The old
+ `ac5eOwnsConditions()` / `ac5eOwnsIncapacitatedUse()` gates are gone.
  - **Do not reach for their override API.** `ac5e.statusEffectsOverrides.register()` is real, documented
  and fires from a one-shot `ac5e.statusEffectsReady` hook carrying `{tables, overrides}` — an `apply`
  returning `""` clears a rule and `undefined` leaves it. It would let us suppress their rules one status
@@ -2576,7 +2571,7 @@ test instead of failing quietly at a table.
  carries no duration — so "until the start of your next turn" was enforced by nobody and a round-one
  Dodge was still lit in round nine. An icon that lies is worse than an unautomated rule, and clearing a
  stale marker is bookkeeping rather than a rules opinion, so `rules/dodge.ts` expires it whenever the
- condition layer is on even when `ac5eOwnsDodging()` is true.
+ condition layer is on. The old `ac5eOwnsDodging()` gate is gone (2026-09-03).
  - **`toggleStatusEffect(id, {active: false})` is not enough to clear it.** Core resolves the effect to
  delete by the status's static `_id` when it has one (`client/documents/actor.mjs:496`) and every
  dnd5e condition has one, so it deletes the system's marker and walks past CE's identically-statused
@@ -3774,12 +3769,11 @@ things came out of reading it:
   `flags.dnd5e.use.consumed` in reverse (`refundSpellSlot`). That is the only option available once consumption
   has happened, and it is exactly what vetoing at `preUseActivity` avoids. Independent confirmation that the
   earlier interception point is the better one.
-- **`gambitsOwnsCounterspell()` requires Gambit's AND midi**, and that conjunction is the point rather than an
-  aside. Its entry point is `MidiQOL.Workflow.getWorkflow()` and every step routes through `MidiQOL.socket()`,
-  so with midi absent — which is this table — its automation cannot fire at all. Standing aside for an
-  installed-but-inert module would have left Counterspell unimplemented while a settings row claimed somebody
-  had it, which is the exact failure the ownership resolver exists to prevent. Note also that theirs fires only
-  for creatures carrying its own flagged Counterspell item; ours reads whatever Counterspell is on the sheet.
+- **Gambit's Counterspell requires Gambit's AND midi.** Its entry point is
+  `MidiQOL.Workflow.getWorkflow()` and every step routes through `MidiQOL.socket()`, so with midi
+  absent its automation cannot fire at all. The old `gambitsOwnsCounterspell()` stand-aside is
+  gone (2026-09-03); both packages are incompatible. Theirs fires only for creatures carrying its
+  own flagged Counterspell item; ours reads whatever Counterspell is on the sheet.
 - Its **Deafened rule is worth having and is an interpretation rather than a printed clause**: a spell with
   Verbal components and neither Somatic nor Material has nothing to *see*, and the rule says "when you see a
   creature casting", so a Deafened creature cannot notice it. `CounterableCast.vocalOnly` carries it.
@@ -4168,9 +4162,8 @@ built for this spell** — which is the argument for having built the boring inf
 - **The verdict is RE-READ after a reroll, never inferred from the reroll's own arithmetic.** The card has been
  rewritten, so `readHits`/`readSave` are the authority on what it now says — the same discipline the damage
  layer already uses, and the thing that keeps one answer to "did that connect".
-- **Stands aside for Gambit's Premades, and only when midi is also active** (`gambitsOwnsBarbs`), because
- Gambit's implementation is carried by midi and does nothing without it. Same shape and same reasoning as the
- Counterspell stand-aside.
+- **Gambit's Barbs is carried by midi and does nothing without it.** The old
+ `gambitsOwnsBarbs()` stand-aside is gone (2026-09-03); both packages are incompatible.
 - `dnd5e-spells.ts` holds `spendsSlot` and `slotAvailable`, and `rules/candidates.ts` holds `reactorsAgainst` —
  both extracted from Counterspell rather than copied, because two implementations of "who could react to this"
  is the divergence the v0.4.1 vision bug was about.
@@ -4923,8 +4916,8 @@ the harness rather than inferred:
 - **THE REAL INERTNESS IS CPR'S AND IT IS NOT FIXABLE BY ANY IMPORT.** Its entry points route
   through `MidiQOL.Workflow.getWorkflow()` and `MidiQOL.socket()`, so with midi gone 441 items'
   automation does nothing. The remedies are reinstalling midi or this module covering the rules,
-  which is the project. Every stand-aside here that gates on `chris-premades` AND midi
-  (`gambitsOwnsCounterspell` and friends) is right for exactly this reason.
+  which is the project. Those stand-asides (`gambitsOwnsCounterspell` and friends) were removed
+  2026-09-03; CPR and midi are incompatible.
 - **The transferable lesson is about attribution, not about either module.** "Content was imported by
   X and X writes Y's flags" is an inference; `Object.keys(item.flags)` is a measurement, and the two
   disagreed here because a *third* module had rewritten the items in between. **Read the flag
@@ -5045,6 +5038,28 @@ an argument.
   walk/fly, so crawl rates never applied. Default stand. Stay down only when keepDistance,
   no melee within 5 feet, and the plan does not travel. `core/` still names no D&D status
   — crawl is `intent.action` from execute.
+
+## Attack range is gated in `police()`, not a second hook (2026-09-03)
+
+dnd5e does not enforce reach or range. The planner's `meleeReached` is NPC-only. A Monk
+pressed Flurry of Blows from across the room: Foundry flashed an error and the use
+continued. Midi's Check Range is live at stock for **weapon attacks** and treats a
+Self-range utility as in range of yourself — that is why we researched it, and why
+gating only `activity.type === "attack"` is not enough. We do not stand aside for midi
+or AC5e (2026-09-03): those are not a supported install.
+
+- **2024 Flurry is `type: utility`, `range.units: self`, `target.affects.type: creature`.**
+  Patient Defense is the same Self range with `affects.type: self` and is skipped. Gating
+  only `activity.type === "attack"` misses Flurry and still spends the Focus Point.
+- **The veto lives inside `police()`** (`src/rules/attack-range.ts`), after the rider and
+  Incapacitated intercepts and **before** `if (!slot) return true`. A second
+  `dnd5e.preUseActivity` listener is how Hide and Dash double-charged.
+- **Fail open** when there is no actor token, no resolvable target, or an unreadable range.
+  If any resolved target is in range, allow. Public text names nobody.
+- **Never `range.value` as melee reach** — a thrown spear's 20 is not a 20-foot poke
+  (Assassin, 2026-08-20). Dual-mode weapons with no `attackMode` yet are skipped.
+- Setting `combat.attackRange`, default on. GM warned and allowed; players and automation
+  refused. `noodlrHooks.surveyAttackRange()`.
 
 ## Melee reach is closest squares, and Polearm Master is enter (2026-08-25)
 
@@ -5285,14 +5300,13 @@ prevent.
  blocker; the log line is now honest about who could have done it.
 - **UNVERIFIED CONFLICT — `wm5e` (Weapon Mastery 5e) versus our Push mastery.** Active in the user's world
   at 14.533.6, a version scheme matching AC5e's, so probably the same author. `system/dnd5e-forced-movement.ts`
-  implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`) and
-`rules/forced.ts::alreadyAutomated()` stands aside only for Chris's Premades and Gambit's — it has never
-heard of wm5e. If wm5e moves the target, a Pike or Warhammer hit pushes twice. **Not confirmed:** wm5e is
-not in `C:\Project\_research` and none of its code has been read. Clone it before either adding a
-stand-aside or dismissing the risk. As of 2026-08-11 this is at least **visible**: `conflicts()` in
-`integration/ownership.ts` warns about it in the settings windows whenever wm5e is active and our forced
-movement is on, and says outright that it is unverified. A warning is the honest response to a
-suspicion — a stand-aside would need proof, and guessing wrong there deletes a rule that works.
+  implements Push natively (`trigger: "mastery"`, read from `flags.dnd5e.roll.mastery`).
+`alreadyAutomated()` (Chris's / Gambit's) was removed 2026-09-03. If wm5e moves the target, a
+Pike or Warhammer hit pushes twice. **Not confirmed:** wm5e is not in `C:\Project\_research` and
+none of its code has been read. Do not add a stand-aside. As of 2026-08-11 this is at least
+**visible**: `conflicts()` in `integration/ownership.ts` warns about it whenever wm5e is active
+and our forced movement is on, and says outright that it is unverified. A warning is the honest
+response to a suspicion.
 - ~~**`attacksPerAction` probably misses Thirsting Blade**~~ — **CONFIRMED and FIXED in v0.4.0**, with
   Devouring Blade alongside it. The inference was right; the corpus is what turned it into a certainty.
 - **The 2026-08-06 audit batch was re-read on 2026-08-10 and is no longer the queue** — most of it shipped

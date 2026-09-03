@@ -3,10 +3,10 @@
 // Foundry's native settings list was adequate at sixteen checkboxes and stopped being adequate at
 // forty-odd rows across three subjects. Two things pushed it over, and neither is length:
 //
-//   * **A stand-aside is invisible in the native list.** `ac5eOwnsConditions()` switches the whole
-//     condition layer off while its checkbox still reads on, and a GM has no way to tell that apart
-//     from the module being broken. Every row here carries an ownership badge from
-//     `integration/ownership.ts`, which reads the same predicates the rules read.
+//   * **A switch that does nothing is invisible in the native list.** dnd5e's Auto-recharge is the
+//     remaining case — when theirs is on we stand aside so two d6s cannot succeed the second roll —
+//     and the badge from `integration/ownership.ts` is what says so. Community packages used to
+//     produce the same silent stand-aside; they are incompatible now and we always enforce.
 //   * **A rule nobody has built looks identical to a rule that is switched off** — that is, like
 //     nothing at all. The pages declare planned rules alongside live ones and say who covers them
 //     today, so "does this module do cover?" has an answer in the interface rather than only in a

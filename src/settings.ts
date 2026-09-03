@@ -7,9 +7,9 @@
 // **They no longer render in Foundry's native list.** Every rule setting is `config: false` and is
 // rendered instead by the three windows in `apps/rules-config.ts`, reached from the three menus
 // registered below. That reverses the original decision, and the reason is not length — it is that a
-// native row cannot show the one thing a GM most needs to know. Several of these rules stand aside
-// silently when another module owns them, so the checkbox reads on while nothing happens; the
-// ownership badge in our own window is the fix, and it cannot exist in Foundry's list.
+// native row cannot show the one thing a GM most needs to know. The remaining case is dnd5e's
+// Auto-recharge: when theirs is on we stand aside, and the ownership badge in our own window is
+// what says so. Community-module stand-asides are gone.
 //
 // `debugLogging` stays in the native list on purpose: it is client-scoped troubleshooting, it is not a
 // rule, and it should be findable without knowing which of three windows to open.
@@ -165,6 +165,7 @@ export function registerCombatSettings(): void {
     },
   );
   world(COMBAT_SETTINGS.movement, "Movement", Boolean, true);
+  world(COMBAT_SETTINGS.attackRange, "AttackRange", Boolean, true);
   world(COMBAT_SETTINGS.forced, "Forced", Boolean, true);
   world(COMBAT_SETTINGS.masteries, "Masteries", Boolean, true);
   // Both sides on: see `isAutoDamageEnabled()` for why the obvious asymmetry (automate monsters, leave
@@ -392,8 +393,8 @@ export function isConditionAutomationEnabled(): boolean {
  * Does dropping to 0 HP apply Unconscious (or Dead), and does further damage tick death failures?
  *
  * Stock floors hit points at zero and never writes those statuses. Instant death when excess damage
- * meets or exceeds max HP is journal prose only. On by default. Stands aside when midi-qol's
- * "Add Dead" mechanic is enabled, so the two do not double-apply.
+ * meets or exceeds max HP is journal prose only. On by default. Always our job on a supported
+ * install — Midi QoL is not compatible.
  *
  * Per audience, and this is the pairing the split was built for: death saves for the party and a
  * straight kill for the mooks is how most tables already play, and it took a code change to express.
@@ -419,7 +420,7 @@ export function honorImportantNpcDeathSaves(): boolean {
  * whispered button, and nothing in the system ends concentration when that save fails. With this on,
  * the save is rolled on the client that owns the creature and a failure drops the spell — as does
  * being Incapacitated, dying, or hitting 0 hit points, which no part of the stack enforces. On by
- * default. Stands aside when midi-qol's concentration handling is anything but "None".
+ * default. Always our job on a supported install — Midi QoL is not compatible.
  *
  * Per audience: the save is a roll the player expects to make, while a monster's is one more dialog in
  * front of a GM who has six of them waiting.
@@ -451,6 +452,18 @@ export function isRepeatSaveEnabled(): boolean {
  */
 export function isMovementCapEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.movement));
+}
+
+/**
+ * Refuse a use whose target is outside melee reach or ranged long range?
+ *
+ * dnd5e stores the numbers and colours the ruler; it never stops the use. Flurry of Blows
+ * 2024 is a utility with `range: self` and a creature target — gating only `type === "attack"`
+ * misses it. On by default: a punch from across the room flashing a Foundry error and then
+ * resolving is how this was reported. The GM is warned, not blocked.
+ */
+export function isAttackRangeEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.attackRange));
 }
 
 /**
@@ -493,8 +506,9 @@ export function getEconomyMode(subject: unknown): "off" | "warn" | "block" {
  * and stores the answer nowhere, so it has no basis on which to apply anything; what it ships instead is
  * the damage tray, a button per target for a human to press. That is a deliberate position rather than a
  * gap — "Range, reach, & cover" and hit determination are both unshipped roadmap items — and midi-qol is
- * the module that has always filled it. On a table without midi, every hit costs the GM a click and a
- * subtraction, which is precisely the arithmetic nobody came to the table for.
+ * the module that used to fill it. On a supported install that package is off, so every hit would
+ * otherwise cost the GM a click and a subtraction — which is precisely the arithmetic nobody came
+ * to the table for.
  *
  * On by default for BOTH sides. The asymmetry a GM might expect — automate the monsters, leave the party
  * alone — is the wrong way round: a player watching their own hit points move is watching the fiction
@@ -503,8 +517,6 @@ export function getEconomyMode(subject: unknown): "off" | "warn" | "block" {
  *
  * Per audience on the creature TAKING the damage, not on whoever rolled it, so the NPC column reads as
  * "monsters' hit points look after themselves" — which is how a GM thinks about it.
- *
- * Stands aside for midi when midi is applying damage itself; see `midiOwnsDamage()`.
  */
 export function isAutoDamageEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.autoDamage, subject);
@@ -808,8 +820,8 @@ export function isInteractReachEnabled(): boolean {
  *
  * On by default. dnd5e never emanates — a Paladin's transferred save bonus stays on the Paladin,
  * and clicking the feature posts the prose. DDB stamps `flags.ActiveAuras` so Active Auras or Aura
- * Effects can do the copy; with those modules off the stamp is inert. Off for a table that already
- * runs one of those, or that wants the Paladin's bonus to stay a hand-applied number.
+ * Effects can do the copy; those packages are incompatible here, and the stamp is inert without
+ * them. Off if the Paladin's bonus should stay a hand-applied number.
  */
 export function isAurasEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.auras));
@@ -818,8 +830,8 @@ export function isAurasEnabled(): boolean {
 /**
  * May a creature mount another token and follow it?
  *
- * On by default. Stands aside when Rideable is active. v1 is mount / dismount / follow and
- * the half-Speed cost — not falling off, not restricting the mount to Dash / Disengage / Dodge.
+ * On by default. v1 is mount / dismount / follow and the half-Speed cost — not restricting
+ * the mount to Dash / Disengage / Dodge. Rideable is not a supported install.
  */
 export function isRidingEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, GENERAL_SETTINGS.riding));

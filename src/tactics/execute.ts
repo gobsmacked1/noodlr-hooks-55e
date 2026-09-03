@@ -42,12 +42,6 @@ function tokenOf(who: any): any {
   return null;
 }
 
-function actorUuidOf(who: any): string | undefined {
-  const token = tokenOf(who);
-  const uuid = token?.document?.actor?.uuid ?? token?.actor?.uuid ?? who?.token?.document?.uuid ?? who?.uuid;
-  return uuid ? String(uuid) : undefined;
-}
-
 function dnd5eTargets(who: any): object[] {
   const token = tokenOf(who);
   const doc = token?.document ?? token;
@@ -118,7 +112,6 @@ async function useAction(
   target?: any,
   opts: { asReaction?: boolean; skipEconomy?: boolean } = {},
 ): Promise<string | undefined> {
-  const asReaction = opts.asReaction === true;
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
   // `configure: false` on `use()` is only the USAGE dialog. AttackActivity then fires `rollAttack`
   // with an empty dialog config (and does not await it), which is the Attack Roll window that sat
@@ -135,27 +128,6 @@ async function useAction(
 
   const attempts: Array<() => Promise<unknown>> = [];
   const activity = action.activity;
-  const midi: any = (globalThis as any).MidiQOL;
-  const targetUuid = actorUuidOf(target);
-
-  // Preferred when midi-qol is present: it resolves the entire workflow (attack, damage, saves, effects)
-  // and can be told its targets outright. `ignoreUserTargets` matters because midi otherwise falls back
-  // to whatever the GM happens to have selected, which on an automated turn is somebody else's choice
-  // leaking into the monster's. Precedence between the two target options is unverified upstream, so the
-  // acting user's targets are ALSO set by the caller: this is belt and braces, not a bet.
-  if (typeof midi?.completeActivityUse === "function" && activity) {
-    // `isReaction` and `targetConfirmation: "none"` are what midi's own reaction path passes; without
-    // them an off-turn use is treated as an ordinary one and can stop for a target confirmation nobody
-    // is present to give. Unknown options are ignored by midi, so they cost nothing when not reacting.
-    const midiOptions: Record<string, unknown> = { ignoreUserTargets: true };
-    if (targetUuid) midiOptions.targetUuids = [targetUuid];
-    if (asReaction) {
-      midiOptions.isReaction = true;
-      midiOptions.workflowOptions = { targetConfirmation: "none" };
-    }
-    const midiUsage = targetUuid || asReaction ? { midiOptions } : {};
-    attempts.push(() => midi.completeActivityUse(activity, midiUsage, dialog, message));
-  }
   if (typeof activity?.use === "function") {
     attempts.push(() => finishActivity(activity, usage, dialog, message, action.attackMode, target));
   }

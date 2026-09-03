@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
-import { barbsReady, gambitsOwnsBarbs, isSilveryBarbs } from "../src/system/dnd5e-barbs";
+import { barbsReady, isSilveryBarbs } from "../src/system/dnd5e-barbs";
 import { rerollLower } from "../src/system/dnd5e-reroll";
 
 // TWO THINGS ARE PINNED HERE, and they are the two that can be wrong without anything being reported.
@@ -245,24 +245,4 @@ test("an at-will caster has no pool to check", () => {
     caster([barbs({ identifier: "silvery-barbs", method: "atwill" })], {}),
   );
   assert.ok(ready, "an at-will caster is ready with no slots at all");
-});
-
-/* -------------------------------------------- */
-/*  Standing aside                               */
-/* -------------------------------------------- */
-
-function installed(...ids: string[]) {
-  (globalThis as any).game.modules = new Map(ids.map((id) => [id, { active: true }]));
-}
-
-test("Gambit's owns this only where midi is there to carry it", () => {
-  assert.equal(gambitsOwnsBarbs(), false, "neither installed");
-  installed("gambits-premades");
-  assert.equal(
-    gambitsOwnsBarbs(),
-    false,
-    "its automation is entered from a midi Workflow, so alone it cannot fire",
-  );
-  installed("gambits-premades", "midi-qol");
-  assert.equal(gambitsOwnsBarbs(), true);
 });

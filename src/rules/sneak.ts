@@ -30,13 +30,12 @@
 // stabbed a sleeping guard in session two would still be locked out in session forty. dnd5e's own `turn`
 // recovery period has the same scope for the same reason.
 //
-// WHERE IT STANDS DOWN, and every one of them has to SAY so. Everything here is reached from
-// `settleAttack`, which only runs when this module is applying damage — so with auto-damage off, the
-// switch reads ON and no rogue is ever asked (`sneakAdvisories`). And per rogue, for Chris's Premades,
-// whose macro adds the dice on midi's damage-bonus pass (`cprAutomatesSneak`, reported by the ownership
-// resolver). It also stands the COMPILER down the other way: a compiled damage rule on this feature is
-// refused while we are dealing it, and the capability sheet says why (`sneakClaimedNatively`). None of
-// the three is allowed to be silently true — a capability that switches itself off has to say so.
+// WHERE IT STANDS DOWN, and it has to SAY so. Everything here is reached from `settleAttack`,
+// which only runs when this module is applying damage — so with auto-damage off, the switch
+// reads ON and no rogue is ever asked (`sneakAdvisories`). It also stands the COMPILER down
+// the other way: a compiled damage rule on this feature is refused while we are dealing it,
+// and the capability sheet says why (`sneakClaimedNatively`). A capability that switches
+// itself off has to say so.
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
 import { isSneakEnabled } from "../settings";
@@ -47,7 +46,6 @@ import { speakerFor } from "../util/speaker";
 import { askUser, registerQuery } from "../util/queries";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
-  cprAutomatesSneak,
   isSneakFeature,
   qualifyingWeapon,
   readSneak,
@@ -170,13 +168,12 @@ export function registerSneakWatch(): void {
  *
  * Only `damage`. A `grant_capability` describing the feature costs nothing and feeds the prompt.
  *
- * Nothing is refused when neither we nor Chris's Premades is dealing it: a table that switched the offer
- * off and compiled the feature deliberately has exactly one thing dealing the dice, which is a working
- * configuration and not ours to overrule.
+ * Nothing is refused when we are not dealing it: a table that switched the offer off and
+ * compiled the feature deliberately has exactly one thing dealing the dice, which is a
+ * working configuration and not ours to overrule.
  */
 export function sneakClaimedNatively(rule: CapabilityRule, item: any): string | null {
   if (rule?.effect?.kind !== "damage" || !isSneakFeature(item)) return null;
-  if (cprAutomatesSneak(item)) return "Chris's Premades already deals this creature's Sneak Attack";
   const actor = item?.actor ?? item?.parent;
   if (!isSneakEnabled(actor)) return null;
   return "Sneak Attack is dealt natively, once per turn and only when the rule's conditions hold";
@@ -205,11 +202,8 @@ export async function offerSneakAttack(
   if (!actor || !isSneakEnabled(actor)) return null;
   if (sneakSpent(actor)) return null;
 
-  // Per-item, before anything else is read: a rogue whose feature Chris's Premades has automated is
-  // already being offered this on the damage-bonus pass, and two offers on one hit is the double-ask
-  // every reaction layer here exists to avoid.
   const feature = sneakFeature(actor);
-  if (!feature || cprAutomatesSneak(feature)) return null;
+  if (!feature) return null;
 
   const item = itemOf(message);
   const sneak = readSneak({
@@ -340,7 +334,6 @@ export function surveySneak(): unknown {
     `feature: ${feature ? String(feature.name) : "NONE — nothing to offer"}`,
     `dice: ${formula ? `${formula}${describeFormula(actor, formula)}` : "NONE — no damage part and no class scale named sneak-attack, so nothing would be rolled"}`,
     `qualifying weapons: ${weapons.length ? weapons.join(" | ") : "NONE — needs a Finesse or Ranged weapon, and the test requires a positive reading"}`,
-    `chris-premades automates it: ${feature && cprAutomatesSneak(feature) ? "YES — we stand aside" : "no"}`,
     `turn stamp: ${turnStamp() || "(out of combat — unlimited)"}`,
     `spent this turn: ${sneakSpent(actor) ? "yes" : "no"}`,
     `asked of: ${nameOf(rollerForActor(actor))}`,

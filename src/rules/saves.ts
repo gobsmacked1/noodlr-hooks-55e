@@ -38,7 +38,6 @@ import { isPrimaryGM, isRollerFor, rollerForActor } from "../util/gm";
 import { narrator } from "../util/speaker";
 import { isAutoSavesEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
-import { midiOwnsDamage, midiOwnsSaves } from "../system/dnd5e-damage";
 import { canResist } from "../system/dnd5e-legendary";
 import { shouldAutomate } from "../tactics/registry";
 import { applyRolledDamage, type DamageEntry } from "./damage";
@@ -202,10 +201,6 @@ export function registerSaveResolution(): void {
 function active(): boolean {
   if (!isPrimaryGM()) return false;
   if (!isAutoSavesEnabled()) return false;
-  // Midi resolves saves itself and writes its verdict to the card. Two layers deciding what a save was
-  // worth is a race whichever of them is right, and midi's reading is the real answer rather than a
-  // reconstruction of one — see `cards.ts` on why the flags, not the module, are the test.
-  if (midiOwnsSaves() || midiOwnsDamage()) return false;
   return true;
 }
 
@@ -933,7 +928,6 @@ export function surveyDamageSaves(): unknown {
     setting: COMBAT_SETTINGS.autoSaves,
     enabled: isAutoSavesEnabled(),
     running: active(),
-    midiOwnsSaves: midiOwnsSaves(),
     activations: Array.from(activations.values()).map((act) => ({
       usage: act.usageId,
       onSave: act.onSave,

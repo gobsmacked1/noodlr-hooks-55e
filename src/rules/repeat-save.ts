@@ -24,10 +24,6 @@
 // WHERE THE STATE LIVES. On the AFFLICTED creature, as a flag, exactly like the action ledger and for
 // the same reason: the rule belongs to the victim's turn, not to whoever applied it, and the applier
 // may well be dead by the time the save comes round.
-//
-// THE STAND-ASIDE. midi-qol's `OverTime` flag encodes this same rule and DDB Importer stamps it on
-// everything it can (`turn=end,saveDC=13,saveAbility=con,saveRemove=true`). An effect carrying one is
-// already being handled, so ours declines rather than rolling a second save against the same DC.
 
 import { MODULE_ID, log } from "../constants";
 import { isRepeatSaveEnabled } from "../settings";
@@ -70,23 +66,6 @@ function stillAfflicted(actor: any, status: string): boolean {
     if (effect?.statuses?.has?.(status)) return true;
   }
   return Boolean(actor?.statuses?.has?.(status));
-}
-
-/**
- * Is something else already rolling this creature's escape save?
- *
- * midi's OverTime is the one real case. Checked per status rather than per actor: a creature can carry
- * a DDB-imported poison midi is counting down AND a paralysis from a stat block that nobody is.
- */
-function alreadyHandled(actor: any, status: string): boolean {
-  for (const effect of actor?.appliedEffects ?? actor?.effects ?? []) {
-    if (!effect?.statuses?.has?.(status)) continue;
-    const overtime = effect?.flags?.["midi-qol"]?.OverTime;
-    if (!overtime) continue;
-    const text = Array.isArray(overtime) ? overtime.join(",") : String(overtime);
-    if (/saveRemove\s*=\s*true/i.test(text)) return true;
-  }
-  return false;
 }
 
 /**
@@ -136,11 +115,6 @@ export async function rollPendingSaves(actor: any): Promise<void> {
 
     // Gone already — the duration ran out, the caster dropped concentration, or someone clicked it off.
     if (!stillAfflicted(actor, status)) continue;
-    if (alreadyHandled(actor, status)) {
-      log(`repeat save: midi's OverTime already rolls ${status} for ${String(actor.name)}`);
-      survivors.push(clause);
-      continue;
-    }
 
     const request: OwedRequest = {
       kind: "save",
@@ -272,7 +246,6 @@ export function surveyRepeatSaves(): unknown {
     clauses: pending(actor).map((c) => ({
       ...c,
       stillAfflicted: stillAfflicted(actor, c.status),
-      midiOwnsIt: alreadyHandled(actor, c.status),
     })),
   };
   log("repeat saves:", report);

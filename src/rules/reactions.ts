@@ -50,15 +50,7 @@ import { hasDisengaged } from "./disengage";
 import { isForcedMovement } from "./shove";
 import { canTakeEnterReach, isPolearmWeapon, standingExemption } from "../system/dnd5e-reactions";
 import { isCounterspellAction } from "../system/dnd5e-counterspell";
-import {
-  alive,
-  canReact,
-  cannotReactReason,
-  notifyMidi,
-  offerReaction,
-  offerable,
-  opportunityTaken,
-} from "./offer";
+import { alive, canReact, cannotReactReason, offerReaction, offerable } from "./offer";
 import type { ReactionTrigger } from "./offer";
 import { claimProvoke, clearAllProvokes, forgetProvokesFor, resetOfferLock } from "./reaction-once";
 
@@ -411,7 +403,6 @@ function spendReaction(combatant: any): void {
   const actor = combatant?.actor;
   if (!actor) return;
   spend(actor, game.combat, combatant, "reaction", false);
-  notifyMidi(actor);
 }
 
 /**
@@ -495,11 +486,6 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
     log(`reaction: ${who} moved but has no readable centre — no opportunity attacks`);
     return;
   }
-  if (opportunityTaken()) {
-    log(`reaction: ${who} left reach, but Gambit's Premades owns opportunity attacks`);
-    return;
-  }
-
   const id = String(moverDoc?.id ?? "");
   handled.add(id);
   // Cleared on a timer, not immediately: the fallback's `updateToken` fires just after this one.
