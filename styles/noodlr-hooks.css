@@ -171,6 +171,31 @@ body.noodlr-compact-cards .message p.supplement {
   padding: 0 0.25rem !important;
 }
 
+/* ---- Streamlined chat totals ---------------------------------------------------------------- */
+
+/* Always on. Replaces dnd5e's formula / tooltip / green-or-red verdict with one line.
+ * Colour is only a natural 20 (green) or a natural 1 (red). Everything else inherits
+ * the theme's default — black on light, white on dark. Compact cards still only cut padding. */
+
+.noodlr-streamlined .dice-formula,
+.noodlr-streamlined .dice-tooltip,
+.noodlr-streamlined .dice-total .icons,
+.noodlr-streamlined p.supplement {
+  display: none !important;
+}
+
+.noodlr-streamlined .dice-total.noodlr-card-total {
+  color: inherit !important;
+}
+
+.noodlr-nat-20 {
+  color: var(--dnd5e-color-success, var(--color-level-success, #18520b)) !important;
+}
+
+.noodlr-nat-1 {
+  color: var(--dnd5e-color-failure, var(--color-level-failure, #782e22)) !important;
+}
+
 /* ---- The capability sheet ------------------------------------------------------------------- */
 
 .noodlr-capability-sheet .window-content {

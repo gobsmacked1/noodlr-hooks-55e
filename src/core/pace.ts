@@ -54,10 +54,28 @@ export function gridDistanceOf(doc?: any): number {
   return Number.isFinite(n) && n > 0 ? n : 5;
 }
 
+/**
+ * Which movement action this animation is actually performing.
+ *
+ * Foundry puts the chosen action on `TokenAnimationOptions.action` (a player picking Fly,
+ * or an API waypoint that set `action: "fly"`). The token's `movementAction` is only the
+ * HUD default — a Beholder whose sheet is fly 40 / walk 5 keeps `walk` selected and would
+ * otherwise animate every flight at 5 ft. Prefer the option; fall back to the HUD.
+ */
+export function paceActionOf(
+  doc: any,
+  options?: { action?: string } | null,
+  dest?: { action?: string } | null,
+): string {
+  const chosen = String(options?.action ?? dest?.action ?? "").trim().toLowerCase();
+  if (chosen) return chosen;
+  return String(doc?.movementAction ?? "walk").trim().toLowerCase() || "walk";
+}
+
 /** Live sheet → spaces/sec, or null when the animation should stay Foundry's. */
-export function sheetSpacesPerSecondOf(doc: any): number | null {
+export function sheetSpacesPerSecondOf(doc: any, action?: string): number | null {
   const feet = sheetFeetPerRound({
-    action: String(doc?.movementAction ?? "walk"),
+    action: String(action || doc?.movementAction || "walk"),
     modes: doc?.actor?.system?.attributes?.movement ?? {},
   });
   if (feet === null) return null;

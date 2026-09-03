@@ -52,7 +52,12 @@ import {
 } from "../../settings";
 import { pickNumber, systemPaths } from "../../system/profiles";
 import { JUMP_RUN_UP, jumpDistances } from "../../system/dnd5e-checks";
-import { animationDurationMs, gridDistanceOf, sheetSpacesPerSecondOf } from "../../core/pace";
+import {
+  animationDurationMs,
+  gridDistanceOf,
+  paceActionOf,
+  sheetSpacesPerSecondOf,
+} from "../../core/pace";
 import {
   horizontalSceneUnits,
   pathClearsWalls,
@@ -318,7 +323,8 @@ export function registerMovementCap(): void {
       _getAnimationMovementSpeed(options: any) {
         try {
           if (isSheetPaceEnabled() && getMoveSpeed() <= 0) {
-            const sps = sheetSpacesPerSecondOf(this.document);
+            const action = paceActionOf(this.document, options);
+            const sps = sheetSpacesPerSecondOf(this.document, action);
             if (sps !== null) return sps;
           }
         } catch (err) {
@@ -330,7 +336,8 @@ export function registerMovementCap(): void {
       _getAnimationDuration(from: any, to: any, options: any) {
         try {
           if (isSheetPaceEnabled() && getMoveSpeed() <= 0) {
-            const sps = sheetSpacesPerSecondOf(this.document);
+            const action = paceActionOf(this.document, options, to);
+            const sps = sheetSpacesPerSecondOf(this.document, action);
             const size = Number((globalThis as any).canvas?.dimensions?.size);
             if (sps !== null && size > 0) {
               const speed = this._modifyAnimationMovementSpeed(sps, options);
@@ -513,7 +520,11 @@ export function surveyMovement(): unknown {
   const action = String(doc?.movementAction ?? "walk");
   const elevation = Number(doc?._source?.elevation ?? doc?.elevation ?? 0);
   const gridDistance = gridDistanceOf(doc);
-  const sps = sheetSpacesPerSecondOf(doc);
+  const sps = sheetSpacesPerSecondOf(doc, action);
+  const paceByAction: Record<string, number | null> = {};
+  for (const mode of ["walk", "fly", "climb", "swim", "burrow"] as const) {
+    if (Number(modes[mode]) > 0) paceByAction[mode] = sheetSpacesPerSecondOf(doc, mode);
+  }
   const sample = [
     { x: Number(doc._source?.x ?? 0), y: Number(doc._source?.y ?? 0), elevation, action },
     {
@@ -544,6 +555,8 @@ export function surveyMovement(): unknown {
       burrow: modes.burrow ?? 0,
     },
     sheetPace: isSheetPaceEnabled(),
+    paceAction: action,
+    paceByAction,
     spacesPerSecond: sps,
     secondsForOneSquare: sps ? round(gridDistance / (sps * gridDistance)) : "—",
     secondsForSheetSpeed: sps ? ROUND_HINT(modes, action, gridDistance, sps) : "—",
@@ -575,8 +588,13 @@ export function surveyMovement(): unknown {
     `${report.token}: ${action} at ${elevation} ${report.units} (${report.size}, tax ${tax})`,
     `spent ${round(travel.total)} (core ${round(travel.core)} + Z ${round(travel.surcharge)})`,
     `sheet ${JSON.stringify(report.sheet)}`,
-    `pace ${report.sheetPace ? "on" : "off"} → ${sps ?? "Foundry default"} spaces/sec` +
-      (typeof report.secondsForSheetSpeed === "string" ? ` (${report.secondsForSheetSpeed})` : ""),
+    `pace ${report.sheetPace ? "on" : "off"} ${action} → ${sps ?? "Foundry default"} spaces/sec` +
+      (typeof report.secondsForSheetSpeed === "string" ? ` (${report.secondsForSheetSpeed})` : "") +
+      (Object.keys(paceByAction).length
+        ? ` [${Object.entries(paceByAction)
+            .map(([mode, value]) => `${mode} ${value ?? "—"}`)
+            .join(", ")}]`
+        : ""),
     `traverse ${report.modeTraverse ? "on" : "off"} ${report.enclosure}/${report.floor} walls ${
       report.defaultWall
     } (${report.walls}) → one square ${report.oneSquareDecision}`,

@@ -4721,6 +4721,38 @@ So the button stays locked and `applyGraze` pays out the flat amount directly.
 - `unresolved` targets get no graze, for the same reason they get no hit: "there are two of these on
  the scene and the record cannot say which" is exactly as unanswerable here.
 
+### Streamlined chat totals (always on)
+
+dnd5e draws a formula, a collapsible tooltip, then greens or reds the total for hit / miss /
+success / failure. The table asked for the opposite. `src/rules/card-line.ts` is the pure
+formatter; `src/rules/streamline-cards.ts` paints after `dnd5e.renderChatMessage` (the hook
+that fires *after* dnd5e's five passes — decorating on core `renderChatMessageHTML` is wiped).
+
+- **First number is the face**, not the total. Crit and fumble omit the modifier column.
+  Comparison against AC / DC still uses the total. A Champion 19 is `(Hit)` in the default
+  colour — labels follow the face, not `isCritical`.
+- **Colour only a natural 20 (green) or a natural 1 (red).** Everything else inherits the
+  theme. 2024 saves and checks do not auto-succeed or auto-fail; a 20 that failed is
+  `20    +4    (Failure)` with a green 20.
+- **Blind is not overridden.** `isContentVisible === false` leaves the system's hidden card.
+  `attackRollVisibility === "none"` and `shouldDisplayChallenge === false` still hide the
+  verdict from players; the GM always sees it. Nick does not leak a hit.
+- Damage: first part is dice + signed modifier + type; extra types are amount + type.
+  Vulnerability shows the doubled number, immunity `0`, resistance `floor(½)`. Mixed
+  target traits fall back to the raw roll rather than guessing. Healing is untraited.
+- Compact cards stay a padding preference. This rewrite is always on.
+
+**Mastery suffixes are labels on the card.** Push, Graze, and Nick's economy are implemented
+elsewhere. Cleave extra attacks, Sap, Topple's save, Slow, and Vex are **not** automated —
+the card still names the mastery that was chosen (`flags.dnd5e.roll.mastery`).
+
+| Mastery | When the suffix appears | Automated? |
+| --- | --- | --- |
+| Cleave, Push, Sap, Topple | Attack card, on a hit (or crit) | Push only (10 ft) |
+| Graze | Attack card, on a miss, amount > 0 | Yes — modifier only |
+| Nick | Attack card, hit or miss | Economy only |
+| Slow, Vex | Damage card, hit with > 0 damage | No |
+
 ### Compact cards, and the Bloodied status
 
 - **`compactCards` is CLIENT-scoped and lives in Foundry's own settings list**, beside `debugLogging`
@@ -5108,6 +5140,11 @@ A second `CONFIG.Token.objectClass` replacement would drop the Speed cap.
   override — duration therefore passes our speed into `super` as well. Blink / displace /
   `noodlrForce` stay instant. `combat.moveSpeed > 0` still wins for automation.
   Difficult terrain slows via `_modifyAnimationMovementSpeed`; it does not change the sheet.
+  **The action is the one this animation is performing, not the HUD default.**
+  `paceActionOf` prefers `TokenAnimationOptions.action` (and the destination waypoint),
+  then `doc.movementAction`. A Beholder with fly 40 / walk 5 keeps HUD `walk`; an API
+  fly that only read the HUD animated at 5 ft. `moveTo` stamps `animation.action` as
+  well as the waypoint. A player who picks Fly changes the HUD and needs no stamp.
 - **Mode-traverse** (`general.modeTraverse`, default on). Core walls have no height —
   native Scene Levels are visibility floors, not wall tops (see
   `_research/_audit/wall-height-2026-08-23.md`). Untagged walls are **10 ft / 0**.

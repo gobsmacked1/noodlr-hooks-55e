@@ -228,7 +228,11 @@ export async function moveTo(token: any, point: Point, intent: MoveIntent = {}):
   if (wanted) waypoint.action = wanted;
   const ignoreWalls = unconstrained();
   const speed = getMoveSpeed();
-  const animation = speed > 0 ? { movementSpeed: speed } : undefined;
+  // `action` must ride on the animation options as well as the waypoint. Sheet pace reads
+  // `TokenAnimationOptions.action`; the token's HUD default is often still `walk` while we fly.
+  const animation: Record<string, unknown> = {};
+  if (speed > 0) animation.movementSpeed = speed;
+  if (wanted) animation.action = wanted;
 
   // Let core enforce the budget in COST rather than distance, when it is known. That is the only way
   // difficult terrain is honoured: 30 ft of movement buys 15 ft of bog, and core already knows the
@@ -248,7 +252,7 @@ export async function moveTo(token: any, point: Point, intent: MoveIntent = {}):
         constrainOptions,
         autoRotate: false,
         showRuler: false,
-        ...(animation ? { animation } : {}),
+        ...(Object.keys(animation).length ? { animation } : {}),
       }),
     );
   } catch (err) {

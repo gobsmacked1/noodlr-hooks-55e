@@ -60,6 +60,7 @@ import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
+import { registerStreamlineCards } from "./rules/streamline-cards";
 import { registerDamageGate, surveyGate } from "./rules/gate";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
 import { registerOwedRolls, surveyOwedRolls } from "./rules/owed-roll";
@@ -594,6 +595,9 @@ Hooks.once("ready", () => {
   registerAutoRoll();
   // The system's cards drawn at half height, if this screen asked for it.
   applyCompactCards();
+  // One-line totals after dnd5e has finished colouring the card. Every client: a player
+  // must see the same rewrite as the GM, and Blind still hides the content from them first.
+  registerStreamlineCards();
   // What hurt whom, when, and with what. Every client keeps its own ledger, because the amount is
   // only computable from `updateActor` (which fires everywhere) while the damage TYPES arrive on the
   // applying client. A GM-only ledger would be blind to damage a player applied.

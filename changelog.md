@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.46
+
+**A fly animates at fly Speed.** Sheet pace was reading the token HUD's
+default action, so a Beholder (fly 40, walk 5) crawled every flight at 5
+ft. The animation now uses the mode this move actually chose — a player
+who picks Fly, or an automated waypoint that set `fly`. Walk stays walk
+when that is what was selected. `noodlrHooks.surveyMovement()` prints
+pace per mode.
+
+**Chat totals are one line.** The formula, tooltip, and green-or-red
+verdict are gone. Colour is only a natural 20 (green) or a natural 1
+(red). Everything else inherits the theme. The first number is the face,
+not the total:
+
+- Attack: `1    (Fumble!)` · `15    +7    (Miss)` · `18    +7    (Hit)` ·
+  `20    (Critical Hit!)`
+- Save or check (no auto success/fail in 2024): `12    +3    (Failure)` ·
+  `16    +3    (Success)`
+- Damage: `8    +4    (Piercing)` · extra types as `12    (Fire)` ·
+  vulnerability shows 2×, immunity 0, resistance floor(½)
+
+Blind rolls are unchanged — players still cannot see what they should
+not; the GM always can. Compact cards stay a padding preference.
+
+**Weapon-mastery suffixes** on those lines: Cleave / Push / Sap / Topple
+on a hit; Graze amount on a miss; Nick on hit or miss; Slow / Vex on a
+damage card that hit for more than 0. Push, Graze, and Nick's economy
+were already automated. The rest are labels so the table can see what
+was chosen.
+
 ## 0.7.45
 
 **After a fail, a miss, or a damage roll, the sheet is asked — not a special

@@ -4,8 +4,10 @@ import { test } from "node:test";
 import {
   ROUND_SECONDS,
   animationDurationMs,
+  paceActionOf,
   sheetFeetPerRound,
   sheetSpacesPerSecond,
+  sheetSpacesPerSecondOf,
 } from "../src/core/pace";
 
 test("a 30 ft walk on a 5 ft grid is one space per second", () => {
@@ -49,4 +51,29 @@ test("an unreadable or non-positive speed is not a pace", () => {
   assert.equal(sheetFeetPerRound({ action: "walk", modes: {} }), null);
   assert.equal(sheetSpacesPerSecond(0, 5), null);
   assert.equal(sheetSpacesPerSecond(30, 0), null);
+});
+
+// A Beholder-shaped sheet: walk 5, fly 40. The HUD default is walk. Animating a fly
+// waypoint at walk speed is the bug — the option names the mode that is happening.
+test("the animation option outranks the token's default movement action", () => {
+  const doc = { movementAction: "walk" };
+  assert.equal(paceActionOf(doc, { action: "fly" }), "fly");
+  assert.equal(paceActionOf(doc, {}, { action: "fly" }), "fly");
+  assert.equal(paceActionOf(doc, {}), "walk");
+  assert.equal(paceActionOf(doc), "walk");
+});
+
+test("a 40 ft fly is eight times a 5 ft walk on the same sheet", () => {
+  const doc = {
+    movementAction: "walk",
+    actor: { system: { attributes: { movement: { walk: 5, fly: 40, hover: true } } } },
+    parent: { grid: { distance: 5 } },
+  };
+  const walk = sheetSpacesPerSecondOf(doc, "walk");
+  const fly = sheetSpacesPerSecondOf(doc, "fly");
+  assert.equal(walk, 5 / 5 / 6);
+  assert.equal(fly, 40 / 5 / 6);
+  assert.ok(fly !== null && walk !== null && fly > walk);
+  // Reading the HUD default alone is what made every Beholder flight crawl.
+  assert.equal(sheetSpacesPerSecondOf(doc), walk);
 });
