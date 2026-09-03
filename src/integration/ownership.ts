@@ -279,6 +279,14 @@ const AREAS: Area[] = [
         : null,
   },
   {
+    id: "diceMods",
+    setting: COMBAT_SETTINGS.diceMods,
+    // Nobody else offers Heroic Inspiration / Indomitable / Stroke of Luck as one after-fail window,
+    // Piercer / Empowered Spell on a damage card, or the Lucky feat as a with-roll hold. Halfling
+    // Luck is the system's (r1=1) and is not in either offer, so there is no contender to name.
+    contender: () => null,
+  },
+  {
     id: "dying",
     setting: COMBAT_SETTINGS.dying,
     contender: () =>

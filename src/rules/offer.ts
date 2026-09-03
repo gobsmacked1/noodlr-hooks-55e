@@ -25,9 +25,9 @@
 // WHAT IS DELIBERATELY NOT OFFERED — a list that is now empty of the two spells it used to name. Counterspell
 // arrived in v0.4.3 through the `casting` trigger, and Silvery Barbs in v0.4.4 through `success`; both of the
 // old refusals were about a window that did not exist yet, and both windows exist because the damage and save
-// layers hold their verdicts open for the Shield and legendary-resistance questions. What is still unoffered is
-// a reaction to an ABILITY CHECK, and that one is honest: nothing here holds a check's verdict open, because a
-// check produces information a GM reads rather than a consequence somebody applies.
+// layers hold their verdicts open for the Shield and legendary-resistance questions. Cutting Words on a
+// made ability check is offered from `rules/dice-mod.ts` (`readCheck`), not from this file. This file's
+// `success` trigger is still Silvery Barbs on an attack or a save.
 
 import { MODULE_ID, log } from "../constants";
 import { rollerForActor } from "../util/gm";

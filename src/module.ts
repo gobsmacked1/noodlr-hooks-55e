@@ -50,6 +50,10 @@ import { registerReactionHooks } from "./rules/reactions";
 import { registerReactionOffers, surveyOffers } from "./rules/offer";
 import { surveyCounterspell } from "./rules/counterspell";
 import { surveyBarbs } from "./rules/barbs";
+import { registerDiceMods, surveyDiceMods } from "./rules/dice-mod";
+import { registerDamageDice, surveyDamageDice } from "./rules/damage-dice";
+import { registerLucky, surveyLucky } from "./rules/lucky";
+import { recordPortent, registerPortent, surveyPortent } from "./rules/portent";
 import { registerSneakOffers, registerSneakWatch, surveySneak } from "./rules/sneak";
 import { registerReady, registerReadyExpiry, surveyReady } from "./rules/ready";
 import { registerReadyWatch } from "./rules/ready-events";
@@ -163,6 +167,11 @@ export interface NoodlrHooksApi {
   surveyOffers(): unknown;
   surveyCounterspell(): unknown;
   surveyBarbs(): unknown;
+  surveyDiceMods(): unknown;
+  surveyDamageDice(): unknown;
+  surveyLucky(): unknown;
+  surveyPortent(): unknown;
+  recordPortent(faces: number[]): Promise<unknown>;
   surveySneak(): unknown;
   surveyReady(): unknown;
   surveyLegendary(): unknown;
@@ -300,6 +309,16 @@ const api: NoodlrHooksApi = {
   surveyCounterspell: () => surveyCounterspell(),
   /** Who could spoil the selected creature's next good roll, and whether anything is holding one open. */
   surveyBarbs: () => surveyBarbs(),
+  /** After-fail / after-miss options on the selected creature (Inspiration, Indomitable, …). */
+  surveyDiceMods: () => surveyDiceMods(),
+  /** Piercer / Empowered Spell / Inspiration on a damage card, and whether Piercer is spent. */
+  surveyDamageDice: () => surveyDamageDice(),
+  /** Lucky feat on the selected creature — charged, skipped, or Halfling-colliding. */
+  surveyLucky: () => surveyLucky(),
+  /** Portent bank on the selected creature — faces left, Greater Portent, spent this turn. */
+  surveyPortent: () => surveyPortent(),
+  /** Write faces onto the selected creature's Portent item. Empty list clears the bank. */
+  recordPortent: (faces) => recordPortent(faces),
   /** Whether the selected creature would be offered Sneak Attack, who is asked, and what has spent it. */
   surveySneak: () => surveySneak(),
   /** What the selected creature is holding, for what trigger, and whether a compiler is listening. */
@@ -541,6 +560,23 @@ Hooks.once("ready", () => {
   // Sneak Attack, same shape and for the same reason: the GM's client reads the hit, and the rogue's own
   // client draws the dialog and rolls `@scale.rogue.sneak-attack` against its own roll data.
   registerSneakOffers();
+  // After-fail / after-miss: the GM notices, the owner answers. Same query shape as a reaction.
+  // Every client, because the addressee is whoever plays the creature.
+  registerDiceMods();
+  // Damage-die rerolls (Piercer, Empowered Spell, Inspiration on a damage or
+  // healing card) plus Cutting Words on a damage roll. Every client — the
+  // addressee is whoever rolled the dice. Auto-damage awaits this before it
+  // subtracts hit points; the chat hook covers the Apply-button path.
+  registerDamageDice();
+  // Portent is before-roll and Lucky is with-roll. Both veto the same
+  // `Hooks.call`. Portent MUST register first: the first `false` wins, and a
+  // spent face replays with `noodlrLucky` so Advantage is not asked on a 14.
+  // Every client — the addressee is the Portent owner, who may not be the roller.
+  registerPortent();
+  // Lucky is with-roll, not after-fail. Same setting, own hook: veto the preRoll,
+  // ask, then replay with Advantage / Disadvantage. Every client — the addressee
+  // is the owner, and preRoll fires only where the die is built.
+  registerLucky();
   // And the feature being pressed from the sheet is watched everywhere, because the press happens on
   // whichever client owns the rogue and the turn has to be marked spent from there.
   registerSneakWatch();

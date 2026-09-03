@@ -4176,6 +4176,148 @@ built for this spell** — which is the argument for having built the boring inf
  is the divergence the v0.4.1 vision bug was about.
 - Diagnostics: `api.surveyBarbs()`.
 
+## After-fail / after-miss dice mods (2026-09-02)
+
+`src/rules/dice-mod.ts` + `src/system/dnd5e-dice-mods.ts` + the keep-new / replace / set-total
+/ add-die / subtract-die half of `src/system/dnd5e-reroll.ts`. One offer, not a special case
+per feature. Five axes — window, operation, whose roll, resource, ask-vs-auto.
+
+- **Checks are held.** `readCheck` is the same DC-from-`options.target` as `readSave`. No DC
+  means `success: null`, so Inspiration cannot fire on an uncontested Athletics check. Skill
+  and ability both land (`type: "skill"` / `"ability"`). Chat hooks on every client; the
+  primary GM notices. A failed check that becomes a success then offers Cutting Words.
+- **Saves: Barbs → own mods → legendary resistance.** A spoiled success is a failure the
+  roller can still Indomitable. The other order spends Indomitable on a fail Barbs then
+  undoes. Re-read the card; do not trust the apply's own arithmetic. Cutting Words does
+  **not** fire on a save (printed trigger is a damage roll or a made check / attack).
+- **Attacks: chat hook AND `consider`, before the reaction window.** The hook is what
+  keeps after-miss honest when auto-damage is off — welding this to `consider` would
+  grey a live setting. `pending` / `done` make the two callers one offer. A miss that
+  becomes a hit is re-read and re-filed so Shield and auto-damage see the new verdict.
+- **Cutting Words is after Barbs on an attack.** `reactionWindow` does Barbs, then CW,
+  then Shield. A spoiled hit must not be subtracted. When auto-damage is off (or midi
+  owns damage), the chat hook offers CW on a clean hit — Barbs never runs on that path.
+  `againstPending` / `againstDone` are a second pair so a miss→hit can still be cut.
+- **Saves stay on `spoilAndResist` whenever auto-saves is on**, so Barbs still goes
+  first. The chat hook only asks when that layer is off (and never when midi owns
+  saves). Asking from both would spend Indomitable on a fail Barbs then undoes.
+- **Discovery is identifier → name-without-identifier → `flags.<ns>.diceMod`.** Name only
+  on declared types (`feat`). `indomitable` never matches `indomitable-might`. The Lucky
+  **feat** (`lucky`) is not Halfling Luck and is not in this table.
+- **Bardic Inspiration spend is the Inspired AE, not the Bard's feat.** Origin identifier
+  `bardic-inspiration`, or name `/bardic inspiration/i`, or name `Inspired` **and**
+  description mentioning bardic. Bare "Inspired" is not enough. Die size from the origin
+  Bard's `system.scale.bard.inspiration` — unreadable is a refusal, never a guessed d6.
+- **Peerless Skill** is self after-fail / after-miss on a check or attack (not a save).
+  Resource is the Bard's BI **uses**. `refundIfStillFails`: apply first, re-read, spend
+  only if it helped.
+- **Cutting Words** is opposed, 60 ft, Reaction + BI use, attack success, check
+  success, and damage rolls. Saves are not. Combat-only. `MAX_ASKED` 1.
+  `reactorsAgainst` skips the same side. On a damage card the offer is raised
+  from `damage-dice.ts` after the self rerolls, not from `dice-mod.ts`.
+- **Halfling Luck is the system's.** `flags.dnd5e.halflingLucky` → `D20Die#applyFlag` (`r1=1`)
+  already rerolls a natural 1 before the card posts. Offering it again would double-reroll.
+  2014 race identifier `lucky`; 2024 species identifier `luck`. Do not match either.
+- **Heroic Inspiration** is offered on a failed d20 test, a missed attack, and the
+  lowest unmaxed die on a damage or healing card. RAW expends it to reroll *any*
+  die immediately after rolling — recharge and a success the player still wants
+  to reroll stay unbuilt. Stored as `system.attributes.inspiration`.
+- **Clock:** timeout may take Indomitable Might (free, always better) and Piercer
+  (free, once per turn) and never spends Inspiration, a held BI die, a use, Focus,
+  Sorcery, Empowered Spell or Cutting Words. Automated
+  combatants are skipped — the planner does not know these features. Might is not
+  offered when the roll already succeeded (`success === true`) even if the total is
+  still below the score — RAW-legal, not worth a dialog. A check with no DC
+  (`success === null`) still is.
+- **Lucky feat is with-roll, not this table** (`src/rules/lucky.ts` +
+  `src/system/dnd5e-lucky.ts`). 2024 spends a Luck Point *with* the roll: Advantage
+  on your D20 Test, or Disadvantage on an attack against you. Implementing 2014
+  ("see the roll, add a d20, pick") against a 2024 sheet would popup at the wrong
+  moment. `dnd5e.preRoll*` is `Hooks.call` — synchronous — so the hold is veto
+  first, ask after, then replay the same method with `noodlrLucky: true` so the
+  hook lets it through. Always replay, even if both offers decline, or the button
+  does nothing. Listen to **exactly one** of each V1/V2 pair (`preRollD20Test` and
+  `preRollDeathSave`); a false from V1 never reaches V2, and listening to both
+  would let the second through while the first is holding. Initiative is skipped
+  (`initiativeDialog`) — replaying `rollAbilityCheck` would break the tracker.
+  Self is not offered when Advantage is already on the config; incoming is not
+  offered when Disadvantage is already on. Both can fire on one attack (they
+  cancel — RAW). Incoming: `MAX_ASKED` 1, no range/sight, being the target is
+  enough; `config.target` on an attack is an **AC number**, so targets come from
+  `config.targets[]` or `game.user.targets`. Automated combatants are skipped for
+  the creature *being asked* — incoming Lucky against an automated monster still
+  asks the player target. Clock: Luck Points are depleting → `luckyTimeoutId()`
+  is `"decline"`. Same `combat.diceMods` switch. Identifier `lucky` is believed
+  only on `type === "feat"` (or `flags.<ns>.diceMod === "lucky"`); 2014 Halfling
+  race `lucky` and 2024 species `luck` / `halflingLucky` are not this feat — the
+  system already rerolls a 1. Do not put Lucky in `DICE_MOD_SPECS`. Diagnostics:
+  `noodlrHooks.surveyLucky()`.
+- **Portent is before-roll, not this table** (`src/rules/portent.ts` +
+  `src/system/dnd5e-portent.ts`). 2024 Diviner: after a Long Rest record two
+  d20s (three with Greater Portent) and replace a D20 Test made by you or a
+  creature you can see. Must choose before the roll. Once per turn. Unused
+  faces are lost on the next Long Rest — refill replaces, it does not append.
+  Same veto-and-replay as Lucky (`Hooks.call` is synchronous). **Register
+  Portent before Lucky** in `module.ts`: the first `false` wins. A spent face
+  replays with `rolls: [{ options: { minimum: face, maximum: face } }]`
+  (dnd5e's own clamp) and `noodlrLucky: true`, because Advantage on a fixed
+  14 does nothing. A declined Portent replays with only `noodlrPortent`, so
+  Lucky can still hold. Separate `holding` flags — do not share Lucky's.
+  Initiative **is** a D20 Test; replay `rollInitiativeDialog`, not
+  `rollAbilityCheck` (Lucky skips initiative for that reason). Death save
+  uses the same V1-only pairing. The **owner** is asked, not the roller, when
+  replacing someone else's test. Sight is `observersWhoSee` — missing tokens
+  fail toward seeing; self needs no sight. Skip `shouldAutomate` for the
+  creature *being asked*. Bank is `flags.<ns>.portent.faces` on the Portent
+  **item** — dnd5e stores uses, not faces. Once-per-turn is
+  `flags.<ns>.portentTurn` on the **actor**; out of combat the stamp is
+  `"ooc"` (not unlimited) and `combatStart` clears it. Clock:
+  `portentTimeoutId()` is `"decline"` — a wrong number spent forever is
+  unrecoverable. Identifier `portent` on `type === "feat"`; reject MM /
+  Faerûn Trigger/Response prose (`isMonsterPortent`). Greater Portent
+  (`greater-portent`) only raises the count and is never spent. Do not put
+  Portent in `DICE_MOD_SPECS`. Rest refill is `on_long_rest` in
+  `readRest().triggers`, not `readRest().long` (that one includes `newDay`).
+  Spend happens on the owner's client, same as Lucky. Diagnostics:
+  `noodlrHooks.surveyPortent()` / `noodlrHooks.recordPortent([n, n])`.
+- **Damage-die family is after-roll, not this table** (`src/rules/damage-dice.ts`
+  + `src/system/dnd5e-damage-dice.ts`). Piercer, Empowered Spell, and Inspiration
+  on a damage or healing card. Do not fold them into `DICE_MOD_SPECS` —
+  `rerollKeepNew` refuses anything that is not a d20, and `applyOffer` is
+  verdict-shaped. `rerollDamageDice` is the write: strike the old face, append
+  the new, move `rolls[i].total`. `damageParts` reads those totals, so both
+  apply paths (`damage.ts` `consider`, `saves.ts` `onSaveDamage`) await this
+  **before** they snapshot parts. The chat hook covers auto-damage-off / midi.
+  `inflight` / `done` make the two callers one offer.
+  - **Order on the card:** self first (reroll), then Cutting Words (subtract).
+    Two self rounds at most — Piercer + Empowered on Ice Knife.
+  - **Piercer** (`piercer`): once per turn, on a **hit**, **piercing** only,
+    one lowest unmaxed die. Fail closed when the originating attack cannot be
+    read (`attackHitForDamage` / a filed `null`). Standalone Damage activities
+    are not attacks. OOC is unlimited (empty stamp = not spent — same as Sneak,
+    not Portent's `"ooc"`). The clock may take it. Name (feat, no identifier):
+    `/^\s*(piercer|puncture)\s*$/i`.
+  - **Empowered Spell** (`empowered-spell`): spell damage only
+    (`flags.dnd5e.item.type === "spell"` or activity `cast`). Healing is not
+    damage. N = `min(dice, max(1, cha.mod))`; unreadable Cha → 1. Costs one
+    Sorcery Point (`font-of-magic`). Do not match `empowered-spells` or
+    `empowered-evocation`. A timeout never spends the point.
+  - **Inspiration on damage/healing:** lowest unmaxed die on the card, including
+    healing. Depleting — decline.
+  - **Which die:** lowest eligible face. Skip if already maxed (keep-new can
+    only stay or get worse).
+  - **Cycle:** `damage-dice.ts` must not import `damage.ts`. Pass `{ hit }` from
+    the apply path; scan chat only when the hint is omitted.
+  - Discovery is the same three routes. Re-identified items are never matched
+    by name. Automated combatants are skipped. Diagnostics:
+    `noodlrHooks.surveyDamageDice()`.
+- **Not this pass:** Flash of Genius (no identifier in the shipped packs),
+  Inspiration on a recharge die, a success the player still wants to reroll.
+  Do not start those from a live Ready or a world recompile.
+- Setting `combat.diceMods` split `.npc` / `.pc`, default on. Diagnostics:
+  `noodlrHooks.surveyDiceMods()` / `noodlrHooks.surveyDamageDice()` /
+  `noodlrHooks.surveyLucky()` / `noodlrHooks.surveyPortent()`.
+
 ## What the finished corpus caught (v0.4.0, 2026-08-13)
 
 The first complete `noodlr-rules-corpus` run — 77,039 atoms over nine books — was read against this

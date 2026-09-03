@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.45
+
+**After a fail, a miss, or a damage roll, the sheet is asked — not a special
+case per feature.** A failed save or check, or a missed attack, holds the die
+and offers whatever on that creature can change it: Heroic Inspiration, a
+held Bardic Inspiration die, Peerless Skill, Indomitable, Stroke of Luck,
+Disciplined Survivor, Seeking Spell, Indomitable Might. Discovery is
+identifier first, then a feat name, then `flags.noodlr-hooks-55e.diceMod`.
+Halfling Luck stays the system's (it already rerolls a natural 1). Automated
+combatants are skipped. The clock may take a free option (Indomitable Might)
+and never spends Inspiration, a Bardic die, a use, Focus, or Sorcery.
+
+**Lucky is with the roll.** 2024 spends a Luck Point as you roll: Advantage
+on your own D20 Test, or Disadvantage on an attack against you. The pre-roll
+is vetoed, you are asked, then the same roll is replayed. Initiative is
+skipped. Timeout declines.
+
+**Portent is before the roll.** Recorded faces replace a D20 Test you can
+see, once per turn. Portent registers before Lucky so a spent face is a
+fixed number Advantage is not asked on. Timeout never spends a face.
+
+**Damage dice, after the card posts and before hit points move.** Piercer
+rerolls one piercing die on a hit (free, once per turn; unlimited out of
+combat). Empowered Spell rerolls up to your Charisma modifier in damage dice
+on a spell (one Sorcery Point). Heroic Inspiration can reroll a damage or
+healing die. Cutting Words can subtract from an enemy's damage roll. Self
+first, then Cutting Words. The card is rewritten before anyone applies
+damage.
+
+Flash of Genius, Inspiration on a recharge die, and rerolling a success you
+just dislike stay unbuilt. One switch on the Combat page (`Offer a die…`),
+split for NPCs and PCs, default on.
+
 ## 0.7.44
 
 **A demanded off-turn roll cannot be walked past.** A save, skill check,

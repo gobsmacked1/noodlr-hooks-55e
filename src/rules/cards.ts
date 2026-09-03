@@ -79,6 +79,49 @@ export function originatingId(message: any): string {
   return String(message?.flags?.dnd5e?.originatingMessage ?? "");
 }
 
+/** Sum of every roll total on a damage card, or NaN when none can be read. */
+export function combinedDamageTotal(message: any): number {
+  let sum = 0;
+  let any = false;
+  for (const roll of message?.rolls ?? []) {
+    const n = Number(roll?.total);
+    if (!Number.isFinite(n)) continue;
+    sum += n;
+    any = true;
+  }
+  return any ? sum : NaN;
+}
+
+/** The attack message this damage roll joined to, or null. */
+export function attackMessageOf(damage: any): any {
+  const origin = originatingId(damage);
+  const selfId = String(damage?.id ?? "");
+  const collection = (globalThis as any).game?.messages;
+  const list = Array.isArray(collection) ? collection : (collection?.contents ?? []);
+  for (const msg of list) {
+    if (rollType(msg) !== "attack") continue;
+    if (origin && (String(msg.id) === origin || originatingId(msg) === origin)) return msg;
+    if (selfId && originatingId(msg) === selfId) return msg;
+  }
+  return null;
+}
+
+/**
+ * Did the attack this damage belongs to hit someone?
+ *
+ * `true` / `false` only when the attack card can be read. `null` is "could not tell"
+ * — Piercer fails closed on that, because offering a hit-gated reroll on a miss
+ * (or on a standalone Damage activity) is a free extra die.
+ */
+export function attackHitForDamage(damage: any): boolean | null {
+  const attack = attackMessageOf(damage);
+  if (!attack) return null;
+  const reading = readHits(attack);
+  if (reading.hits.length > 0) return true;
+  if (reading.missed.length > 0) return false;
+  return null;
+}
+
 /**
  * The usage-card id a PENDING roll is about, read the same two ways dnd5e itself does.
  *
@@ -300,6 +343,38 @@ export function readSave(message: any): SaveReading {
     // A bought success is a success even when the DC is unreadable: somebody paid for it explicitly.
     success: forced ? true : rolled,
     forced,
+  };
+}
+
+/** An ability or skill check as it appears in chat: which ability, against what, and whether it made it. */
+export interface CheckReading {
+  ability: string;
+  skill: string;
+  dc: number | null;
+  total: number;
+  success: boolean | null;
+}
+
+/**
+ * Read an ability-check or skill-check message.
+ *
+ * Same DC path as a save (`rolls[0].options.target`). A check with no DC is information, not a
+ * contest — `success` is null rather than a guess, so an after-fail offer cannot fire on it.
+ * Skill id and ability are both stamped when present: a Stealth check is `skill: "ste"` and
+ * `ability: "dex"`.
+ */
+export function readCheck(message: any): CheckReading {
+  const roll: any = message?.rolls?.[0];
+  const flags = message?.flags?.dnd5e?.roll ?? {};
+  const total = Number(roll?.total);
+  const target = Number(roll?.options?.target);
+  const dc = Number.isFinite(target) ? target : null;
+  return {
+    ability: String(flags.ability ?? ""),
+    skill: String(flags.skillId ?? ""),
+    dc,
+    total: Number.isFinite(total) ? total : NaN,
+    success: dc === null || !Number.isFinite(total) ? null : total >= dc,
   };
 }
 

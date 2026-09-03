@@ -45,6 +45,8 @@ import { applyRolledDamage, type DamageEntry } from "./damage";
 import { savesSkip } from "./counterspell";
 import { considerResistance, statusesOnFailedSave } from "./legendary";
 import { considerBarbs } from "./barbs";
+import { considerDiceMods } from "./dice-mod";
+import { considerDamageDice } from "./damage-dice";
 import {
   activityOf,
   damageOnSave,
@@ -421,6 +423,8 @@ function activationForAutoFail(message: any, doc: any): Activation | null {
 
 /** The damage has been rolled. Everything that has saved can be settled; the rest waits. */
 async function onSaveDamage(message: any): Promise<void> {
+  // Rewrite the card before we snapshot parts — settle applies those numbers.
+  await considerDamageDice(message);
   const usageId = originatingId(message);
   const parts = damageParts(message);
   if (!parts.length) return;
@@ -593,8 +597,36 @@ async function dispatchSaveTriggers(act: Activation): Promise<void> {
  * silently, on exactly the creatures where the interaction is most likely to come up.
  */
 async function spoilAndResist(act: Activation): Promise<void> {
+  // Barbs first so a spoiled success becomes a failure the roller can still answer with Indomitable
+  // or Inspiration. The other order spends those on a fail that Barbs then undoes. Resist last:
+  // a bought success is not something a die-mod should then overwrite.
   await spoilSuccesses(act);
+  await offerOwnDiceMods(act);
   await offerResistances(act);
+}
+
+/**
+ * After-fail features on the creature that just failed — Inspiration, Indomitable, Stroke of Luck,
+ * Disciplined Survivor, Indomitable Might. Re-read the card; do not trust the apply's own arithmetic.
+ */
+async function offerOwnDiceMods(act: Activation): Promise<void> {
+  for (const state of act.targets.values()) {
+    if (state.applied || state.success !== false) continue;
+    if (!state.saveMessage) continue;
+    if (readSave(state.saveMessage).forced) continue;
+    const actor = state.doc?.actor;
+    if (!actor) continue;
+
+    const result = await considerDiceMods({
+      kind: "save",
+      message: state.saveMessage,
+      actor,
+      token: state.doc,
+    });
+    if (!result.changed) continue;
+    const after = readSave(state.saveMessage);
+    if (after.success === true) state.success = true;
+  }
 }
 
 /**

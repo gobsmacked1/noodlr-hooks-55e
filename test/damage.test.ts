@@ -5,6 +5,7 @@ import {
   damageOnSave,
   damageParts,
   isHealing,
+  readCheck,
   readHits,
   readSave,
   saveMultiplier,
@@ -101,6 +102,30 @@ test("a save is judged against the DC on the roll, and no DC means no verdict", 
   // cost a creature its hit points. Null is the only honest answer.
   const unjudgeable = readSave({ rolls: [{ total: 19, options: {} }], flags: {} });
   assert.equal(unjudgeable.success, null);
+});
+
+test("a check is judged against the DC on the roll, and no DC means no verdict", () => {
+  const made = readCheck({
+    rolls: [{ total: 14, options: { target: 14 } }],
+    flags: { dnd5e: { roll: { type: "skill", skillId: "ste", ability: "dex" } } },
+  });
+  assert.equal(made.success, true, "a check meets its DC on equal");
+  assert.equal(made.skill, "ste");
+  assert.equal(made.ability, "dex");
+  assert.equal(made.dc, 14);
+
+  const failed = readCheck({
+    rolls: [{ total: 13, options: { target: 14 } }],
+    flags: { dnd5e: { roll: { type: "ability", ability: "str" } } },
+  });
+  assert.equal(failed.success, false);
+  assert.equal(failed.ability, "str");
+
+  // Same hole as a save: BasicRoll#isSuccess is false with no DC. Null, or Inspiration fires on every
+  // uncontested Athletics check the table ever rolls.
+  const unjudgeable = readCheck({ rolls: [{ total: 19, options: {} }], flags: {} });
+  assert.equal(unjudgeable.success, null);
+  assert.equal(unjudgeable.dc, null);
 });
 
 test("what a made save is worth comes off the damage message, defaulting to half", () => {

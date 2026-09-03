@@ -124,6 +124,13 @@ export const COMBAT_SETTINGS = {
    * and the bestiary automatically is the case it serves.
    */
   sneak: "combat.sneak",
+  /**
+   * Per audience. Whether a failed d20 is held open for Heroic Inspiration, Indomitable and the rest.
+   *
+   * Split by the creature that FAILED (or missed), matching Sneak Attack rather than Barbs: this
+   * offers a creature its own resource, so the creature offered owns the column.
+   */
+  diceMods: "combat.diceMods",
   /** Whether condition combat math (adv/disadv, auto-fail, crit-on-hit, incapacitated) is applied. */
   conditions: "combat.conditions",
   /** Per audience. Whether dropping to 0 HP applies Unconscious/Dead and damage-at-0 death failures. */
@@ -166,6 +173,7 @@ export const SPLIT_COMBAT_SETTINGS = [
   COMBAT_SETTINGS.ready,
   COMBAT_SETTINGS.barbs,
   COMBAT_SETTINGS.sneak,
+  COMBAT_SETTINGS.diceMods,
 ] as const;
 
 /** The registered key for one side of a split setting. */

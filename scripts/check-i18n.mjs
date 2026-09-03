@@ -63,6 +63,32 @@ const families = {
   "NOODLRHOOKS.Combat.Gate.Refused": ["Graze", "Miss", "Spent", "Waiting"],
   // Why a readied action woke up. Built from a variable in ready-events.ts, and shown to the player in
   // the release prompt — a missing one reads as the trigger having fired for no reason.
+  // After-fail / after-miss offer labels, assembled from each spec id in dnd5e-dice-mods.ts.
+  "NOODLRHOOKS.DiceMod": [
+    "Inspiration",
+    "InspirationHint",
+    "Indomitable",
+    "IndomitableHint",
+    "StrokeOfLuck",
+    "StrokeOfLuckHint",
+    "DisciplinedSurvivor",
+    "DisciplinedSurvivorHint",
+    "SeekingSpell",
+    "SeekingSpellHint",
+    "IndomitableMight",
+    "IndomitableMightHint",
+    "BardicInspiration",
+    "BardicInspirationHint",
+    "PeerlessSkill",
+    "PeerlessSkillHint",
+    "CuttingWords",
+    "CuttingWordsHint",
+    "InspirationDamageHint",
+    "Piercer",
+    "PiercerHint",
+    "EmpoweredSpell",
+    "EmpoweredSpellHint",
+  ],
   "NOODLRHOOKS.Ready.Why": [
     "Appeared",
     "Attacked",

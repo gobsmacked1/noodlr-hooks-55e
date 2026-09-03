@@ -39,6 +39,8 @@ import { grazeDamage } from "../system/dnd5e-graze";
 import { fireAttackTriggers } from "../capability/attack";
 import { offerReaction } from "./offer";
 import { considerBarbs } from "./barbs";
+import { considerAgainstDiceMods, considerDiceMods } from "./dice-mod";
+import { considerDamageDice } from "./damage-dice";
 import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
 import { offerSneakAttack } from "./sneak";
 import {
@@ -141,8 +143,19 @@ async function consider(message: any, flags: any): Promise<void> {
 
   const kind = rollType(message);
   if (kind === "attack") {
-    const reading = readHits(message);
+    let reading = readHits(message);
     remember(message, reading);
+    if (reading.hits.length === 0 && reading.missed.length > 0) {
+      const token = speakerToken(message?.speaker);
+      const actor = token?.actor ?? message?.speakerActor ?? null;
+      if (actor) {
+        const result = await considerDiceMods({ kind: "attack", message, actor, token });
+        if (result.changed) {
+          reading = readHits(message);
+          remember(message, reading);
+        }
+      }
+    }
     // Registered before anything is awaited, so a damage roll arriving in the same tick still finds it.
     const window = reactionWindow(message, reading).finally(() => {
       for (const key of keysOf(message)) if (windows.get(key) === window) windows.delete(key);
@@ -159,15 +172,18 @@ async function consider(message: any, flags: any): Promise<void> {
   // One press per attack, recorded where a reload and a second client can both see it.
   await noteSpent(message);
 
-  const parts = damageParts(message);
-  if (parts.length === 0) return;
-  if (message?.getFlag?.(MODULE_ID, APPLIED)) return;
-
-  // Anybody still deciding whether they were hit gets to finish first.
+  // Anybody still deciding whether they were hit gets to finish first. Piercer
+  // is hit-gated, so a Shield that turns the swing aside must land before we ask.
   for (const key of keysOf(message)) {
     const open = windows.get(key);
     if (open) await open;
   }
+
+  await considerDamageDice(message, { hit: filedHit(message) });
+
+  const parts = damageParts(message);
+  if (parts.length === 0) return;
+  if (message?.getFlag?.(MODULE_ID, APPLIED)) return;
 
   const resolved = resolveTargets(message);
   if (resolved.silent) return;
@@ -190,6 +206,18 @@ async function consider(message: any, flags: any): Promise<void> {
     parts,
     resolved.unresolved,
   );
+}
+
+/** Filed attack verdict for this damage card, or `undefined` when nothing was filed. */
+function filedHit(message: any): boolean | null | undefined {
+  for (const key of keysOf(message)) {
+    const reading = verdicts.get(key);
+    if (!reading) continue;
+    if (reading.hits.length > 0) return true;
+    if (reading.missed.length > 0) return false;
+    return null;
+  }
+  return undefined;
 }
 
 /**
@@ -230,11 +258,10 @@ function keysOf(message: any): string[] {
  * and lives here, the window falls out of it: read the verdict, ask the creature that was hit, and if the
  * bonus arrives, move it out of `hits` before anything is applied.
  *
- * TWO REACTIONS SHARE ONE WINDOW, and the ORDER IS THE DESIGN. Silvery Barbs is offered first and Shield
- * second, because Barbs attacks the die and Shield attacks the number: a spoiled roll may miss everything,
- * in which case nobody should be invited to spend a slot defending against an attack that no longer lands.
- * The other order would routinely cost the party two slots where one would have done. Both are cast by the
- * defending side, so nothing about this gives the attacker a say in the sequence.
+ * THREE PASSES SHARE ONE WINDOW, and the ORDER IS THE DESIGN. Silvery Barbs first, Cutting Words
+ * second, Shield third. Barbs and Cutting Words both attack the number; a spoiled hit must not be
+ * subtracted, and a subtracted miss must not be Shielded. Shield still attacks the AC. The other
+ * orders spend a slot or a BI die on a roll that no longer lands.
  */
 async function reactionWindow(message: any, reading: HitReading): Promise<void> {
   if (reading.hits.length === 0) return;
@@ -245,6 +272,8 @@ async function reactionWindow(message: any, reading: HitReading): Promise<void> 
   const attacker = speakerToken(message?.speaker);
 
   await barbsWindow(message, reading, attacker);
+  if (reading.hits.length === 0) return;
+  await cuttingWordsWindow(message, reading, attacker);
   if (reading.hits.length === 0) return;
 
   for (const doc of [...reading.hits]) {
@@ -304,6 +333,30 @@ async function barbsWindow(message: any, reading: HitReading, attacker: any): Pr
     victim: reading.hits[0],
   });
   if (!outcome.taken) return;
+
+  const fresh = readHits(message);
+  reading.hits.splice(0, reading.hits.length, ...fresh.hits);
+  reading.missed.splice(0, reading.missed.length, ...fresh.missed);
+  reading.unresolved.splice(0, reading.unresolved.length, ...fresh.unresolved);
+  for (const key of Object.keys(reading.margin)) delete reading.margin[key];
+  Object.assign(reading.margin, fresh.margin);
+}
+
+/**
+ * Cutting Words after Barbs. A spoiled hit must not be subtracted — the Bard would spend
+ * a die and a reaction to worsen a roll that already missed. Re-read; do not infer.
+ */
+async function cuttingWordsWindow(message: any, reading: HitReading, attacker: any): Promise<void> {
+  if (reading.hits.length === 0) return;
+  const actor = attacker?.actor ?? message?.speakerActor ?? null;
+  if (!actor) return;
+  const outcome = await considerAgainstDiceMods({
+    kind: "attack",
+    message,
+    actor,
+    token: attacker,
+  });
+  if (!outcome.changed) return;
 
   const fresh = readHits(message);
   reading.hits.splice(0, reading.hits.length, ...fresh.hits);

@@ -804,6 +804,16 @@ const SNEAK_ROW: Row = {
   ownership: "sneak",
 };
 
+const DICE_MODS_ROW: Row = {
+  id: "diceMods",
+  label: "NOODLRHOOKS.Combat.DiceMods.Name",
+  hint: "NOODLRHOOKS.Combat.DiceMods.Hint",
+  state: "live",
+  setting: C.diceMods,
+  kind: "boolean",
+  ownership: "diceMods",
+};
+
 const READY_ROW: Row = {
   id: "ready",
   label: "NOODLRHOOKS.Combat.Ready.Name",
@@ -860,6 +870,7 @@ const PER_SIDE_STATE: Section = {
         COUNTERSPELL_ROW,
         BARBS_ROW,
         SNEAK_ROW,
+        DICE_MODS_ROW,
         READY_ROW,
       ],
     },
@@ -876,6 +887,7 @@ const PER_SIDE_STATE: Section = {
         COUNTERSPELL_ROW,
         BARBS_ROW,
         SNEAK_ROW,
+        DICE_MODS_ROW,
         READY_ROW,
       ],
     },
@@ -998,7 +1010,8 @@ const PER_SIDE_RESOURCES: Section = {
             "The same switch as Rolling and reporting → Recharge. NPCs only, matching the system: a " +
             "spent breath is already excluded from a planned turn until the die succeeds.",
           state: "system",
-          today: "This module, default automatic and silent. Stands aside if dnd5e's Auto-recharge is on.",
+          today:
+            "This module, default automatic and silent. Stands aside if dnd5e's Auto-recharge is on.",
         },
         {
           id: "legendaryActions",
@@ -1025,8 +1038,7 @@ const PER_SIDE_RESOURCES: Section = {
             "This module does not write the pool and will not add a second refill on turnStart — that would double-fill if dnd5e ever moves the hook. " +
             "A RAW override would mean we take the refill away from the system. Not built. Expected request from tables that want the sheet to read 3/3 during its own turn.",
           state: "planned",
-          today:
-            "dnd5e, incorrectly vs RAW. We follow the system. Override not offered.",
+          today: "dnd5e, incorrectly vs RAW. We follow the system. Override not offered.",
         },
         {
           id: "legendaryResistances",
@@ -1036,7 +1048,8 @@ const PER_SIDE_RESOURCES: Section = {
             "fight-ending status (Stun and kin) or on damage worth the spend; the GM is still asked when they drive it. " +
             "The pool is per day — it does not refill mid-combat or between encounters, only on a long rest.",
           state: "system",
-          today: "This module. Automated creatures spend; a GM-driven clock still declines. Long rest only — we never refill in combat.",
+          today:
+            "This module. Automated creatures spend; a GM-driven clock still declines. Long rest only — we never refill in combat.",
         },
         {
           id: "lairActions",
@@ -1065,18 +1078,117 @@ const PER_SIDE_RESOURCES: Section = {
           id: "heroicInspiration",
           label: "Heroic Inspiration",
           hint:
-            "dnd5e stores the flag on the sheet and spending it is a click. Awarding it on a natural 1 " +
-            "under 2024 rules, and reminding a player they are holding one, are not built.",
+            "2024: expend after rolling any die, must use the new roll. Offered on a failed save or " +
+            "check, a missed attack, and the lowest unmaxed die on a damage or healing card. A " +
+            "success the player still wants to reroll, and recharge dice, are not offered. Awarding " +
+            "it on a natural 1 is still the GM.",
+          state: "live",
+          today: "Offered after a fail, a miss, or a damage/healing roll when combat.diceMods is on.",
+        },
+        {
+          id: "halflingLuck",
+          label: "Halfling Luck",
+          hint:
+            "Species trait (2024 identifier luck; 2014 identifier lucky on type race). dnd5e already " +
+            'rerolls a natural 1 via D20Die#applyFlag("halflingLucky"). We do not offer it. The Lucky ' +
+            "feat is a different feature that happens to share the 2014 identifier.",
           state: "system",
-          today: "dnd5e holds the flag; nothing awards or reminds.",
+          today: "dnd5e rerolls a 1 automatically (r1=1).",
         },
         {
           id: "bardicInspiration",
           label: "Bardic Inspiration",
           hint:
-            "A limited-use feature with a die, fully modelled by the system. Applying it to a roll is " +
-            "manual.",
-          state: "system",
+            "2024: the holder adds the die when they fail a D20 Test. Discovered from an Inspired " +
+            "Active Effect (origin identifier bardic-inspiration, or named Inspired with Bardic " +
+            "prose). Spending deletes that effect. The Bard's own feat is not an offer unless they " +
+            "also wear Inspired. Die size is read from the origin Bard's scale — unreadable is a refusal.",
+          state: "live",
+          today:
+            "Offered after a fail or miss when combat.diceMods is on and an Inspired AE is live.",
+        },
+        {
+          id: "peerlessSkill",
+          label: "Peerless Skill",
+          hint:
+            "2024 College of Lore: when you fail an ability check or attack roll, expend one Bardic " +
+            "Inspiration use and add the die. If you still fail, the use is not expended.",
+          state: "live",
+          today:
+            "Offered after a failed check or a missed attack. Saves are not in the printed trigger.",
+        },
+        {
+          id: "luckyFeat",
+          label: "Lucky feat (2024)",
+          hint:
+            "With-roll: spend a Luck Point for Advantage on your D20 Test, or impose Disadvantage on " +
+            'an attack against you. Not the 2014 "see the roll" version. Own hook (preRollD20Test), ' +
+            "not the after-fail table. Identifier lucky is believed only on type feat — Halfling's " +
+            "2014 race trait shares that identifier and is already the system's r1=1.",
+          state: "live",
+          today:
+            "Offered on preRoll when combat.diceMods is on. A timeout never spends a Luck Point.",
+        },
+        {
+          id: "portent",
+          label: "Portent",
+          hint:
+            "2024 Diviner: after a Long Rest, record two d20s (three with Greater Portent) and " +
+            "replace a D20 Test made by you or a creature you can see with one of those numbers. " +
+            "You must choose before the roll. Once per turn. Own hook (preRollD20Test), registered " +
+            "before Lucky so a spent face is not also offered Advantage. Monster Portent " +
+            "(Trigger / Response) is a different feature and is not matched. A timeout never " +
+            "spends a banked number.",
+          state: "live",
+          today:
+            "Offered on preRoll when combat.diceMods is on and the bank has a face. " +
+            "Initiative is included; replay uses rollInitiativeDialog. " +
+            "noodlrHooks.recordPortent([n, n]) writes the bank on the selected token.",
+        },
+        {
+          id: "cuttingWords",
+          label: "Cutting Words",
+          hint:
+            "2024: a creature you can see within 60 ft makes a damage roll or succeeds on an ability " +
+            "check or attack roll. Attack success, check success, and damage rolls. Saves are not. " +
+            "Reaction plus one Bardic Inspiration use. Opposed only. Offered after Silvery Barbs on " +
+            "an attack, and after Piercer / Empowered Spell / Inspiration on a damage card, so a " +
+            "spoiled or rerolled number is the one that is subtracted.",
+          state: "live",
+          today:
+            "Offered on a made attack or check, or a damage roll, when combat.diceMods is on. Saves are not.",
+        },
+        {
+          id: "piercer",
+          label: "Piercer",
+          hint:
+            "2024: once per turn, when you hit with a piercing weapon, reroll one of the damage " +
+            "dice. You must use the new roll. Identifier piercer. Name (feat only, no identifier): " +
+            "Piercer or Puncture. Fail closed when the originating attack cannot be read as a hit. " +
+            "Unlimited out of combat — there is no turn to lock. The clock may take it when the " +
+            "chosen die is not already maxed.",
+          state: "live",
+          today: "Offered on a piercing damage card after a hit when combat.diceMods is on.",
+        },
+        {
+          id: "empoweredSpell",
+          label: "Empowered Spell",
+          hint:
+            "2024 Metamagic: when you roll damage for a spell, reroll a number of the damage dice " +
+            "up to your Charisma modifier (minimum 1) and use the new rolls. Costs one Sorcery " +
+            "Point (font-of-magic). Identifier empowered-spell — not empowered-spells (2014) or " +
+            "empowered-evocation. Healing is not damage. A timeout never spends the point.",
+          state: "live",
+          today: "Offered on a spell's damage card when combat.diceMods is on and a Sorcery Point remains.",
+        },
+        {
+          id: "flashOfGenius",
+          label: "Flash of Genius",
+          hint:
+            "Ally or self: add Intelligence modifier to a failed check or save. No identifier in the " +
+            "shipped dnd5e packs (Tasha's Artificer). Do not invent one.",
+          state: "planned",
+          today: "Not built. No flash-of-genius item in the stock packs.",
         },
       ],
     },

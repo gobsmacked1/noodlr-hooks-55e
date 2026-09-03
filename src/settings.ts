@@ -186,6 +186,7 @@ export function registerCombatSettings(): void {
   split(COMBAT_SETTINGS.ready, "Ready", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.barbs, "Barbs", Boolean, { npc: true, pc: true });
   split(COMBAT_SETTINGS.sneak, "Sneak", Boolean, { npc: true, pc: true });
+  split(COMBAT_SETTINGS.diceMods, "DiceMods", Boolean, { npc: true, pc: true });
   world(COMBAT_SETTINGS.legendaryResistance, "LegendaryResistance", Boolean, true);
   world(COMBAT_SETTINGS.conditions, "Conditions", Boolean, true);
   split(COMBAT_SETTINGS.dying, "Dying", Boolean, { npc: true, pc: true });
@@ -594,6 +595,11 @@ export function isBarbsEnabled(subject: unknown): boolean {
  */
 export function isSneakEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.sneak, subject);
+}
+
+/** Is the after-fail / after-miss dice-mod offer on for this creature? */
+export function isDiceModsEnabled(subject: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.diceMods, subject);
 }
 
 /**
