@@ -179,6 +179,7 @@ body.noodlr-compact-cards .message p.supplement {
 
 .noodlr-streamlined .dice-formula,
 .noodlr-streamlined .dice-tooltip,
+.noodlr-streamlined .dice-tooltip-collapser,
 .noodlr-streamlined .dice-total .icons,
 .noodlr-streamlined p.supplement {
   display: none !important;

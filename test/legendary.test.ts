@@ -2,7 +2,12 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import { readSave } from "../src/rules/cards";
-import { decideResistance, statusesOnFailedSave, worthAsking } from "../src/rules/legendary";
+import {
+  contestOfFailedSave,
+  decideResistance,
+  statusesOnFailedSave,
+  worthAsking,
+} from "../src/rules/legendary";
 import { canResist, legendaryResistances } from "../src/system/dnd5e-legendary";
 
 // Three things are pinned here, and each of them is a way this feature can fail silently rather than loudly:
@@ -126,6 +131,66 @@ test("a fight-ending status outranks a small damage number", () => {
       actor: creature(180),
       avoided: 14,
       statuses: ["stunned"],
+      automated: true,
+    }),
+    "spend",
+  );
+});
+
+test("an automated creature spends on Grapple and takes a Shove", () => {
+  const beholder = creature(180);
+  assert.equal(
+    decideResistance({
+      actor: beholder,
+      avoided: null,
+      statuses: ["grappled"],
+      automated: true,
+    }),
+    "spend",
+  );
+  assert.equal(
+    decideResistance({
+      actor: beholder,
+      avoided: null,
+      statuses: ["prone"],
+      activityName: "Shove",
+      automated: true,
+    }),
+    "decline",
+  );
+  assert.equal(
+    decideResistance({
+      actor: beholder,
+      avoided: null,
+      statuses: ["prone"],
+      automated: true,
+    }),
+    "decline",
+  );
+});
+
+test("2024 Unarmed Strike folds Grapple and Shove — treat the fold as Grapple", () => {
+  // Both on-fail AEs sit on one activity. Missing a Grapple is worse than
+  // spending on a Shove through the same button.
+  assert.equal(contestOfFailedSave(["grappled", "prone"], "Grapple/Shove"), "grapple");
+  assert.equal(
+    decideResistance({
+      actor: creature(180),
+      avoided: null,
+      statuses: ["grappled", "prone"],
+      activityName: "Grapple/Shove",
+      automated: true,
+    }),
+    "spend",
+  );
+});
+
+test("a Banishment with no statuses is still worth a resistance", () => {
+  assert.equal(
+    decideResistance({
+      actor: creature(180),
+      avoided: null,
+      statuses: [],
       automated: true,
     }),
     "spend",

@@ -707,6 +707,7 @@ async function offerResistances(act: Activation): Promise<void> {
         spell: act.source,
         avoided,
         statuses: statusesOnFailedSave(item, activity),
+        activityName: String(activity?.name ?? ""),
         automated: wePlayToken(state.doc),
       });
     } finally {

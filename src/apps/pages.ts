@@ -1052,8 +1052,10 @@ const PER_SIDE_RESOURCES: Section = {
           label: "Legendary resistances",
           hint:
             "The count is on the sheet and decrements when spent. A creature we play spends one on a " +
-            "fight-ending status (Stun and kin) or on damage worth the spend; the GM is still asked when they drive it. " +
-            "The pool is per day — it does not refill mid-combat or between encounters, only on a long rest.",
+            "fight-ending status (Stun and kin), on being Grappled, or on damage worth the spend. " +
+            "A Shove is taken — a slide is not a resistance. The chat card says Resisted when one is spent. " +
+            "The GM is still asked when they drive it. The pool is per day — it does not refill mid-combat " +
+            "or between encounters, only on a long rest.",
           state: "system",
           today:
             "This module. Automated creatures spend; a GM-driven clock still declines. Long rest only — we never refill in combat.",

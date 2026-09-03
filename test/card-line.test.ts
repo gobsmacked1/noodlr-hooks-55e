@@ -25,6 +25,7 @@ const L = {
   miss: "Miss",
   success: "Success",
   failure: "Failure",
+  resisted: "Resisted",
 };
 
 const title = (type: string) => type.charAt(0).toUpperCase() + type.slice(1);
@@ -82,6 +83,15 @@ test("saves and checks never auto-succeed or auto-fail on 20 or 1", () => {
   assert.equal(
     formatContestLine({ face: 1, modifiers: 4, kind: "success", labels: L }),
     "1    +4    (Success)",
+  );
+});
+
+test("a bought success is Resisted, not Success — the die still failed", () => {
+  assert.equal(contestKind(true, true), "resisted");
+  assert.equal(contestKind(false, true), "resisted");
+  assert.equal(
+    formatContestLine({ face: 5, modifiers: 3, kind: "resisted", labels: L }),
+    "5    +3    (Resisted)",
   );
 });
 

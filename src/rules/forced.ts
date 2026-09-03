@@ -47,6 +47,7 @@ import {
   itemOf,
   masteryOf,
   readHits,
+  readSave,
   speakerToken,
   tokenFromActorUuid,
   tokenFromTokenUuid,
@@ -377,10 +378,12 @@ async function fromAttack(message: any): Promise<void> {
  * off the sheet is genuinely unattributable and is left alone.
  */
 async function fromSave(message: any): Promise<void> {
-  const roll: any = message?.rolls?.[0];
-  const dc = Number(roll?.options?.target);
-  if (!Number.isFinite(dc)) return; // No DC means no verdict; `isFailure` would read false regardless.
-  if (!roll.isFailure) return;
+  const verdict = readSave(message);
+  if (verdict.dc === null) return;
+  // `roll.isFailure` is arithmetic only and ignores a legendary resistance.
+  // A bought Success is a Success — shoving after that is the Beholder
+  // sliding 5 ft for a save it already paid to undo.
+  if (verdict.success !== false) return;
 
   const originId = String(message?.flags?.dnd5e?.originatingMessage ?? "");
   if (!originId) return;

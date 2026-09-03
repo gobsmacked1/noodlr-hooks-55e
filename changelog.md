@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.50
+
+**Legendary Resistance no longer spends on a Shove.** A creature this module plays
+still spends automatically on a fight-ending status, on being Grappled, or on
+damage worth the spend. A Shove (prone, or a shove-named activity) is taken —
+a five-foot slide is not a resistance. 2024 Unarmed Strike folds Grapple and
+Shove onto one activity; that fold is treated as Grapple so a real lock-down
+is never missed. A bought success is labelled **Resisted** on the chat card
+for the player and the GM, not Success. Forced movement now honours that
+bought success instead of shoving after the save was undone.
+
+**Save activities roll their damage on an automated turn.** Disintegration Ray
+(and Fireball from an NPC) posted the save and never the damage card, because
+the system leaves that button for after the save and nobody pressed it.
+Charm Ray has no damage parts and is unchanged.
+
+**Leftover collapse carets on streamlined cards are hidden.** The tooltip they
+used to open is already gone.
+
 ## 0.7.49
 
 **The tag on the weapon is not Weapon Mastery.** The 2024 sentence is:

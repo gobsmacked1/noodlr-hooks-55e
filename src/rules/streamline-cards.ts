@@ -63,7 +63,10 @@ function decorate(message: any, incoming: any): void {
     if (!canSeeContent(message)) return;
     const type = rollType(message);
     if (type === "attack") paintAttack(message, html);
-    else if (type === "save" || type === "death" || type === "concentration") paintContest(message, html, readSave(message).success);
+    else if (type === "save" || type === "death" || type === "concentration") {
+      const reading = readSave(message);
+      paintContest(message, html, reading.success, reading.forced);
+    }
     else if (type === "skill" || type === "ability") paintContest(message, html, readCheck(message).success);
     else if (type === "damage" || type === "healing") paintDamage(message, html);
   } catch (err) {
@@ -107,6 +110,7 @@ function labels(): CardLabels {
     miss: loc("NOODLRHOOKS.Cards.Miss", "Miss"),
     success: loc("NOODLRHOOKS.Cards.Success", "Success"),
     failure: loc("NOODLRHOOKS.Cards.Failure", "Failure"),
+    resisted: loc("NOODLRHOOKS.Cards.Resisted", "Resisted"),
   };
 }
 
@@ -180,10 +184,10 @@ function localizeMasterySuffix(suffix: string, key: string): string {
   return suffix.replaceAll(`(${fallback})`, `(${pretty})`);
 }
 
-function paintContest(message: any, html: HTMLElement, success: boolean | null): void {
+function paintContest(message: any, html: HTMLElement, success: boolean | null, forced = false): void {
   const roll = message.rolls?.[0];
   const { face, modifiers } = readD20Breakdown(roll);
-  const kind = canSeeChallenge(message) ? contestKind(success) : "plain";
+  const kind = canSeeChallenge(message) ? contestKind(success, forced) : "plain";
   paintD20Total(html, face, formatContestLine({ face, modifiers, kind, labels: labels() }));
   hideMath(html);
 }
@@ -328,7 +332,9 @@ function paintPlainTotal(html: HTMLElement, line: string): void {
 }
 
 function hideMath(html: HTMLElement, opts: { keepFirstTotal?: boolean } = {}): void {
-  for (const el of html.querySelectorAll<HTMLElement>(".dice-formula, .dice-tooltip")) {
+  for (const el of html.querySelectorAll<HTMLElement>(
+    ".dice-formula, .dice-tooltip, .dice-tooltip-collapser",
+  )) {
     el.hidden = true;
   }
   for (const el of html.querySelectorAll<HTMLElement>(".dice-total .icons")) {

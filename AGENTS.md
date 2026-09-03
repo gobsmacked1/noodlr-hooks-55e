@@ -3584,6 +3584,10 @@ button press.
   creatures we are playing, and `finishActivity` skips the subsequent call, awaits the attack, and
   rolls damage so the turn cannot advance while the dice are still a window. A player's roll is
   never silenced.
+  **A Save activity with `damage.parts` is rolled here too** (Disintegration Ray, Fireball).
+  The system leaves that button for after the save; nobody presses it on an automated turn,
+  so the table saw the save and never the damage (Beholder Eye Rays, 2026-09-03). Charm Ray
+  has no parts and is skipped. Do not expand this to a player-cast Fireball sitting unpressed.
 - **`if (!rollerForActor(actor))` on concentration's `preUpdateActor` is the OTHER use of a truthy
   election, and it is correct.** That line asks "is anyone elected to roll instead?" so the stock
   button can be suppressed. Flipping it to `isRollerFor` would leave the system's prompt up on every
@@ -3860,9 +3864,20 @@ harmless while a human was also applying the damage by hand, because the same pa
 - **The default is to decline when the GM is driving the creature**, which is the prompt layer's one rule
  (a timeout may spend a renewing resource and never a depleting one) applied to the most depleting
  resource in the game. **When this module is playing the creature, `decideResistance` spends** on a
- `MUST_RESIST` status (stunned / paralyzed / petrified / unconscious / incapacitated) or on damage
- `worthAsking` already prices — a Beholder that "takes" Stunning Strike because a six-second dialog
- timed out is the creature playing badly, not the GM being protected (Monk vs Beholder, 2026-08-25).
+ `MUST_RESIST` status (stunned / paralyzed / petrified / unconscious / incapacitated), on
+ **Grapple**, or on damage `worthAsking` already prices — a Beholder that "takes" Stunning Strike
+ because a six-second dialog timed out is the creature playing badly, not the GM being protected
+ (Monk vs Beholder, 2026-08-25). **A Shove is taken.** A 5-foot slide or knockdown is not a
+ resistance (user, 2026-09-03). Hazard-into-a-pit is a later check: dry-run 5 ft through
+ `constrainMovementPath` + `hazardsUnder` — not built. `contestOfFailedSave` is the split.
+ 2024 Unarmed Strike folds Grapple and Shove onto one activity (both on-fail AEs); the fold
+ is treated as Grapple so a real lock-down is never missed. A named `Shove` activity, or
+ `prone` without `grappled`, declines. Do not put `grappled` in `MUST_RESIST` — that set is
+ fight-ending, and the fold would then spend on every Shove through the same button.
+- **`fromSave` in `forced.ts` reads `readSave`, never `roll.isFailure`.** Arithmetic ignores
+ `forceSuccess`. After a bought Success the Beholder was still shoved 5 ft (2026-09-03).
+- **The chat card says Resisted**, not Success, when a resistance undid the die. Face and
+ modifier stay; the verdict is the distinction. `contestKind(success, forced)`.
  A fight-ending status outranks a small damage number, because the 17:27 log priced a save as
  "14 damage" and declined. Legendary *actions* (Eye Rays at the end of someone else's turn) are
  `tactics/legendary-act.ts` — one option per other turn, same `isUnableToAct` gate.
@@ -4726,7 +4741,11 @@ that fires *after* dnd5e's five passes — decorating on core `renderChatMessage
   colour — labels follow the face, not `isCritical`.
 - **Colour only a natural 20 (green) or a natural 1 (red).** Everything else inherits the
   theme. 2024 saves and checks do not auto-succeed or auto-fail; a 20 that failed is
-  `20    +4    (Failure)` with a green 20.
+  `20    +4    (Failure)` with a green 20. A legendary resistance is `(Resisted)`, not
+  `(Success)` — the face still failed.
+- **Hide `.dice-tooltip-collapser`, not only `.dice-tooltip`.** dnd5e wraps the breakdown
+  in a caret that no longer expands anything once the tooltip is gone. Leave
+  `.description.collapsible` on the card header alone — those chevrons still work.
 - **Blind is not overridden.** `isContentVisible === false` leaves the system's hidden card.
   `attackRollVisibility === "none"` and `shouldDisplayChallenge === false` still hide the
   verdict from players; the GM always sees it. Nick does not leak a hit.

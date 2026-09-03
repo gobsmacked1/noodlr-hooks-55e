@@ -221,13 +221,16 @@ async function finishActivity(
       await activity.rollDamage({}, silent, follow);
     }
   } else if (
-    (kind === "heal" || kind === "damage") &&
+    (kind === "heal" || kind === "damage" || kind === "save") &&
     typeof activity.rollDamage === "function" &&
     hasParts
   ) {
-    // Heal/Damage activities also fire an una waited subsequent roll. A Save activity
-    // has `rollDamage` too (Fireball) and the system leaves that button for after the
-    // save — do not press it here.
+    // Heal/Damage fire an unawaited subsequent roll. A Save activity also has
+    // `rollDamage` (Fireball, Disintegration Ray) and the system leaves that
+    // button for after the save — nobody presses it on an automated turn, so
+    // the table saw the save and never the damage. Charm Ray has no parts and
+    // is skipped. Auto-saves then settle the card the same way a Bite's damage
+    // card already does.
     await activity.rollDamage({}, silent, follow);
   }
   return results;

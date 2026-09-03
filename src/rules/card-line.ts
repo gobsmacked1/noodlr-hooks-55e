@@ -17,7 +17,7 @@
 export const COL = "    ";
 
 export type AttackKind = "fumble" | "crit" | "hit" | "miss" | "plain";
-export type ContestKind = "success" | "failure" | "plain";
+export type ContestKind = "success" | "failure" | "resisted" | "plain";
 export type FaceColor = "nat20" | "nat1" | "none";
 
 export interface D20Breakdown {
@@ -33,6 +33,7 @@ export interface CardLabels {
   miss: string;
   success: string;
   failure: string;
+  resisted: string;
 }
 
 export interface DamagePartLine {
@@ -115,7 +116,11 @@ export function attackKind(face: number | null, hit: boolean | null): AttackKind
   return "plain";
 }
 
-export function contestKind(success: boolean | null): ContestKind {
+export function contestKind(success: boolean | null, forced = false): ContestKind {
+  // A legendary resistance undoes a failed save. That is not the same as rolling
+  // high enough — the card has to say so, or the table cannot tell a 8 vs DC 20
+  // from a real Success.
+  if (forced) return "resisted";
   if (success === true) return "success";
   if (success === false) return "failure";
   return "plain";
@@ -147,15 +152,17 @@ export function formatContestLine(input: {
   face: number | null;
   modifiers: number;
   kind: ContestKind;
-  labels: Pick<CardLabels, "success" | "failure">;
+  labels: Pick<CardLabels, "success" | "failure" | "resisted">;
 }): string {
   const face = input.face === null ? "?" : input.face;
   const verdict =
-    input.kind === "success"
-      ? `(${input.labels.success})`
-      : input.kind === "failure"
-        ? `(${input.labels.failure})`
-        : "";
+    input.kind === "resisted"
+      ? `(${input.labels.resisted})`
+      : input.kind === "success"
+        ? `(${input.labels.success})`
+        : input.kind === "failure"
+          ? `(${input.labels.failure})`
+          : "";
   return joinColumns(face, formatSigned(input.modifiers), verdict);
 }
 

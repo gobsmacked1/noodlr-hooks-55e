@@ -64,6 +64,18 @@ export const MUST_RESIST = new Set([
   "incapacitated",
 ]);
 
+/**
+ * What kind of failed save this is, for the spend/decline split.
+ *
+ * Grapple is automatic when we play the creature — being locked down is what a
+ * resistance is for. Shove (prone, or a shove-named activity with no grapple)
+ * is not: a 5-foot slide or a knockdown is cheap unless a later hazard check
+ * says otherwise. 2024 Unarmed Strike folds both onto one activity, so both
+ * statuses appear; that fold is treated as Grapple so a real grapple is never
+ * missed. A world that splits them into named activities gets the split.
+ */
+export type SaveContest = "must" | "grapple" | "shove" | "other";
+
 /** What `decideResistance` tells `considerResistance` to do. */
 export type ResistDecision = "spend" | "ask" | "decline";
 
@@ -85,6 +97,8 @@ export interface ResistanceCase {
   avoided: number | null;
   /** Statuses the failed save would apply, read off the activity's on-fail effects. */
   statuses?: string[];
+  /** Activity title, used to split Grapple from Shove on a folded Unarmed Strike. */
+  activityName?: string;
   /** True when this module is playing the creature this fight — we decide, we do not ask. */
   automated?: boolean;
 }
@@ -114,18 +128,24 @@ export async function considerResistance(request: ResistanceCase): Promise<boole
       actor: request.actor,
       avoided: request.avoided,
       statuses: request.statuses ?? [],
+      activityName: request.activityName ?? "",
       automated: Boolean(request.automated),
     });
     if (decision === "decline") {
+      const contest = contestOfFailedSave(request.statuses ?? [], request.activityName ?? "");
       log(
-        `legendary resistance: ${request.name} failed, but ${describeStake(request)} is not worth a resistance`,
+        contest === "shove"
+          ? `legendary resistance: ${request.name} takes the Shove — a slide is not worth a resistance`
+          : `legendary resistance: ${request.name} failed, but ${describeStake(request)} is not worth a resistance`,
       );
       return false;
     }
 
     if (decision === "spend") {
       if (!(await spendResistance(request.actor, request.message))) return false;
-      const why = (request.statuses ?? []).filter((s) => MUST_RESIST.has(s)).join(", ");
+      const why = (request.statuses ?? [])
+        .filter((s) => MUST_RESIST.has(s) || s === "grappled")
+        .join(", ");
       log(
         `legendary resistance: ${request.name} spends one on ${request.spell || "it"}${
           why ? ` (${why})` : ""
@@ -185,10 +205,40 @@ export function decideResistance(input: {
   avoided: number | null;
   statuses: string[];
   automated: boolean;
+  activityName?: string;
 }): ResistDecision {
-  const fightEnding = input.statuses.some((s) => MUST_RESIST.has(s));
-  if (!fightEnding && !worthAsking(input.actor, input.avoided)) return "decline";
+  const contest = contestOfFailedSave(input.statuses, input.activityName);
+  // A shove is not worth a resistance. Hazard-into-a-pit is a later check; until
+  // that exists, decline is the stated default (user, 2026-09-03).
+  if (contest === "shove") return "decline";
+  const fightEnding = contest === "must";
+  const grappled = contest === "grapple";
+  if (!fightEnding && !grappled && !worthAsking(input.actor, input.avoided)) return "decline";
   return input.automated ? "spend" : "ask";
+}
+
+/**
+ * Classify a failed save so Grapple spends and Shove does not.
+ *
+ * Exported so the fold (both statuses on one Unarmed Strike activity) can be
+ * pinned rather than rediscovered the next time a Beholder is shoved.
+ */
+export function contestOfFailedSave(statuses: string[], activityName = ""): SaveContest {
+  const set = new Set(statuses.map((s) => String(s ?? "").toLowerCase()));
+  if ([...MUST_RESIST].some((s) => set.has(s))) return "must";
+
+  const name = String(activityName ?? "").trim();
+  const namedGrapple = /^\s*grapple\s*$/i.test(name);
+  const namedShove = /^\s*shove\s*$/i.test(name);
+  if (namedGrapple) return "grapple";
+  if (namedShove) return "shove";
+
+  const grappled = set.has("grappled");
+  const prone = set.has("prone");
+  if (grappled) return "grapple";
+  if (prone) return "shove";
+  if (/shove/i.test(name) && !/grapple/i.test(name)) return "shove";
+  return "other";
 }
 
 /**
@@ -273,6 +323,23 @@ export function surveyLegendary(): unknown {
           actor,
           avoided: null,
           statuses: ["stunned"],
+          automated: true,
+        })
+      : null,
+    onGrappleIfAutomated: actor
+      ? decideResistance({
+          actor,
+          avoided: null,
+          statuses: ["grappled"],
+          automated: true,
+        })
+      : null,
+    onShoveIfAutomated: actor
+      ? decideResistance({
+          actor,
+          avoided: null,
+          statuses: ["prone"],
+          activityName: "Shove",
           automated: true,
         })
       : null,
