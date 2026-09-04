@@ -9,9 +9,12 @@
 // The triggers implemented here were chosen because they can be detected with certainty from core:
 //
 //   1. SOMEONE LEFT MY REACH — `moveToken`, which hands over the whole route: where the move began, the
-//      waypoints it passed through, and the action each one used. The route is walked rather than
-//      compared end to end, because leaving reach provokes even when the creature finishes back inside
-//      it, and a `displace` waypoint is a teleport, which provokes nothing at all.
+//      waypoints it passed through, and the action each one used. Halt (Sentinel) still walks that
+//      planned route, because remaining waypoints must pause before they play. Offers do not: Foundry
+//      commits `_source` (and fires this hook) at the start of a slide, so a planned destination near
+//      the Monk would otherwise start their six-second clock while the Beholder is still across the
+//      map. Offers follow the sprite in `core/visible-move.ts`. A `displace` is a teleport and
+//      provokes nothing.
 //   2. I WAS HURT AND IT IS NOT MY TURN — a hit-point decrease on the actor. This is as system-agnostic
 //      as anything gets: every system tracks hit points, and none of them hide a decrease.
 //
@@ -66,6 +69,8 @@ import {
   shouldHoldMove,
 } from "./move-hold";
 import { noteOpportunitySwing } from "./oa-swing";
+import { tokenIsMoving } from "../core/settle";
+import { watchOrigin, watchVisibleMove, type VisiblePoint } from "../core/visible-move";
 
 /** Mover id -> where it was, captured before a bare document update lands. */
 const departing = new Map<string, { x: number; y: number }>();
@@ -78,6 +83,10 @@ const wounded = new Map<string, number>();
 
 /** One `provoke` at a time so per-waypoint `moveToken` cannot stack dialogs. */
 let provokeQueue: Promise<void> = Promise.resolve();
+
+/** Mover id -> Date.now() until which a later waypoint must not re-offer a finished watch. */
+const watchedRest = new Map<string, number>();
+const WATCHED_REST_MS = 2000;
 
 /** Combatant whose turn last began — their reach-reaction claims refresh with their reaction. */
 let lastTurnCombatant = "";
@@ -98,6 +107,7 @@ export function registerReactionHooks(): void {
   Hooks.on("deleteCombat", () => {
     departing.clear();
     wounded.clear();
+    watchedRest.clear();
     clearAllProvokes();
     resetOfferLock();
     lastTurnCombatant = "";
@@ -112,10 +122,8 @@ export function registerReactionHooks(): void {
   });
 
   // `moveToken` carries the whole route: `movement.origin`, `movement.passed.waypoints`, and the action
-  // each waypoint used. That matters for two rules, not just for convenience. A creature that steps out
-  // of reach and back again inside one move still provokes, which a simple before-and-after comparison
-  // misses entirely. And a teleport provokes nothing, which is only knowable from the waypoint's action.
-  // Neither hook is awaited by core, so nothing here may block it.
+  // each waypoint used. Halt still walks that planned path. Offers wait for the sprite — see
+  // `provoke()`. Neither hook is awaited by core, so nothing here may block it.
   //
   // Core fires this PER WAYPOINT. Two overlapping `provoke()` both see an enter and both pass
   // `hasReaction` until the player answers. Queue them, and claim the (watcher, mover, kind)
@@ -606,6 +614,13 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
       return;
     }
 
+    const moverId = String(moverDoc?.id ?? "");
+    const restUntil = watchedRest.get(moverId) ?? 0;
+    if (restUntil > Date.now() && !tokenIsMoving(moverDoc) && !tokenIsMoving(mover)) {
+      log(`reaction: ${who} was already watched to rest — a later waypoint does not re-offer`);
+      return;
+    }
+
     // A standing trait — Flyby, Agile — is checked here rather than beside Disengage because Flyby's
     // exemption is conditional on HOW the creature left, and the waypoints are the only record of that.
     const standing = standingExemption(moverDoc?.actor);
@@ -614,75 +629,35 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
 
     let left = 0;
     let entered = 0;
-    const moverId = String(moverDoc?.id ?? "");
-    for (const watcher of watchers) {
-      const events = moveEvents(watcher, route, moverDoc);
-      if (events.includes("leave")) left++;
-      if (events.includes("enter")) entered++;
-
-      const watcherId = String(watcher.combatant?.id ?? "");
-      for (const event of events) {
-        // One reaction until this creature's next turn, no matter how many combatants walked past.
-        if (!hasReaction(watcher.combatant)) {
-          log(`reaction: ${watcher.combatant?.name} has already spent its reaction`);
-          break;
-        }
-
-        if (event === "leave") {
-          if (exempt) {
-            log(
-              `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
-            );
-            continue;
-          }
-          if (disengaged) {
-            log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
-            continue;
-          }
-          if (watcher.automated && withholds(watcher.combatant)) continue;
-          if (!claimProvoke(watcherId, moverId, "leave")) {
-            log(`reaction: ${watcher.combatant?.name} already had its chance at ${who} leaving`);
-            continue;
-          }
-          if (!watcher.automated) {
-            const taken = await ask(watcher.combatant, watcher.token, mover, "opportunity");
-            if (taken && (await settleLeave(moverDoc))) {
-              stopped = true;
-              await haltMovement(moverDoc);
-              return;
-            }
-            if (taken) break;
-            continue;
-          }
-          await strike(watcher, mover, "as it slips away", undefined, "opportunity");
-          if (await settleLeave(moverDoc)) {
+    const start = watchOrigin(moverDoc, route[0]);
+    log(`reaction: ${who} — watching the sprite, not the planned destination`);
+    await watchVisibleMove(moverDoc, start, {
+      shouldStop: () => stopped,
+      onStep: async (from: VisiblePoint, to: VisiblePoint) => {
+        const segment = [from, to];
+        for (const watcher of watchers) {
+          const events = moveEvents(watcher, segment, moverDoc);
+          if (events.includes("leave")) left++;
+          if (events.includes("enter")) entered++;
+          const outcome = await offerAlong(
+            watcher,
+            events,
+            moverDoc,
+            mover,
+            who,
+            Boolean(exempt),
+            disengaged,
+            standing,
+          );
+          if (outcome === "halt") {
             stopped = true;
             await haltMovement(moverDoc);
             return;
           }
-          break;
         }
-
-        // Polearm Master's Reactive Strike is not an Opportunity Attack. Disengage and Flyby name
-        // OAs; they do not shut this off. The printed trigger is entering the polearm's reach.
-        // Once per enemy combatant until the watcher's next turn — a Large walk fires
-        // `moveToken` per square, and each remaining-path event still contains the enter.
-        if (event === "enter" && watcher.enterAction) {
-          if (watcher.automated && withholds(watcher.combatant)) continue;
-          if (!claimProvoke(watcherId, moverId, "enter")) {
-            log(`reaction: ${watcher.combatant?.name} already had its Reactive Strike at ${who}`);
-            continue;
-          }
-          if (!watcher.automated) {
-            const taken = await ask(watcher.combatant, watcher.token, mover, "enter");
-            if (taken) break;
-            continue;
-          }
-          await strike(watcher, mover, "as it steps in", watcher.enterAction, "enter");
-          break;
-        }
-      }
-    }
+      },
+    });
+    if (!stopped) watchedRest.set(moverId, Date.now() + WATCHED_REST_MS);
     if (left === 0 && entered === 0) {
       log(
         `reaction: ${who} moved past ${watchers.length} watcher(s) and left nobody's reach` +
@@ -695,6 +670,75 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
       else await resumeHeld(moverDoc);
     }
   }
+}
+
+/**
+ * One visual step: the same leave / enter offers that used to run against the
+ * whole planned route. Returns `halt` when Sentinel should pause remaining waypoints.
+ */
+async function offerAlong(
+  watcher: Watcher,
+  events: Array<"enter" | "leave">,
+  moverDoc: any,
+  mover: any,
+  who: string,
+  exempt: boolean,
+  disengaged: boolean,
+  standing: ReturnType<typeof standingExemption>,
+): Promise<"halt" | "continue"> {
+  const moverId = String(moverDoc?.id ?? "");
+  const watcherId = String(watcher.combatant?.id ?? "");
+  for (const event of events) {
+    if (!hasReaction(watcher.combatant)) {
+      log(`reaction: ${watcher.combatant?.name} has already spent its reaction`);
+      return "continue";
+    }
+
+    if (event === "leave") {
+      if (exempt) {
+        log(
+          `reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} has ${standing!.label}`,
+        );
+        continue;
+      }
+      if (disengaged) {
+        log(`reaction: ${watcher.combatant?.name} holds its swing — ${moverDoc?.name} disengaged`);
+        continue;
+      }
+      if (watcher.automated && withholds(watcher.combatant)) continue;
+      if (!claimProvoke(watcherId, moverId, "leave")) {
+        log(`reaction: ${watcher.combatant?.name} already had its chance at ${who} leaving`);
+        continue;
+      }
+      if (!watcher.automated) {
+        const taken = await ask(watcher.combatant, watcher.token, mover, "opportunity");
+        if (taken && (await settleLeave(moverDoc))) return "halt";
+        if (taken) return "continue";
+        continue;
+      }
+      await strike(watcher, mover, "as it slips away", undefined, "opportunity");
+      if (await settleLeave(moverDoc)) return "halt";
+      return "continue";
+    }
+
+    // Polearm Master's Reactive Strike is not an Opportunity Attack. Disengage and Flyby name
+    // OAs; they do not shut this off. The printed trigger is entering the polearm's reach.
+    if (event === "enter" && watcher.enterAction) {
+      if (watcher.automated && withholds(watcher.combatant)) continue;
+      if (!claimProvoke(watcherId, moverId, "enter")) {
+        log(`reaction: ${watcher.combatant?.name} already had its Reactive Strike at ${who}`);
+        continue;
+      }
+      if (!watcher.automated) {
+        const taken = await ask(watcher.combatant, watcher.token, mover, "enter");
+        if (taken) return "continue";
+        continue;
+      }
+      await strike(watcher, mover, "as it steps in", watcher.enterAction, "enter");
+      return "continue";
+    }
+  }
+  return "continue";
 }
 
 /**
@@ -800,6 +844,7 @@ function crossingsAt(
  * Those two numbers are usually the same (a Quarterstaff is 5 ft for both). They are not when the
  * best melee swing is a Reach weapon that is not a polearm — then OA is 10 ft and Reactive Strike
  * is still the staff's 5. Walked in route order so a pass-through spends at most one Reaction.
+ * `provoke` feeds this a visual segment, never the whole planned destination.
  */
 function moveEvents(
   watcher: Watcher,

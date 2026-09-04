@@ -158,3 +158,33 @@ test("a Large token walking onto the next square enters a 5 ft reach", () => {
   const events = reachEventsAlong(monkCenter, [away, adjacent], large, 5, GRID, feet, 0, monk);
   assert.deepEqual(events, ["enter"]);
 });
+
+test("the planned destination is not an enter until the visible prefix reaches that square", () => {
+  // Halt still walks origin → dest. Offers follow the sprite: a Beholder whose
+  // committed dest is next to the Monk has not entered until it is actually there.
+  const destNear = { x: GRID, y: 0 };
+  const startFar = { x: GRID * 8, y: 0 };
+  const midFar = { x: GRID * 6, y: 0 };
+  const planned = reachEventsAlong(
+    monkCenter,
+    [startFar, destNear],
+    large,
+    5,
+    GRID,
+    feet,
+    0,
+    monk,
+  );
+  assert.deepEqual(planned, ["enter"]);
+  const visiblePrefix = reachEventsAlong(
+    monkCenter,
+    [startFar, midFar],
+    large,
+    5,
+    GRID,
+    feet,
+    0,
+    monk,
+  );
+  assert.deepEqual(visiblePrefix, []);
+});

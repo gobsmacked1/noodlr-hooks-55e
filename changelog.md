@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.55
+
+**Opportunity attacks and Reactive Strike follow the sprite, not the planned
+landing square.** Foundry commits the token (and fires `moveToken`) when a walk
+starts, then animates there. A Beholder flying toward the Monk used to start the
+Monk's six-second clock at takeoff, because the destination was already next to
+him. Offers now sample the placeable every 250 ms. Sentinel Halt still reads the
+planned route, so remaining waypoints can pause before they play.
+
 ## 0.7.54
 
 **Optional 2014 flanking (Advantage), off by default.** When you and an ally stand in

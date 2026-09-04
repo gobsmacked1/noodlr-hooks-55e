@@ -5141,6 +5141,24 @@ a per-audience courtesy. One variant: Advantage on a melee attack, never a +2.
 - Elevation: `|Δz| ≤ grid.distance`. Fail toward no Advantage (a spurious hit is already
   applied). Geometry is `src/core/flank.ts` (no Foundry). `noodlrHooks.surveyFlanking()`.
 
+## Reactions follow the sprite, not the planned destination (2026-09-03)
+
+Foundry writes TokenDocument `_source` and fires `moveToken` when the walk is
+**committed**, then animates the placeable there. Sheet pace makes a fly take
+several seconds after that. Offers that walked the planned route started the
+Monk's six-second Reactive Strike clock while the Beholder was still across the
+map; the clock expired, then the sprite arrived and flew away.
+
+- **Halt still uses the planned route.** Sentinel has to pause remaining waypoints
+  before they play (`leavingWouldProvoke` / `firstLeaveSquare` / `registerMoveHold`).
+- **Offers follow `src/core/visible-move.ts`.** `provoke` samples the placeable
+  (~250 ms) and runs leave / enter on each visual step. A read that already matches
+  `_source` while the sprite is still sliding is ignored until idle.
+- Do not trigger PC or NPC reactions from the intended destination. Do not
+  auto-Disengage to "fix" a missing OA.
+- A later `moveToken` waypoint after a watch has gone idle does not re-offer.
+- `test/visible-move.test.ts` and the prefix pin in `test/reactions-reach.test.ts`.
+
 ## Melee reach is closest squares, and Polearm Master is enter (2026-08-25)
 
 - **A Large token adjacent to a Medium one is 5 ft away.** `measureBetween` is centre-to-centre;
