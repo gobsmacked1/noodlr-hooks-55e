@@ -1747,12 +1747,25 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     made this cost three releases: `moveTo` reported refusals in detail while nothing ever reached it.
   - **Turn pace is a floor on duration, gated on completion — never a deadline (2026-08-04).** The clock
     starts when the tracker reaches the creature, and the tracker only advances after `runTurnFor`'s
-    promise resolves, so a turn that takes longer than the floor simply takes longer. Nothing anywhere
-    cuts a turn short, and nothing keys off "movement finished". Say this plainly when it comes up: the
-    natural reading of "minimum turn duration" is a timer that could truncate a turn, and it is not one.
-    The one place a clock CAN end something early is the move stall watchdog, which is why it counts only
-    time with no visible animation — a twelve-square walk at one square per second is twelve legitimate
-    seconds, and the flat 8-second timeout it replaced would have killed it mid-stride as a hang.
+    promise resolves, so a turn that takes longer than the floor simply takes longer. Nothing of ours
+    cuts a turn short. Say this plainly when it comes up: the natural reading of "minimum turn duration"
+    is a timer that could truncate a turn, and it is not one. The one place a clock CAN end something
+    early is the move stall watchdog, which is why it counts only time with no visible animation — a
+    twelve-square walk at one square per second is twelve legitimate seconds, and the flat 8-second
+    timeout it replaced would have killed it mid-stride as a hang.
+  - **Initiative waits until combatants are at rest (2026-09-03, Fig Reth Dash).** A player
+    Dash at sheet pace is still sliding when something else calls `nextTurn()` — Foundry
+    commits the TokenDocument (and can flip the tracker) before the sprite arrives, and the
+    last waypoint can land a few hundred ms *after* the flip. `src/core/settle.ts` is the
+    wait: 400 ms grace, then poll `animationContexts` / pending movement, abandon a hung
+    context after 3 s of no `_source` change (WebGL-lost leftover), 60 s deadline.
+    `onAdvance` awaits it before legendary actions and `takeTurn`; `endAutomatedTurn`
+    awaits it before `nextTurn`. We did **not** play Fig Reth — `shouldAutomate` refuses
+    player owners — so this is not "the module ended the Fighter's turn." Whoever flipped
+    the tracker (Argon End Turn, Hurry Up `goNext`, a click) is named on the new
+    `tracker advanced to … by <user>` line. `owedHold` stores the combatant we were
+    holding; resuming `next` after the tracker has moved on no longer skips a player.
+    Do not treat this as Sentinel Halt ending a turn.
   - **Off-turn reactions, natively (2026-08-04).** `combat/auto/reactions.ts`, no module required — see
     design principle #0. Two triggers, chosen because core alone can detect them with certainty:
     `preUpdateToken`/`updateToken` for "someone left my reach" (snapshot who had the mover in reach

@@ -10,8 +10,13 @@
 // horde of skeletons resolves itself while the party keeps its own pacing. A creature the GM is playing
 // by hand is untouched in either mode, and the console entry point does NOT advance: a GM asking Noodlr
 // to play one creature has not asked it to take over the fight.
+//
+// After the tracker flips, nobody else acts until combatants are at rest (`core/settle.ts`). A player
+// Dash at sheet pace is still sliding when Argon / Hurry Up / a click calls nextTurn; legendary
+// actions and takeTurn used to fire in that window. We never end a player-owned turn ourselves.
 
 import { log } from "../constants";
+import { waitForCombatantsToRest } from "../core/settle";
 import { getTurnPaceSeconds } from "../settings";
 import { isPrimaryGM } from "../util/gm";
 import { runTurnFor } from "./npc-turn";
@@ -27,7 +32,7 @@ import {
 } from "../rules/owed-roll";
 
 /** Why we have not yet advanced or played: an Eye Ray save (or similar) is still open. */
-let owedHold: "take" | "next" | null = null;
+let owedHold: { action: "take" | "next"; combatantId: string } | null = null;
 
 /**
  * Floor on how long an automated turn occupies the table, in milliseconds.
@@ -89,11 +94,14 @@ async function endAutomatedTurn(
 
   const clear = await waitForOwedRolls();
   if (!clear) {
-    owedHold = "next";
+    owedHold = { action: "next", combatantId: playedId };
     const names = owedOutstanding().map((o) => o.name).join(", ");
     log(`automation holding nextTurn — ${names || "a demanded roll"} still outstanding`);
     return;
   }
+
+  await settleCombatants(combat, "nextTurn");
+  if (!combat?.started || String(combat.combatant?.id ?? "") !== playedId) return;
 
   try {
     await combat.nextTurn();
@@ -173,7 +181,21 @@ function takeTurn(combat: any): void {
   void runTurnFor(combatant).then(() => endAutomatedTurn(combat, id, startedAt));
 }
 
+async function settleCombatants(combat: any, why: string): Promise<void> {
+  const settled = await waitForCombatantsToRest(combat);
+  if (settled === "rest") return;
+  log(
+    `automation proceeding (${why}) after combatants ${
+      settled === "stale" ? "stopped moving (stale animation)" : "hit the rest-wait deadline"
+    }`,
+  );
+}
+
 async function onAdvance(combat: any): Promise<void> {
+  // The tracker can flip while a player Dash is still in flight — document commit
+  // lags nextTurn by a few hundred ms, and the sprite lags the document by seconds
+  // at sheet pace. Legendary actions and the next takeTurn wait here.
+  await settleCombatants(combat, "onAdvance");
   const ended = noteLegendaryAdvance(combat);
   // Eye Rays at the end of the turn that just finished, before the next creature acts.
   // Awaited so a Beholder that is also next in order rays first, then takes its turn.
@@ -182,7 +204,7 @@ async function onAdvance(combat: any): Promise<void> {
   // lets the new current combatant act (or be played) before a petrify save exists.
   const clear = await waitForOwedRolls();
   if (!clear) {
-    owedHold = "take";
+    owedHold = { action: "take", combatantId: String(combat.combatant?.id ?? "") };
     const names = owedOutstanding().map((o) => o.name).join(", ");
     log(`automation holding takeTurn — ${names || "a demanded roll"} still outstanding`);
     return;
@@ -194,9 +216,19 @@ function resumeOwedHold(): void {
   const what = owedHold;
   owedHold = null;
   const combat = (globalThis as any).game?.combat;
-  if (!combat?.started) return;
-  if (what === "take") takeTurn(combat);
-  else if (what === "next") void combat.nextTurn?.();
+  if (!combat?.started || !what) return;
+  const current = String(combat.combatant?.id ?? "");
+  if (what.action === "next") {
+    if (current !== what.combatantId) {
+      log(
+        `automation dropped a held nextTurn — tracker is now ${combat.combatant?.name ?? current}, not the combatant we were holding`,
+      );
+      return;
+    }
+    void combat.nextTurn?.();
+    return;
+  }
+  takeTurn(combat);
 }
 
 export function registerAutomationTurnHook(): void {
@@ -213,10 +245,14 @@ export function registerAutomationTurnHook(): void {
     resumeOwedHold();
   });
 
-  Hooks.on("updateCombat", (combat: any, changed: any) => {
+  Hooks.on("updateCombat", (combat: any, changed: any, _options: unknown, userId?: string) => {
     // Only when the turn actually moved: unrelated tracker edits (initiative fixes, a token added
     // mid-fight) must not re-run the current creature.
     if (!("turn" in (changed ?? {})) && !("round" in (changed ?? {}))) return;
+    const user = (globalThis as any).game?.users?.get?.(userId);
+    log(
+      `tracker advanced to ${combat?.combatant?.name ?? "?"} (round ${combat?.round ?? "?"}) by ${user?.name ?? userId ?? "?"}`,
+    );
     void onAdvance(combat);
   });
 

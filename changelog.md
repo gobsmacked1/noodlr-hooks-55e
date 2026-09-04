@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.53
+
+**Nobody acts until combatants have stopped sliding.** A player Dash at sheet
+pace can still be mid-animation when the tracker advances — Foundry commits
+the token (and can flip initiative) before the sprite arrives. Legendary
+actions and the next automated turn now wait for every combatant to rest.
+A hung animation after a WebGL glitch is not a 60-second stall. The console
+now names who advanced the tracker. A leftover owed-roll hold can no longer
+skip a player who took the slot in the meantime.
+
 ## 0.7.52
 
 **Sentinel Halt stops a walk already in motion.** Guardian offers an Opportunity

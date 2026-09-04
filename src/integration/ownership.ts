@@ -615,19 +615,21 @@ export function conflicts(): Advisory[] {
     });
   }
 
-  if (
-    moduleActive("hurry-up") &&
-    moduleSetting("hurry-up", "goNext") === true &&
-    moduleSetting("hurry-up", "runForNPC") === true
-  ) {
+  if (moduleActive("hurry-up") && moduleSetting("hurry-up", "goNext") === true) {
+    const forNpc = moduleSetting("hurry-up", "runForNPC") === true;
     out.push({
       level: "warn",
-      title: "Hurry Up will advance turns this module is still playing",
-      detail:
-        "Its combat timer calls nextTurn() when it expires, and asks nothing about whether a turn is " +
-        "mid-resolution. On an automated creature that races this module's own advance, so a slow " +
-        "turn can be skipped or double-advanced. Turning off its Run for NPCs scopes the timer to " +
-        "players and removes the conflict entirely.",
+      title: forNpc
+        ? "Hurry Up will advance turns this module is still playing"
+        : "Hurry Up will end a player's turn on its timer",
+      detail: forNpc
+        ? "Its combat timer calls nextTurn() when it expires, and asks nothing about whether a turn is " +
+          "mid-resolution. On an automated creature that races this module's own advance, so a slow " +
+          "turn can be skipped or double-advanced. Turning off its Run for NPCs scopes the timer to " +
+          "players; turning off goNext stops it ending anyone's turn."
+        : "Its combat timer calls nextTurn() when it expires, including on a player who is still " +
+          "walking. That is the next combatant acting while this one is still sliding. Turn its " +
+          "auto-advance (goNext) off, or give the timer enough time for a Dash at sheet pace.",
     });
   }
 
