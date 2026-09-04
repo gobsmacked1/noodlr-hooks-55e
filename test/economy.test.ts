@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
+import { isActionSurge } from "../src/system/dnd5e-action-surge";
 import { actionDeclarationOf } from "../src/system/dnd5e-declarations";
 import { isHideActivity } from "../src/system/dnd5e-stealth";
 import {
@@ -18,6 +19,7 @@ import {
   budget,
   check,
   explainAttacksPerAction,
+  grantSurge,
   lightSwings,
   spend,
   takeLightSwing,
@@ -169,6 +171,77 @@ test("Devouring Blade outranks Thirsting Blade, which it requires", () => {
     item({ name: "Devouring Blade", type: "feat", identifier: "devouring-blade" }),
   ]);
   assert.equal(explainAttacksPerAction(warlock).value, 3);
+});
+
+/* -------------------------------------------- */
+/*  Action Surge                                 */
+/* -------------------------------------------- */
+
+test("Action Surge is recognised by identifier, and by name only on a feat with none", () => {
+  const use = activity("Use", "utility", "special");
+  assert.equal(
+    isActionSurge(item({ name: "Action Surge", type: "feat", identifier: "action-surge" }), use),
+    true,
+  );
+  assert.equal(isActionSurge(item({ name: "Action Surge", type: "feat" }), use), true);
+  assert.equal(
+    isActionSurge(
+      item({ name: "Action Surge", type: "feat", identifier: "house-surge" }),
+      use,
+    ),
+    false,
+  );
+  assert.equal(isActionSurge(item({ name: "Action Surge", type: "weapon" }), use), false);
+});
+
+test("Action Surge grants a second Attack action this turn, once", () => {
+  // Level 20 fighter: three-extra-attacks → 4 swings, then the 5th was asked "4 of 4".
+  const { combat, combatant } = fight();
+  const fighter = actor([
+    item({ name: "Extra Attack (3)", type: "feat", identifier: "three-extra-attacks" }),
+  ]);
+  fighter.uuid = "Actor.action-surge";
+
+  for (let i = 0; i < 4; i++) spend(fighter, combat, combatant, "action", true);
+  assert.equal(check(fighter, combat, combatant, "action", true).allowed, false);
+  assert.equal(check(fighter, combat, combatant, "action", true).spent, 4);
+  assert.equal(check(fighter, combat, combatant, "action", true).max, 4);
+
+  assert.equal(grantSurge(fighter, combat, combatant), true);
+  assert.equal(check(fighter, combat, combatant, "action", true).allowed, true);
+  assert.equal(check(fighter, combat, combatant, "action", true).max, 8);
+  assert.equal(budget(fighter, combat, combatant).attack, 4);
+
+  assert.equal(grantSurge(fighter, combat, combatant), false);
+
+  const next = { id: "combat1", round: 2, turn: 0, turns: [combatant] };
+  assert.equal(check(fighter, next, combatant, "action", true).max, 4);
+});
+
+test("Action Surge stacks with a Haste extraAction flag", () => {
+  const { combat, combatant } = fight();
+  const fighter = actor();
+  fighter.uuid = "Actor.action-surge-haste";
+  fighter.flags["noodlr-hooks-55e"] = { extraAction: 1 };
+
+  assert.equal(budget(fighter, combat, combatant).action, 2);
+  assert.equal(grantSurge(fighter, combat, combatant), true);
+  assert.equal(budget(fighter, combat, combatant).action, 3);
+});
+
+test("a DDB Action Surge that claims an Action is exempted, not charged", () => {
+  const claims = slotClaims(
+    actor([
+      item({
+        name: "Action Surge",
+        type: "feat",
+        identifier: "action-surge",
+        activities: [activity("Use", "utility", "action")],
+      }),
+    ]),
+  );
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].exemptedAs, "Action Surge");
 });
 
 /* -------------------------------------------- */

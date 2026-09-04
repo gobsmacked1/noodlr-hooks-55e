@@ -148,7 +148,16 @@ export function registerReactionHooks(): void {
     if (!before) return;
     departing.delete(String(doc?.id ?? ""));
     if (!active() || handled.has(String(doc?.id ?? ""))) return;
-    enqueueProvoke(doc, { origin: before });
+    // This path has no waypoints and no operation. A Push's `moveToken` often arrives
+    // later (or sits behind another sprite watch), so without the in-flight mark this
+    // fallback starts a walk watch and offers Opportunity Attacks / Reactive Strike.
+    const movement = { origin: before };
+    if (isForcedMovement(movement, undefined, doc)) {
+      const who = String(doc?.name ?? "?");
+      log(`reaction: ${who} was displaced — forced movement does not provoke`);
+      return;
+    }
+    enqueueProvoke(doc, movement);
   });
 
   // Hit points falling on someone else's turn is the one damage signal every system gives us. The old
@@ -523,7 +532,7 @@ function enqueueProvoke(doc: any, movement: any, operation?: any): void {
 
 /** Would anyone get a leave-reach Opportunity Attack (not PAM enter, not Disengage/Flyby)? */
 export function leavingWouldProvoke(doc: any, movement: any, operation?: any): boolean {
-  if (isForcedMovement(movement, operation)) return false;
+  if (isForcedMovement(movement, operation, doc)) return false;
   if (!(game.combat as any)?.started) return false;
   const mover = doc?.object ?? doc;
   const route = movementRoute(movement, {
@@ -591,9 +600,10 @@ async function provoke(moverDoc: any, movement: any, operation?: any): Promise<v
     // Neither a teleport nor a shove provokes. A creature that was never between the two points cannot be
     // swung at on the way past (Misty Step, Blink and Dimension Door all arrive as displacements), and
     // under the 2024 rules an opportunity attack triggers only on movement a creature SPENDS — being
-    // pushed, pulled or dragged is somebody else's expenditure.
+    // pushed, pulled or dragged is somebody else's expenditure. This return is before both leave (OA)
+    // and enter (Reactive Strike). Compelled walks still reach the watchers.
     const waypoints: any[] = movement?.passed?.waypoints ?? [];
-    if (isForcedMovement(movement, operation)) {
+    if (isForcedMovement(movement, operation, moverDoc)) {
       log(`reaction: ${who} was displaced — forced movement does not provoke`);
       return;
     }

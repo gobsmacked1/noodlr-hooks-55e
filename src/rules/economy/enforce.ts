@@ -31,6 +31,7 @@ import { speakerFor } from "../../util/speaker";
 import { getEconomyMode, isConditionAutomationEnabled } from "../../settings";
 import { shouldAutomate } from "../../tactics/registry";
 import { isIncapacitated } from "../../system/dnd5e-conditions";
+import { isActionSurge } from "../../system/dnd5e-action-surge";
 import { isDashActivity } from "../../system/dnd5e-dash";
 import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
@@ -42,7 +43,16 @@ import { interceptInfluenceActivity } from "../influence";
 import { holdForCounterspell, useReplay } from "../counterspell";
 import { captureReadied, interceptReadyActivity } from "../ready";
 import { gateActivityRange } from "../attack-range";
-import { check, lightSwings, slotFor, spend, takeDash, takeLightSwing, type Slot } from "./ledger";
+import {
+  check,
+  grantSurge,
+  lightSwings,
+  slotFor,
+  spend,
+  takeDash,
+  takeLightSwing,
+  type Slot,
+} from "./ledger";
 
 /** Uses already approved by their owner, waiting to come back round through the hook. */
 const cleared = new Set<string>();
@@ -138,6 +148,38 @@ function combatantFor(combat: any, actor: any): any {
   );
 }
 
+/**
+ * Pressing Action Surge spends the feature's use (dnd5e's) and grants +1 Action on this stamp.
+ *
+ * No started combat / not in the fight: let the use through without a grant — there is no turn to
+ * attach one to. Already surged this stamp: refuse so a second press does not burn the 17+ use.
+ */
+function applyActionSurge(actor: any): boolean {
+  const combat: any = game.combat;
+  if (!combat?.started) {
+    log("action economy: Action Surge — no started combat; the use goes through without a grant");
+    return true;
+  }
+  const combatant = combatantFor(combat, actor);
+  if (!combatant) {
+    log(
+      `action economy: Action Surge — ${String(actor?.name ?? "?")} is not in the fight; the use goes through`,
+    );
+    return true;
+  }
+  if (grantSurge(actor, combat, combatant)) {
+    log(`action economy: Action Surge — ${combatant?.name} gains +1 action this turn`);
+    return true;
+  }
+  log(`action economy: Action Surge — ${combatant?.name} already surged this turn; refused`);
+  ui.notifications?.warn(
+    game.i18n.format("NOODLRHOOKS.Combat.Economy.ActionSurgeOnce", {
+      name: String(actor?.name ?? "This creature"),
+    }),
+  );
+  return false;
+}
+
 function police(activity: any, usageConfig: any, dialogConfig: any, messageConfig: any): boolean {
   const key = String(activity?.uuid ?? "");
   if (key && cleared.has(key)) {
@@ -203,6 +245,11 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
   // Reach is a physical fact, not an action-economy one. Before `if (!slot)` so an empty-activation
   // Unarmed Strike enricher is still checked. Fail-open (no token / no target) lives inside the gate.
   if (!gateActivityRange(activity, usageConfig, messageConfig, isAutomating())) return false;
+
+  // Action Surge is `activation.type: special` on stock sheets, so `slotFor` would skip it and
+  // grant nothing. A DDB copy that claims an Action must not be charged either — the button is the
+  // grant, not a spend. Before `if (!slot)`, same placement as Hide.
+  if (isActionSurge(activity?.item, activity)) return applyActionSurge(actor);
 
   const slot = slotFor(activity?.activation?.type);
   if (!slot) return true;

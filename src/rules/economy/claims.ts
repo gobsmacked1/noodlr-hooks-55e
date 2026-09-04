@@ -7,6 +7,7 @@
 // Deliberately no dependency on settings or config. This answers a question about a sheet, and it must be
 // askable from a census that runs with every automation switched off.
 
+import { isActionSurge } from "../../system/dnd5e-action-surge";
 import { actionDeclarationOf } from "../../system/dnd5e-declarations";
 import { damageRiderOf } from "../../system/dnd5e-riders";
 import { slotFor, type Slot } from "./ledger";
@@ -45,7 +46,10 @@ export function slotClaims(actor: any): SlotClaim[] {
         activity: String(activity?.name ?? "") || String(activity?.type ?? ""),
         activityType: String(activity?.type ?? "?"),
         claims: slot,
-        exemptedAs: damageRiderOf(item, activity) ?? actionDeclarationOf(item, activity),
+        exemptedAs:
+          damageRiderOf(item, activity) ??
+          actionDeclarationOf(item, activity) ??
+          (isActionSurge(item, activity) ? "Action Surge" : null),
       });
     }
   }

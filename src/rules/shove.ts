@@ -8,7 +8,9 @@
 //     charge the victim for being hit.
 //   * IT PROVOKES NOTHING. Under the 2024 rules an opportunity attack triggers only when a creature
 //     spends its own movement, action, bonus action or reaction. Forced movement is exempt, so the
-//     reaction layer has to be able to recognise this as forced rather than as walking.
+//     reaction layer has to be able to recognise this as forced rather than as walking. Leave-reach
+//     OA and enter-reach Reactive Strike both skip — some tables fire PAM on a shove *into* reach;
+//     this module does not. Compelled movement (Dissonant Whispers) still walks and still provokes.
 //   * IT STILL STOPS AT THINGS. A creature pushed into a wall stops at the wall; one pushed into an
 //     occupied space stops beside it. That is the part everyone else's implementation gets thinnest on.
 //
@@ -93,6 +95,16 @@ interface Restore {
 const undoStack: Restore[] = [];
 
 /**
+ * Tokens we are mid-shove on. `updateToken` fires a provoke with no waypoints and no
+ * operation, often BEFORE `moveToken` (and sometimes seconds later, queued behind another
+ * sprite watch). Without this mark that fallback looks like a walk and offers Opportunity
+ * Attacks / Reactive Strike on a Push. Cleared on a timer long enough to outlive the queue,
+ * not in `finally` — a 5 s watch ahead of us would otherwise expire the mark first.
+ */
+const forcedNow = new Set<string>();
+const FORCED_HOLD_MS = 8000;
+
+/**
  * Register the forced-movement action. Must run during `init`.
  *
  * Core sorts and then DEEP-FREEZES `CONFIG.Token.movement.actions` inside `setupGame()`, before the
@@ -144,22 +156,79 @@ function forceAction(): string {
   return actions?.[FORCE_ACTION] ? FORCE_ACTION : "displace";
 }
 
+function tokenKey(doc: any): string {
+  return String(doc?.id ?? doc?.document?.id ?? "");
+}
+
+function isForceAction(action: unknown): boolean {
+  const value = String(action ?? "");
+  return value === "displace" || value === FORCE_ACTION;
+}
+
+/** Call before `doc.move` on a shove so every hook in that window can see it. */
+export function beginForced(doc: any): void {
+  const key = tokenKey(doc);
+  if (!key) return;
+  forcedNow.add(key);
+  const hold = setTimeout(() => forcedNow.delete(key), FORCED_HOLD_MS);
+  hold.unref?.();
+}
+
+export function endForced(doc: any): void {
+  forcedNow.delete(tokenKey(doc));
+}
+
+function waypointsOf(movement: any): any[] {
+  const passed = movement?.passed?.waypoints;
+  const pending = movement?.pending?.waypoints;
+  const loose = movement?.waypoints;
+  const out: any[] = [];
+  if (Array.isArray(passed)) out.push(...passed);
+  if (Array.isArray(pending)) out.push(...pending);
+  if (Array.isArray(loose)) out.push(...loose);
+  if (movement?.destination) out.push(movement.destination);
+  return out;
+}
+
+/**
+ * Last committed waypoint is our shove, and this update landed on that square.
+ *
+ * The `updateToken` fallback carries no action. After `move()` writes `movementHistory`,
+ * a provoke queued behind another watch can still recognise the shove. A later walk
+ * this turn has a different last waypoint, so it is not shadowed.
+ */
+function historyForced(doc: any, movement: any): boolean {
+  const hist = doc?.movementHistory;
+  if (!Array.isArray(hist) || hist.length === 0) return false;
+  const last = hist[hist.length - 1];
+  if (!isForceAction(last?.action)) return false;
+  const dest = movement?.destination ?? doc?._source ?? doc;
+  const lx = Number(last?.x);
+  const ly = Number(last?.y);
+  const dx = Number(dest?.x);
+  const dy = Number(dest?.y);
+  if (!Number.isFinite(lx) || !Number.isFinite(dx)) return true;
+  return Math.abs(lx - dx) < 2 && Math.abs(ly - dy) < 2;
+}
+
 /**
  * Was this movement forced?
  *
  * The reaction layer and the movement budget both need to answer this, and both should answer it the
  * same way. Displacement is included as well as our own action, so a shove from ANY module that uses
  * core's standard idiom is recognised — which is the entire benefit of core having standardised it.
+ *
+ * `doc` is optional and load-bearing for the `updateToken` fallback: that path has empty waypoints
+ * and no `operation`. Compelled movement (Dissonant Whispers, Command) walks with `walk`/`fly` and
+ * must stay false — those spend the victim's own Speed and do provoke.
  */
-export function isForcedMovement(movement: any, operation?: any): boolean {
+export function isForcedMovement(movement: any, operation?: any, doc?: any): boolean {
   if (operation?.noodlrForced) return true;
   if (operation?.noodlrRiding === "follow") return true;
-  const waypoints: any[] = movement?.passed?.waypoints ?? [];
-  if (waypoints.length === 0) return false;
-  return waypoints.some((w: any) => {
-    const action = String(w?.action ?? "");
-    return action === "displace" || action === FORCE_ACTION;
-  });
+  if (doc && forcedNow.has(tokenKey(doc))) return true;
+  if (waypointsOf(movement).some((w) => isForceAction(w?.action))) return true;
+  if (doc && waypointsOf(movement).length === 0 && historyForced(doc, movement)) return true;
+  return false;
 }
 
 function gridSize(): number {
@@ -485,6 +554,7 @@ async function commit(doc: any, centre: Point, elevation: number): Promise<boole
   const before = { x: Number(doc?._source?.x) || 0, y: Number(doc?._source?.y) || 0 };
   const beforeElevation = elevationOf(doc);
 
+  beginForced(doc);
   try {
     await doc.move(
       {
@@ -632,6 +702,7 @@ export async function undoForcedMovement(): Promise<number> {
     try {
       const doc: any = await (globalThis as any).fromUuid?.(entry.uuid);
       if (!doc?.move) continue;
+      beginForced(doc);
       await doc.move(
         { x: entry.x, y: entry.y, elevation: entry.elevation, action: "displace", explicit: true },
         {

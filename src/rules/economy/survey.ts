@@ -61,6 +61,7 @@ export function surveyEconomy(): Record<string, unknown> {
       "attacksPerAction is read from the extra-attack class features, or parsed from Multiattack prose " +
       "for monsters (attacksPerActionFrom says which); set flags.noodlr-hooks-55e.attacksPerAction on an " +
       "actor to override it (flags.noodlr.* is still read, for effects written before the split). " +
+      "`recorded.surge` is this turn's Action Surge grant (1 or 0), not a lasting extraAction flag. " +
       "`claims` lists the features that would be charged a slot, plus anything already exempted, with " +
       "exemptedAs naming the rule that spared it. An entry with exemptedAs null that is really extra " +
       "damage on another action wants flags.noodlr-hooks-55e.damageRider on its item, or a line in " +

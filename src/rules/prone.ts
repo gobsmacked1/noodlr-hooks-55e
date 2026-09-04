@@ -160,7 +160,7 @@ export function registerProneWatch(): void {
     try {
       const game = (globalThis as any).game;
       if (game?.user?.isGM || isAutomating()) return true;
-      if (isForcedMovement(movement)) return true;
+      if (isForcedMovement(movement, undefined, doc)) return true;
       if (!isProne(doc?.actor)) return true;
       const action = actionOf(doc, movement);
       if (action === "crawl") return true;

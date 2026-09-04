@@ -92,7 +92,7 @@ export function registerForcedMovement(): void {
   Hooks.on("moveToken", (doc: any, movement: any, operation: any) => {
     if (!active()) return;
     // Our own displacements must not cascade, and a captive being dragged is itself a forced move.
-    if (isForcedMovement(movement, operation)) return;
+    if (isForcedMovement(movement, operation, doc)) return;
     void dragCaptives(doc, movement).catch((err) =>
       log("could not drag a grappled creature:", err),
     );

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.56
+
+**Action Surge grants the extra Action for this turn.** Pressing the feature used
+to spend the use and change nothing, so a level-20 fighter who then swung a fifth
+time was asked whether they really meant to go over 4 of 4 attacks. Haste still
+uses its lasting flag; Surge is a same-turn grant so the two stack. A second
+press on the same turn is refused. The 2024 "not the Magic action" restriction
+is not modelled yet.
+
+**A Push no longer offers Opportunity Attacks or Reactive Strike.** Forced
+movement already stamped `noodlrForce`, but a second hook (`updateToken`) often
+fired first with no waypoints, so the shove looked like a walk. Compelled
+movement (Dissonant Whispers, Command) still uses the victim's own Speed and
+still provokes. Compiled `on_move` rules are unchanged.
+
 ## 0.7.55
 
 **Opportunity attacks and Reactive Strike follow the sprite, not the planned

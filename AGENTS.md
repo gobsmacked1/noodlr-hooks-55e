@@ -2129,6 +2129,12 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     answering publicly is what keeps the override usable without making it abusable.
   - **Effects grant slots via flags, not via code changes here:** `flags.noodlr.extraAction`,
     `extraBonus`, `extraReaction` (AE mode Add) and `flags.noodlr.attacksPerAction` (Override).
+  - **Action Surge is a button, not an AE (2026-09-03).** Stock dnd5e ships it as `activation.type:
+    special` with `effects: []`, so `slotFor` used to skip it and the 5th attack of a level-20 fighter
+    asked "4 of 4". `isActionSurge` in `system/dnd5e-action-surge.ts` intercepts the press; `grantSurge`
+    writes `tally.surge` on the same turn stamp (once per turn — 17+ cannot dump both uses). Haste still
+    uses the lasting `extraAction` flag so the two stack. The 2024 "not the Magic action" restriction
+    and the planner pressing it are parked. Do not write a lasting AE for this.
   - `execute.ts` asks the ledger *before* attempting, because a hook veto cancels without throwing and
     the attempt loop would otherwise report a swing that never happened.
   - **Extra damage is not an action, and the test has to be a name table (v0.4.46, 2026-08-07).** Reported
@@ -2432,6 +2438,17 @@ edits closed without saving are lost. Same trade `noodlr` makes.
   - Exempt from opportunity attacks and from the Speed budget by construction: `isForcedMovement()` in
     `shove.ts` is the single predicate both `reactions.ts` and the movement cap consult, and it recognises
     `displace` as well as our own action so a shove from *any* module using core's idiom is covered.
+  - **The `updateToken` fallback has no waypoints (Fig Reth Push → Monk/Fighter reactions, 2026-09-03).**
+    `commit()` already stamps `action: noodlrForce` and `noodlrForced: true`, and `provoke()` already
+    returns early when `isForcedMovement` is true — **before both leave (OA) and enter (PAM)**. The
+    Monk still got a prompt because a second hook feeds the same queue: `updateToken` enqueues
+    `{ origin }` with no operation, often *before* `moveToken`, and `isForcedMovement` used to return
+    false on empty waypoints. `beginForced` marks the token before `doc.move()`; history at the shove
+    destination covers a provoke queued behind another sprite watch after the mark would have expired.
+    Compelled movement (Dissonant Whispers, Command) still walks with `walk`/`fly` and still provokes.
+    **PAM enter is skipped on forced too** — some 2024 table readings fire Reactive Strike when a
+    shove *enters* reach; the user overruled that. Compiled `on_move` still fires (Ashardalon's
+    Stride). Do not treat every `method: "api"` move as forced.
   - Stands down on `activity.flags.cat.macros` (Chris's) or `item.flags["gambits-premades"].gpsUuid`
     (Gambit's) when those modules are active. Diagnostics: `api.surveyForced()`; manual use:
     `api.push(feet)` / `api.pull(feet)`.

@@ -425,7 +425,7 @@ export function registerMovementCap(): void {
   Hooks.on("preMoveToken", (doc: any, movement: any, operation?: any) => {
     try {
       const method = String(movement?.method ?? "");
-      if (hasHalted(doc?.actor) && method !== "undo" && !isForcedMovement(movement, operation)) {
+      if (hasHalted(doc?.actor) && method !== "undo" && !isForcedMovement(movement, operation, doc)) {
         ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.Movement.Halted"));
         return false;
       }

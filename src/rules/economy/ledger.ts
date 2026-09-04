@@ -66,6 +66,13 @@ interface Tally {
    * unlimited — free and unbounded are not the same thing.
    */
   light: number;
+  /**
+   * Extra Actions granted this turn by Action Surge (and nothing else).
+   *
+   * Not `flags.<ns>.extraAction`: that hatch is a lasting Active Effect, and Action Surge is this
+   * turn only. A second press on the same stamp is refused so 17+ cannot spend both uses at once.
+   */
+  surge: number;
 }
 
 const FLAG = "spent";
@@ -79,7 +86,7 @@ const FLAG = "spent";
 const local = new Map<string, Tally>();
 
 function zero(stamp: string): Tally {
-  return { stamp, action: 0, bonus: 0, reaction: 0, attack: 0, dash: 0, light: 0 };
+  return { stamp, action: 0, bonus: 0, reaction: 0, attack: 0, dash: 0, light: 0, surge: 0 };
 }
 
 /** The activation types this file is willing to police. Everything else is somebody else's business. */
@@ -121,6 +128,7 @@ function readTally(actor: any, stamp: string): Tally {
         attack: Number(stored.attack) || 0,
         dash: Number(stored.dash) || 0,
         light: Number(stored.light) || 0,
+        surge: Number(stored.surge) || 0,
       };
     }
   } catch {
@@ -135,6 +143,7 @@ function readTally(actor: any, stamp: string): Tally {
     tally.attack = Math.max(tally.attack, shadow.attack);
     tally.dash = Math.max(tally.dash, shadow.dash);
     tally.light = Math.max(tally.light, shadow.light);
+    tally.surge = Math.max(tally.surge, shadow.surge);
   }
   return tally;
 }
@@ -266,7 +275,7 @@ export function check(
 ): Verdict {
   const stamp = stampFor(combat, combatant);
   const tally = readTally(actor, stamp);
-  const max = allowance(actor, slot);
+  const max = allowance(actor, slot) + (slot === "action" ? tally.surge : 0);
 
   if (slot === "action" && isAttack) {
     const per = attacksPerAction(actor);
@@ -310,6 +319,28 @@ export function spend(
   } catch {
     /* an actor we may not write is an actor we do not police */
   }
+}
+
+/**
+ * Grant this turn's Action Surge extra Action.
+ *
+ * Returns false when the stamp already holds a surge, so a second press does not burn another use.
+ * The item's own uses (2/rest at 17+) are dnd5e's to spend; this only answers once-per-turn.
+ */
+export function grantSurge(actor: any, combat: any, combatant: any): boolean {
+  const stamp = stampFor(combat, combatant);
+  const tally = readTally(actor, stamp);
+  if (tally.surge >= 1) return false;
+  tally.surge = 1;
+  local.set(String(actor?.uuid ?? ""), tally);
+  try {
+    void Promise.resolve(actor?.setFlag?.(MODULE_ID, FLAG, tally)).catch(() => {
+      /* see spend() */
+    });
+  } catch {
+    /* ditto */
+  }
+  return true;
 }
 
 /**
@@ -397,7 +428,7 @@ export function budget(actor: any, combat: any, combatant: any): Record<string, 
   const stamp = stampFor(combat, combatant);
   const tally = readTally(actor, stamp);
   const per = attacksPerAction(actor);
-  const actions = allowance(actor, "action");
+  const actions = allowance(actor, "action") + tally.surge;
   return {
     action: actions - actionsUsed(tally, per),
     bonus: allowance(actor, "bonus") - tally.bonus,
