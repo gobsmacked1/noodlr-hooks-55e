@@ -61,6 +61,7 @@ import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { surveyAttackRange } from "./rules/attack-range";
+import { surveyFlanking } from "./rules/flanking";
 import { registerMasteries, surveyMasteries } from "./rules/masteries";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
 import { registerStreamlineCards } from "./rules/streamline-cards";
@@ -165,6 +166,7 @@ export interface NoodlrHooksApi {
   surveyMovement(): unknown;
   surveySentinel(): unknown;
   surveyAttackRange(): unknown;
+  surveyFlanking(): unknown;
   surveyForced(): unknown;
   surveyMasteries(): unknown;
   surveyDamage(): unknown;
@@ -305,6 +307,8 @@ const api: NoodlrHooksApi = {
   surveySentinel: () => surveySentinel(),
   /** Whether a use can reach its current targets, and who else already enforces range. */
   surveyAttackRange: () => surveyAttackRange(),
+  /** Whether the selected token and an ally flank the current target (2014 Advantage rule). */
+  surveyFlanking: () => surveyFlanking(),
   /** Which push/pull rules are recognised on the selected creature, and whether the layer is live. */
   surveyForced: () => surveyForced(),
   /** Whether Sap / Slow / Topple / Vex / Cleave are applying, and the selected creature's state. */

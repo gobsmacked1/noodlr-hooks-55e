@@ -166,6 +166,7 @@ export function registerCombatSettings(): void {
   );
   world(COMBAT_SETTINGS.movement, "Movement", Boolean, true);
   world(COMBAT_SETTINGS.attackRange, "AttackRange", Boolean, true);
+  world(COMBAT_SETTINGS.flanking, "Flanking", Boolean, false);
   world(COMBAT_SETTINGS.forced, "Forced", Boolean, true);
   world(COMBAT_SETTINGS.masteries, "Masteries", Boolean, true);
   // Both sides on: see `isAutoDamageEnabled()` for why the obvious asymmetry (automate monsters, leave
@@ -464,6 +465,16 @@ export function isMovementCapEnabled(): boolean {
  */
 export function isAttackRangeEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.attackRange));
+}
+
+/**
+ * 2014 optional flanking — Advantage from opposite sides or corners.
+ *
+ * Off by default. 2024 dropped the rule; a table that wants the old one turns it on.
+ * Players and NPCs share the switch: a physical fact is not a per-audience courtesy.
+ */
+export function isFlankingEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.flanking));
 }
 
 /**

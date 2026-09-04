@@ -110,6 +110,7 @@ const AREAS: Area[] = [
   { id: "unseen", setting: COMBAT_SETTINGS.conditions },
   { id: "rangedNearby", setting: COMBAT_SETTINGS.conditions },
   { id: "attackRange", setting: COMBAT_SETTINGS.attackRange },
+  { id: "flanking", setting: COMBAT_SETTINGS.flanking },
   { id: "autoDamage", setting: COMBAT_SETTINGS.autoDamage },
   { id: "autoSaves", setting: COMBAT_SETTINGS.autoSaves },
   { id: "templateLifetime", setting: COMBAT_SETTINGS.templateLifetime },

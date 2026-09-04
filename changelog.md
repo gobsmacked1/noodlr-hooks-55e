@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.54
+
+**Optional 2014 flanking (Advantage), off by default.** When you and an ally stand in
+squares adjacent to an enemy on opposite sides or opposite corners, melee attacks
+against that enemy have Advantage. Both must see the target; an Incapacitated ally
+does not count. Players and NPCs alike. This is the 2014 DMG optional rule — 2024
+dropped it — so the switch starts off. Not a +2 bonus. Hex grids use the printed
+ring count. Combat page, under Cover, flanking and vision.
+
 ## 0.7.53
 
 **Nobody acts until combatants have stopped sliding.** A player Dash at sheet

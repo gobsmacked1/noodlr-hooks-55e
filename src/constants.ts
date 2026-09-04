@@ -57,6 +57,12 @@ export const COMBAT_SETTINGS = {
    * a supported install, so this layer does not stand aside for it.
    */
   attackRange: "combat.attackRange",
+  /**
+   * 2014 DMG optional flanking: Advantage on a melee attack when you and an ally stand
+   * on opposite sides or opposite corners of the target. Default off — it is not a 2024
+   * rule. Not split by audience: the geometry applies to every creature.
+   */
+  flanking: "combat.flanking",
   /** Whether pushes, pulls and shoves actually move the token they land on. */
   forced: "combat.forced",
   /** Whether Sap / Slow / Topple / Vex / Cleave apply themselves. Push stays on `forced`. */

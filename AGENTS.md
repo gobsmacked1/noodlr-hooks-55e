@@ -5121,6 +5121,26 @@ or AC5e (2026-09-03): those are not a supported install.
 - Setting `combat.attackRange`, default on. GM warned and allowed; players and automation
   refused. `noodlrHooks.surveyAttackRange()`.
 
+## 2014 flanking is Advantage, and adjacency is Chebyshev (v0.7.54)
+
+Optional DMG 2014 rule (`combat.flanking`, default **off**). 2024 dropped it; a table that
+wants the old one turns it on. Players and NPCs share the switch — a physical fact is not
+a per-audience courtesy. One variant: Advantage on a melee attack, never a +2.
+
+- **Opposite sides or opposite corners**, including a Large+ space when any occupied
+  square qualifies. Hex: shorter-arc count on the adjacent ring (Medium 2 between,
+  Large 4, Huge 5, Gargantuan 6). An unreadable hex offset **fails closed**.
+- **Adjacent is Chebyshev 1** (shared edge or corner of occupied squares). Do not use
+  `tokenDistance` / `measureBetween` — Foundry EXACT diagonals make a corner 7.07 ft
+  and would make opposite-corner flanking impossible.
+- **Ally = same disposition**, not Incapacitated, not defeated. SECRET is never an ally.
+  Attacker and ally must both see the target (`unseenBy`). Do not require the attacker
+  to see the ally, and do not skip a hidden ally.
+- **Merged into `applyAttackFlags`**, not a second `preRollAttack` pair. Own setting,
+  not the condition matrix — a table can want this house rule and nothing else.
+- Elevation: `|Δz| ≤ grid.distance`. Fail toward no Advantage (a spurious hit is already
+  applied). Geometry is `src/core/flank.ts` (no Foundry). `noodlrHooks.surveyFlanking()`.
+
 ## Melee reach is closest squares, and Polearm Master is enter (2026-08-25)
 
 - **A Large token adjacent to a Medium one is 5 ft away.** `measureBetween` is centre-to-centre;

@@ -22,6 +22,7 @@ import {
   isIncapacitated,
 } from "../system/dnd5e-conditions";
 import { sightModifiers } from "./unseen";
+import { flankModifiers, readFlank } from "./flanking";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { blocked, centerOf } from "../core/positioning";
 import { originatingUsageIdFromRoll, targetsOf, tokenFromActorUuid } from "./cards";
@@ -197,6 +198,15 @@ function applyAttackFlags(config: any): void {
     mods.advantage.push(...geometry.advantage);
     mods.disadvantage.push(...geometry.disadvantage);
   }
+
+  // 2014 optional flanking. Own setting, not the condition matrix — a table can want this house
+  // rule and nothing else. Merged here so one pre-roll pair stamps the die.
+  const flank = flankModifiers({
+    attackerToken: controlledTokenFor(attacker),
+    targetToken: target?.token,
+    melee,
+  });
+  mods.advantage.push(...flank.advantage);
 
   if (!mods.advantage.length && !mods.disadvantage.length) return;
 
@@ -516,6 +526,9 @@ export function surveyConditions(): unknown {
     // hides the crowding rule exactly when it is being asked about.
     sightMelee: sightModifiers({ attackerToken: token, targetToken: target?.token, melee: true }),
     sightRanged: sightModifiers({ attackerToken: token, targetToken: target?.token, melee: false }),
+    flanking: token
+      ? readFlank({ attackerToken: token, targetToken: target?.token, melee: true })
+      : null,
     critOnHitWithin5: target?.actor ? critOnHitWithin5(target.actor) : null,
   };
 }

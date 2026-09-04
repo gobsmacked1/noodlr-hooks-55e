@@ -204,7 +204,8 @@ const HOUSE: Page = {
     {
       id: "positioning",
       title: "Cover, flanking and vision",
-      blurb: "The three every table rules on differently, and the three we have least of today.",
+      blurb:
+        "Cover is still someone else's. Flanking is the 2014 optional rule and ships off. Vision is always on.",
       rows: [
         {
           id: "cover",
@@ -221,12 +222,12 @@ const HOUSE: Page = {
         },
         {
           id: "flanking",
-          label: "Flanking",
-          hint:
-            "An optional rule in both editions and a house rule in practice — advantage, a flat bonus, " +
-            "or nothing. Not built, and it needs a decision about which variant before it can be.",
-          state: "planned",
-          today: "Midi QoL implements several flanking variants.",
+          label: "NOODLRHOOKS.Combat.Flanking.Name",
+          hint: "NOODLRHOOKS.Combat.Flanking.Hint",
+          state: "live",
+          setting: C.flanking,
+          kind: "boolean",
+          ownership: "flanking",
         },
         {
           id: "rangedInMelee",

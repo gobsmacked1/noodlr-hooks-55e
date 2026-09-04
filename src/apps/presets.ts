@@ -39,6 +39,8 @@ const ALL_RULES = {
   [C.masteries]: true,
   [C.movement]: true,
   [C.attackRange]: true,
+  // Optional 2014 house rule. Every preset leaves it off; a table that wants it turns it on after.
+  [C.flanking]: false,
   [C.stealth]: true,
   [C.surprise]: true,
   [C.invisBreak]: true,

@@ -307,6 +307,8 @@
   "NOODLRHOOKS.Combat.EngageRadius.Hint": "When a hostile creature spots the party, only other hostiles within this distance of it join the fight — the rest of the map carries on unaware. Measured in the scene's own units, through walls, since this is a shout. Set to 0 and the creature that spotted you fights alone.",
   "NOODLRHOOKS.Combat.EngageRadius.Name": "How far a creature can call for help",
   "NOODLRHOOKS.Combat.Failed": "NPC turn failed: {error}",
+  "NOODLRHOOKS.Combat.Flanking.Hint": "Optional 2014 DMG rule, off by default — 2024 dropped it. When you and an ally stand in squares adjacent to an enemy on opposite sides or opposite corners, melee attack rolls against that enemy have Advantage. Both must see the target; an Incapacitated ally does not count. Players and NPCs alike. Not a +2 bonus.",
+  "NOODLRHOOKS.Combat.Flanking.Name": "2014 flanking (Advantage)",
   "NOODLRHOOKS.Combat.Forced.Action": "Forced",
   "NOODLRHOOKS.Combat.Forced.ByHand": "the GM",
   "NOODLRHOOKS.Combat.Forced.Grappled": "dragged along",
