@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.58
+
+**A confirmed hit that still needs its damage dice holds the fight.** The
+Damage button on an attack card was the same skip as an unpressed save: the
+tracker moved, legendary actions fired, and a creature that should have been
+bloodied or dead still took its turn. Monsters now roll those dice without the
+button (players get a timed prompt; the clock still rolls, there is no Skip).
+Initiative, End Turn, and the attacker's walk wait until the dice exist *and*
+until hit points have had a chance to move. Automated NPC turns already roll
+and are not asked again. This does not change Apply.
+
+**Declining Graze on the attack dialog is now honoured.** A Greatsword still
+tagged Graze was dealing the modifier on a miss after the player picked
+none (or another mastery). The weapon tag is only the fallback when the
+card never recorded a choice — the 2024 Monster Manual encoding.
+
 ## 0.7.57
 
 **Walking while Prone now asks stand or crawl.** The half-Speed stand and the crawl

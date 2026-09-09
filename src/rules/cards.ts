@@ -231,12 +231,17 @@ export function activityOf(message: any, item: any): any {
  * Pass the wielder when you already have them; otherwise the speaker token's actor is used.
  */
 export function masteryOf(message: any, item: any, actor?: any): string {
-  const flagged = String(message?.flags?.dnd5e?.roll?.mastery ?? "")
+  const roll = message?.flags?.dnd5e?.roll;
+  const hasFlag = Boolean(roll) && Object.prototype.hasOwnProperty.call(roll, "mastery");
+  const flagged = String(roll?.mastery ?? "")
     .trim()
     .toLowerCase();
   const declared =
     typeof item?.system?.mastery === "string" ? String(item.system.mastery).trim().toLowerCase() : "";
-  const claimed = flagged || declared;
+  // The message is the dialog choice. Empty there is a decline — falling through to the weapon
+  // tag would Graze a fighter who picked none. A card that never wrote the field still needs
+  // the item (2024 MM NPCs store mastery only on the attack).
+  const claimed = hasFlag ? flagged : declared;
   if (!claimed) return "";
   const wielder = actor ?? speakerToken(message?.speaker)?.actor;
   return canUseWeaponMastery(wielder, item, claimed) ? claimed : "";

@@ -42,6 +42,8 @@ import { considerBarbs } from "./barbs";
 import { considerAgainstDiceMods, considerDiceMods } from "./dice-mod";
 import { considerDamageDice } from "./damage-dice";
 import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
+import { isAutomating } from "./economy/enforce";
+import { collectOwedDamage } from "./owed-roll";
 import { offerSneakAttack } from "./sneak";
 import { applyCleaveCut, noteMasteryDamageDealt, peekCleaveCut } from "./masteries";
 import {
@@ -400,6 +402,7 @@ async function settleAttack(message: any, reading: HitReading): Promise<void> {
   if (reading.hits.length > 0) verdict = "hit";
   else if (reading.missed.length > 0) verdict = grazed ? "graze" : "miss";
   await noteVerdict(message, verdict);
+  await collectOwedDamage(message, verdict, { automating: isAutomating() });
 
   const sneak = await offerSneakAttack(message, reading);
   if (sneak) {

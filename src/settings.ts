@@ -172,6 +172,9 @@ export function registerCombatSettings(): void {
   // Both sides on: see `isAutoDamageEnabled()` for why the obvious asymmetry (automate monsters, leave
   // the party to click) is the wrong way round.
   split(COMBAT_SETTINGS.autoDamage, "AutoDamage", Boolean, { npc: true, pc: true });
+  // The opposite split, and on the ATTACKER: monsters roll the damage they just landed; players
+  // get a timed prompt so the card cannot scroll away unpressed. See `isAutoRollDamageEnabled()`.
+  split(COMBAT_SETTINGS.autoRollDamage, "AutoRollDamage", Boolean, { npc: true, pc: false });
   world(COMBAT_SETTINGS.autoSaves, "AutoSaves", Boolean, true);
   // Two identical clocks — who is elected to roll, not sheet type. `hasPlayerOwner` would treat
   // every goblin as a player on "All Players: Owner". GM defaults to 0 so a Fireball on five
@@ -531,6 +534,19 @@ export function getEconomyMode(subject: unknown): "off" | "warn" | "block" {
  */
 export function isAutoDamageEnabled(subject: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.autoDamage, subject);
+}
+
+/**
+ * Does this ATTACKER roll damage without being asked?
+ *
+ * Split by who SWINGS, not who takes the hit — the opposite of `autoDamage`. Monsters default
+ * on so a GM driving them by hand is not hunting a Damage button the log already scrolled past.
+ * Player characters default off: those dice are the fun part, and a timed prompt is what stops
+ * the card vanishing. Timeout still rolls. Automated turns already call `rollDamage` in
+ * `finishActivity` and this layer skips them.
+ */
+export function isAutoRollDamageEnabled(attacker: unknown): boolean {
+  return splitFlag(COMBAT_SETTINGS.autoRollDamage, attacker);
 }
 
 /**

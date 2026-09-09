@@ -41,6 +41,14 @@ test("no mastery, or a different one, deals nothing", () => {
   assert.equal(grazeDamage(attack("topple"), greatsword(), activity(4)), null);
 });
 
+test("an NPC card that never wrote a mastery flag still reads the weapon", () => {
+  const npc = activity(4);
+  npc.actor.type = "npc";
+  (npc.actor.system.traits.weaponProf as { mastery?: unknown }).mastery = undefined;
+  const silent = { flags: { dnd5e: { roll: {} } } };
+  assert.deepEqual(grazeDamage(silent, greatsword(), npc), { amount: 4, type: "slashing" });
+});
+
 test("a leftover graze flag does nothing when the wielder has no Weapon Mastery for it", () => {
   const monk = activity(4);
   monk.actor.system.traits.weaponProf.mastery.value = new Set();

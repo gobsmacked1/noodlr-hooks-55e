@@ -633,10 +633,11 @@ const SHARED_ROLLS: Section = {
   id: "rolls",
   title: "Rolling and reporting",
   blurb:
-    "Applying damage is built and lives in the next section, per side; a saving throw settling that damage " +
-    "is here. What is still missing is rolling an attack for you, placing an area, and deciding who a " +
-    "template caught — this module reads rolls off the chat log and acts on them, but it does not make " +
-    "them.",
+    "Applying rolled damage lives in the next section, per side. Rolling the damage dice on a confirmed " +
+    "hit is also there — monsters default on, players get a timed prompt. A demanded save, check, or " +
+    "those damage dice all hold initiative until they exist, and until hit points have had a chance to " +
+    "move, so a bloody or a kill lands before the next turn. What is still missing is rolling an attack " +
+    "for you, placing an area, and deciding who a template caught.",
   rows: [
     {
       id: "autoAttack",
@@ -775,6 +776,16 @@ const AUTO_DAMAGE_ROW: Row = {
   ownership: "autoDamage",
 };
 
+const AUTO_ROLL_DAMAGE_ROW: Row = {
+  id: "autoRollDamage",
+  label: "NOODLRHOOKS.Combat.AutoRollDamage.Name",
+  hint: "NOODLRHOOKS.Combat.AutoRollDamage.Hint",
+  state: "live",
+  setting: C.autoRollDamage,
+  kind: "boolean",
+  ownership: "autoRollDamage",
+};
+
 const REACTION_PROMPT_ROW: Row = {
   id: "reactionPrompts",
   label: "NOODLRHOOKS.Combat.ReactionPrompts.Name",
@@ -866,6 +877,7 @@ const PER_SIDE_STATE: Section = {
       blurb: "Anything whose sheet is not a character, whoever happens to own the token.",
       rows: [
         AUTO_DAMAGE_ROW,
+        AUTO_ROLL_DAMAGE_ROW,
         DYING_ROW,
         {
           id: "importantNpc",
@@ -891,6 +903,7 @@ const PER_SIDE_STATE: Section = {
       blurb: "Character sheets. The GM is never refused here, only ever asked.",
       rows: [
         AUTO_DAMAGE_ROW,
+        AUTO_ROLL_DAMAGE_ROW,
         DYING_ROW,
         CONCENTRATION_ROW,
         ECONOMY_ROW,

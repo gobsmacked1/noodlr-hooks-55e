@@ -69,6 +69,14 @@ export const COMBAT_SETTINGS = {
   masteries: "combat.masteries",
   /** Per audience. Whether rolled damage lands on the creature it was rolled against, with no button. */
   autoDamage: "combat.autoDamage",
+  /**
+   * Per audience. Whether a confirmed hit rolls its damage without the chat-card button.
+   *
+   * Split by the ATTACKER, the opposite of `autoDamage`. Monsters default on; player characters
+   * default off and get a timed prompt instead — the dice are the fun part, and the card scrolls
+   * away. Timeout still rolls. Automated turns already roll in `finishActivity` and skip this.
+   */
+  autoRollDamage: "combat.autoRollDamage",
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */
   autoSaves: "combat.autoSaves",
   /**
@@ -184,6 +192,7 @@ export const SPLIT_COMBAT_SETTINGS = [
   COMBAT_SETTINGS.concentration,
   COMBAT_SETTINGS.economy,
   COMBAT_SETTINGS.autoDamage,
+  COMBAT_SETTINGS.autoRollDamage,
   COMBAT_SETTINGS.reactionPrompts,
   COMBAT_SETTINGS.counterspell,
   COMBAT_SETTINGS.ready,

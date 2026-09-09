@@ -1214,6 +1214,9 @@ the console output the call produced as well as the return value, which matters 
 these surveys PRINT a flat block and hand back a count — see the flat-output note under v0.6.3. Full
 reasoning, the security constraint and the Playwright traps are in
 [noodlr's AGENTS.md](../noodlr-main/AGENTS.md) under "The GM harness".
+`deleteCombat` always logs `combat ended` (full mode never opts anyone in, so the old
+"releasing N" line stayed silent on this table). The harness rolls `latest.log` on that
+sentence and copies the slice to `logs/latest.combat.log`.
 
 **Nothing this module logs reaches the Foundry server**, so `journalctl` is not an alternative: module
 code is browser-only ESM. The one server-side channel that carries our own output is the **chat log**,
@@ -3602,9 +3605,15 @@ button press.
   is elected to roll (`rollerForActor` is a GM vs a player) picks the clock — not sheet
   type, or "All Players: Owner" would give every goblin the Player timer. Transport and
   `waitForOwedRolls` size to the longer clock so a 120 s Player timer is not GM-rolled
-  at 30 s. **OA attack rolls and damage rolls stay on their own layers** — the
-  reaction offer and auto-damage / the damage gate. This clock is the demanded
-  check that used to sit unpressed on a chat card while the fight moved on.
+  at 30 s. **OA attack rolls stay on the reaction layer.** Owed **weapon damage**
+  is on this list: a confirmed hit that still has no damage card holds initiative
+  the same way a demanded save does, and the line stays up until auto-apply has
+  had a chance so a bloody or a kill lands before legendary actions or the next
+  turn. `combat.autoRollDamage` (NPC on / PC off) is who rolls without the
+  chat-card button; the clock still rolls, there is no Skip. Automated turns
+  already roll in `finishActivity` and are not asked again. Fireball
+  save-then-damage is not this pass. This clock is the demanded check (or
+  damage) that used to sit unpressed on a chat card while the fight moved on.
 - **Advantage + Disadvantage highlights neither button (Monk vs stunned Beholder, 2026-09-02).**
   The condition layer did apply `vs:stunned`. dnd5e's `D20Roll.applyKeybindings` then cancelled it
   against `unseen target (no line of sight)` from a single centre-to-centre ray. A Large token

@@ -1,4 +1,10 @@
-// A demanded d20 that nobody has rolled yet — player or GM, one target or four.
+// A demanded roll that nobody has produced yet — a d20, or the damage dice on a confirmed hit.
+//
+// Unrolled weapon damage is the same skip as an unpressed save: the tracker moves, legendary
+// actions fire, and a creature that should be bloodied or dead still takes its turn. Owed
+// damage therefore uses this same list. The hold lasts until the dice exist AND (when
+// auto-apply is on) hit points have had a chance to move — a bloody or a kill has to land
+// before the next combatant acts.
 //
 // The system's card draws a button and waits. Anyone who never presses it still gets their turn,
 // so a petrifying ray, a Grapple, a forced Deception, or a concentration check that nobody
@@ -24,10 +30,10 @@
 // query never arrives (offline, transport timeout), never the first roll for a connected owner.
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
+import { enabledForEither, isAutoRollDamageEnabled, isAutoSavesEnabled } from "../settings";
 import { isPrimaryGM, isRollerFor, rollerForActor } from "../util/gm";
 import { promptChoice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
-import { isAutoSavesEnabled } from "../settings";
 import {
   activityOf,
   itemOf,
@@ -58,10 +64,13 @@ export const OWED_SETTLE_MS = 5_000;
 /** How long initiative will wait when both clocks are 0 (instant rolls plus settle). */
 export const OWED_ADVANCE_BUDGET_MS = 20_000;
 
+/** After the damage card exists, wait this long for auto-apply before releasing the tracker. */
+export const OWED_DAMAGE_APPLY_MS = 4_000;
+
 /** A usage card posted this tick may not have been filed yet. */
 export const OWED_GRACE_MS = 750;
 
-export type OwedKind = "save" | "check" | "concentration";
+export type OwedKind = "save" | "check" | "concentration" | "damage";
 
 export interface OwedRequest {
   kind: OwedKind;
@@ -75,6 +84,11 @@ export interface OwedRequest {
   usageId: string;
   /** Seconds the owner's client waits. 0 = no prompt. Stamped by the asker so both sides agree. */
   seconds?: number;
+  /** Damage only — activity uuids do not resolve through `fromUuid`. */
+  itemUuid?: string;
+  activityId?: string;
+  isCritical?: boolean;
+  attackMode?: string;
 }
 
 export interface OwedAnswer {
@@ -122,6 +136,35 @@ export function owedAdvanceBudgetMs(gmSeconds: number, playerSeconds: number): n
 
 export function shouldPromptOwed(seconds: number): boolean {
   return clampOwedSeconds(seconds) > 0;
+}
+
+/**
+ * Clock for an owed damage roll. Auto-roll is instant (0). Manual never uses a 0 clock —
+ * the GM's save timer is 0 so Fireball-on-goblins does not prompt, and that must not
+ * silently auto-roll a player's (or a hand-driven monster's) weapon damage.
+ */
+export function owedDamageSeconds(autoRoll: boolean, clockSeconds: number): number {
+  if (autoRoll) return 0;
+  const clock = clampOwedSeconds(clockSeconds);
+  return shouldPromptOwed(clock) ? clock : OWED_SECONDS;
+}
+
+/**
+ * A confirmed attack hit still needs its damage dice. Automated turns already roll
+ * in `finishActivity` and must not be asked again. Graze / miss / open / a Charm Ray
+ * with no parts are not this pass — nor is a Fireball's save-then-damage button.
+ */
+export function shouldCollectOwedDamage(input: {
+  verdict: string;
+  activityType: string;
+  hasDamageParts: boolean;
+  alreadyRolled: boolean;
+  automating: boolean;
+}): boolean {
+  if (input.automating || input.alreadyRolled) return false;
+  if (input.verdict !== "hit") return false;
+  if (input.activityType !== "attack") return false;
+  return input.hasDamageParts;
 }
 
 function readOwedSeconds(which: "gm" | "players"): number {
@@ -215,7 +258,10 @@ export function registerOwedRolls(): void {
   Hooks.on("createChatMessage", (message: any) => {
     const usageId = originatingId(message);
     const type = rollType(message);
-    if (usageId && (type === "save" || type === "skill" || type === "ability")) {
+    if (
+      usageId &&
+      (type === "save" || type === "skill" || type === "ability" || type === "damage" || type === "healing")
+    ) {
       const token = speakerToken(message?.speaker);
       if (token) abortOwedPrompt(owedKey(usageId, String(token.id ?? "")));
     }
@@ -275,10 +321,18 @@ export async function requestOwedRoll(request: OwedRequest): Promise<OwedAnswer 
  * A clock of 0 on this creature's elected roller rolls immediately (configure: false) —
  * that is the GM-owned Fireball-on-goblins path. A positive clock always prompts, even
  * when this client is the roller, so a GM who set their timer to 6 is asked. A hung
- * query falls through to a GM roll. Used for checks, concentration, and repeat
- * end-of-turn saves — anything that is not already filed on the save-layer activation map.
+ * query falls through to a GM roll. Used for checks, concentration, repeat
+ * end-of-turn saves, and owed damage — anything that is not already filed on
+ * the save-layer activation map.
+ *
+ * `after` runs while the line is still outstanding. Damage uses it so a bloody
+ * or a kill lands before initiative can move, not a tick later.
  */
-export async function collectDemanded(request: OwedRequest, line: OwedLine): Promise<OwedAnswer | null> {
+export async function collectDemanded(
+  request: OwedRequest,
+  line: OwedLine,
+  after?: () => Promise<void>,
+): Promise<OwedAnswer | null> {
   const key = owedKey(request.usageId, request.tokenId);
   if (asking.has(key)) return null;
   asking.add(key);
@@ -290,17 +344,86 @@ export async function collectDemanded(request: OwedRequest, line: OwedLine): Pro
     stampClock(request, actor);
     if (actor && isRollerFor(actor) && !shouldPromptOwed(request.seconds ?? 0)) {
       const local = await performOwedRoll(request, { configure: false });
-      if (local.ok) return { rolled: true, total: local.total };
+      if (local.ok) {
+        if (after) await after();
+        return { rolled: true, total: local.total };
+      }
     }
     const answer = await requestOwedRoll(request);
-    if (answer?.already || answer?.rolled) return answer;
+    if (answer?.already || answer?.rolled) {
+      if (after) await after();
+      return answer;
+    }
     const fallback = await performOwedRoll(request, { configure: false });
+    if (after) await after();
     return { rolled: fallback.ok, total: fallback.total };
   } finally {
     pendingChecks.delete(key);
     asking.delete(key);
     void syncOwedFlag();
   }
+}
+
+/**
+ * A confirmed hit still needs its damage dice. Uses the same outstanding list as a
+ * demanded save, so End Turn, nextTurn, walks, and activity use all wait. Automated
+ * turns already roll in `finishActivity` and are skipped.
+ */
+export async function collectOwedDamage(
+  message: any,
+  verdict: string,
+  opts?: { automating?: boolean },
+): Promise<void> {
+  const item = itemOf(message);
+  const activity = activityOf(message, item);
+  const parts = activity?.damage?.parts;
+  const usageId = originatingId(message) || String(message?.id ?? "");
+  const token = speakerToken(message?.speaker);
+  const actor = token?.actor ?? message?.speakerActor ?? null;
+  if (!usageId || !token || !actor || !item || !activity) return;
+
+  if (
+    !shouldCollectOwedDamage({
+      verdict,
+      activityType: String(activity.type ?? ""),
+      hasDamageParts: Array.isArray(parts) && parts.length > 0,
+      alreadyRolled: usageAlreadyHasDamage(usageId, String(message?.id ?? "")),
+      automating: Boolean(opts?.automating),
+    })
+  ) {
+    return;
+  }
+
+  const tokenId = String(token.id ?? "");
+  const source = String(item.name ?? activity.name ?? "");
+  const request: OwedRequest = {
+    kind: "damage",
+    actorUuid: String(actor.uuid ?? ""),
+    tokenUuid: String(token.uuid ?? ""),
+    tokenId,
+    ability: "",
+    dc: 0,
+    source,
+    usageId,
+    itemUuid: String(item.uuid ?? message?.flags?.dnd5e?.item?.uuid ?? ""),
+    activityId: String(activity.id ?? message?.flags?.dnd5e?.activity?.id ?? ""),
+    isCritical: Boolean(message?.rolls?.[0]?.isCritical),
+    attackMode: String(message?.flags?.dnd5e?.roll?.attackMode ?? "") || undefined,
+    seconds: owedDamageSeconds(isAutoRollDamageEnabled(actor), owedSecondsFor(actor)),
+  };
+  const line: OwedLine = {
+    tokenId,
+    name: String(token.name ?? actor.name ?? ""),
+    kind: "damage",
+    ability: "",
+    dc: null,
+    source,
+  };
+  const keys = [usageId, String(message?.id ?? "")].filter(Boolean);
+  await collectDemanded(request, line, async () => {
+    if (!enabledForEither(COMBAT_SETTINGS.autoDamage)) return;
+    await waitForDamageLanded(keys);
+  });
 }
 
 export async function waitForOwedRolls(budgetMs?: number): Promise<boolean> {
@@ -418,7 +541,17 @@ async function performOwedRoll(
   const dialog = { configure: opts.configure };
   try {
     let result: unknown;
-    if (request.kind === "concentration") {
+    if (request.kind === "damage") {
+      const item: any = await resolve(request.itemUuid ?? "");
+      const activity =
+        item?.system?.activities?.get?.(request.activityId) ??
+        item?.system?.activities?.get?.(String(request.activityId ?? ""));
+      if (!activity || typeof activity.rollDamage !== "function") return { ok: false, total: null };
+      const rollCfg: { isCritical?: boolean; attackMode?: string } = {};
+      if (request.isCritical) rollCfg.isCritical = true;
+      if (request.attackMode) rollCfg.attackMode = request.attackMode;
+      result = await activity.rollDamage(rollCfg, dialog, messageData);
+    } else if (request.kind === "concentration") {
       result = await actor.rollConcentration({ target: request.dc }, dialog, messageData);
     } else if (request.kind === "save") {
       result = await actor.rollSavingThrow(
@@ -509,6 +642,12 @@ async function maybeAskCheck(message: any): Promise<void> {
 }
 
 function sentence(request: OwedRequest, name: string): string {
+  if (request.kind === "damage") {
+    return game.i18n.format("NOODLRHOOKS.OwedRoll.BodyDamage", {
+      name,
+      source: request.source,
+    });
+  }
   const key =
     request.kind === "concentration"
       ? "NOODLRHOOKS.OwedRoll.BodyConcentration"
@@ -529,12 +668,17 @@ function notifyBlocked(owed: OwedLine[]): void {
   const first = owed[0]!;
   const text =
     owed.length === 1
-      ? game.i18n.format("NOODLRHOOKS.OwedRoll.Blocked", {
-          name: first.name,
-          ability: abilityLabel(first.ability),
-          source: first.source,
-          dc: String(first.dc ?? "?"),
-        })
+      ? first.kind === "damage"
+        ? game.i18n.format("NOODLRHOOKS.OwedRoll.BlockedDamage", {
+            name: first.name,
+            source: first.source,
+          })
+        : game.i18n.format("NOODLRHOOKS.OwedRoll.Blocked", {
+            name: first.name,
+            ability: abilityLabel(first.ability),
+            source: first.source,
+            dc: String(first.dc ?? "?"),
+          })
       : game.i18n.format("NOODLRHOOKS.OwedRoll.BlockedMany", {
           name: first.name,
           more: String(owed.length - 1),
@@ -571,6 +715,43 @@ async function resolve(uuid: string): Promise<any> {
     return (await (globalThis as any).fromUuid?.(uuid)) ?? null;
   } catch {
     return null;
+  }
+}
+
+function usageAlreadyHasDamage(usageId: string, attackId: string): boolean {
+  const keys = new Set([usageId, attackId].filter(Boolean));
+  return findDamageCard(keys) !== null;
+}
+
+function findDamageCard(keys: Iterable<string>): any {
+  const wanted = new Set([...keys].filter(Boolean));
+  if (!wanted.size) return null;
+  const collection = (globalThis as any).game?.messages;
+  const list = Array.isArray(collection) ? collection : (collection?.contents ?? []);
+  for (const msg of list) {
+    const type = rollType(msg);
+    if (type !== "damage" && type !== "healing") continue;
+    const origin = originatingId(msg);
+    if (origin && wanted.has(origin)) return msg;
+    if (wanted.has(String(msg.id ?? ""))) return msg;
+  }
+  return null;
+}
+
+/**
+ * Hold until auto-apply has had a chance. A bloody or a kill has to land before
+ * the next turn or legendary action. Released once the card is flagged, or shortly
+ * after it appears (apply declined / stood aside), or at the patience cap.
+ */
+async function waitForDamageLanded(keys: string[]): Promise<void> {
+  const start = Date.now();
+  let seenAt = 0;
+  while (Date.now() - start < OWED_DAMAGE_APPLY_MS) {
+    const card = findDamageCard(keys);
+    if (card?.getFlag?.(MODULE_ID, "damageApplied")) return;
+    if (card && !seenAt) seenAt = Date.now();
+    if (card && Date.now() - seenAt >= OWED_GRACE_MS) return;
+    await sleep(50);
   }
 }
 

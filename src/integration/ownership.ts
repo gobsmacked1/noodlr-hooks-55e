@@ -112,6 +112,7 @@ const AREAS: Area[] = [
   { id: "attackRange", setting: COMBAT_SETTINGS.attackRange },
   { id: "flanking", setting: COMBAT_SETTINGS.flanking },
   { id: "autoDamage", setting: COMBAT_SETTINGS.autoDamage },
+  { id: "autoRollDamage", setting: COMBAT_SETTINGS.autoRollDamage },
   { id: "autoSaves", setting: COMBAT_SETTINGS.autoSaves },
   { id: "templateLifetime", setting: COMBAT_SETTINGS.templateLifetime },
   { id: "reactionPrompts", setting: COMBAT_SETTINGS.reactionPrompts },

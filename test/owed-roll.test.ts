@@ -10,8 +10,10 @@ import {
   clampOwedSeconds,
   owedAdvanceBudgetMs,
   owedClockForUser,
+  owedDamageSeconds,
   owedTransportMs,
   shouldBlockAdvance,
+  shouldCollectOwedDamage,
   shouldPromptOwed,
   type OwedLine,
 } from "../src/rules/owed-roll";
@@ -81,4 +83,40 @@ test("Mass Suggestion on four targets holds until the last die exists", () => {
   assert.equal(shouldBlockAdvance(four, { turn: 3 }), true);
   assert.equal(shouldBlockAdvance(four.slice(0, 1), { turn: 3 }), true);
   assert.equal(shouldBlockAdvance([], { turn: 3 }), false);
+});
+
+const hit: Parameters<typeof shouldCollectOwedDamage>[0] = {
+  verdict: "hit",
+  activityType: "attack",
+  hasDamageParts: true,
+  alreadyRolled: false,
+  automating: false,
+};
+
+test("owed damage is collected only on a confirmed attack hit that still needs dice", () => {
+  assert.equal(shouldCollectOwedDamage(hit), true);
+  assert.equal(shouldCollectOwedDamage({ ...hit, verdict: "miss" }), false);
+  assert.equal(shouldCollectOwedDamage({ ...hit, verdict: "open" }), false);
+  assert.equal(shouldCollectOwedDamage({ ...hit, activityType: "save" }), false);
+  assert.equal(shouldCollectOwedDamage({ ...hit, hasDamageParts: false }), false);
+  assert.equal(shouldCollectOwedDamage({ ...hit, alreadyRolled: true }), false);
+  assert.equal(shouldCollectOwedDamage({ ...hit, automating: true }), false);
+});
+
+test("manual damage never uses a 0 clock; auto-roll is instant", () => {
+  assert.equal(owedDamageSeconds(true, 0), 0);
+  assert.equal(owedDamageSeconds(true, 30), 0);
+  assert.equal(owedDamageSeconds(false, 0), OWED_SECONDS);
+  assert.equal(owedDamageSeconds(false, 30), 30);
+  assert.equal(owedDamageSeconds(false, 120), 120);
+});
+
+test("owed damage holds initiative the same way a demanded save does", () => {
+  const damage: OwedLine[] = [
+    { tokenId: "t1", name: "Monk", kind: "damage", ability: "", dc: null, source: "Quarterstaff" },
+  ];
+  assert.equal(shouldBlockAdvance(damage, { turn: 2 }), true);
+  assert.equal(shouldBlockAdvance(damage, { round: 2 }), true);
+  assert.equal(shouldBlockAdvance(damage, { flags: { "noodlr-hooks-55e": { owed: damage } } }), false);
+  assert.equal(shouldBlockAdvance([], { turn: 2 }), false);
 });

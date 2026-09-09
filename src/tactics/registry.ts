@@ -15,7 +15,11 @@ const optedIn = new Set<string>();
 
 export function registerAutomationCleanup(): void {
   Hooks.on("deleteCombat", () => {
-    if (optedIn.size > 0) log(`combat ended; releasing ${optedIn.size} automated combatant(s)`);
+    // Always say the encounter is over — full mode never opts anyone in, so a "releasing N"
+    // line alone would stay silent on the fights this table actually runs. The harness rolls
+    // latest.log on this sentence.
+    log("combat ended");
+    if (optedIn.size > 0) log(`releasing ${optedIn.size} automated combatant(s)`);
     optedIn.clear();
   });
 }
