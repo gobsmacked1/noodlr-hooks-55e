@@ -3,10 +3,18 @@ import { test } from "node:test";
 
 import { leftoverPastZero } from "../src/system/dnd5e-dying";
 import {
+  ESTIMATE_NOT_DEAD,
+  ESTIMATE_NS,
+  firstAidKind,
   isBludgeoningOnly,
   knockoutQualifies,
   meleeFromParts,
 } from "../src/system/dnd5e-knockout";
+
+test("Health Estimate's Dead label is opted out by dontMarkDead, not by applying dead", () => {
+  assert.equal(ESTIMATE_NS, "healthEstimate");
+  assert.equal(ESTIMATE_NOT_DEAD, "dontMarkDead");
+});
 
 test("only Bludgeoning qualifies; empty and mixed types do not", () => {
   assert.equal(isBludgeoningOnly(["bludgeoning"]), true);
@@ -65,6 +73,32 @@ test("knockoutQualifies: leftover below max, melee bludgeoning, no death saves",
     reason: "not-bludgeoning-only",
   });
   assert.deepEqual(knockoutQualifies({ ...base, maxHp: 0 }), { ok: false, reason: "no-max" });
+});
+
+test("firstAidKind: knockout wakes even at 1 HP; 0 HP still stabilizes", () => {
+  const dying = {
+    hp: 0,
+    knockout: false,
+    unconscious: true,
+    dead: false,
+    stable: false,
+  };
+  assert.equal(firstAidKind(dying), "stabilize");
+  assert.equal(firstAidKind({ ...dying, stable: true }), "none");
+  assert.equal(firstAidKind({ ...dying, dead: true }), "none");
+  assert.equal(firstAidKind({ ...dying, hp: 8, unconscious: false }), "none");
+  assert.equal(
+    firstAidKind({ hp: 1, knockout: true, unconscious: true, dead: false, stable: false }),
+    "wake",
+  );
+  assert.equal(
+    firstAidKind({ hp: 1, knockout: true, unconscious: false, dead: false, stable: false }),
+    "wake",
+  );
+  assert.equal(
+    firstAidKind({ hp: 1, knockout: true, unconscious: true, dead: true, stable: false }),
+    "none",
+  );
 });
 
 test("leftoverPastZero: exactly 0 HP still has leftover 0; massive is leftover >= max", () => {

@@ -5,10 +5,12 @@
 // via dnd5e's own applyDamage hooks — no patching. Midi QoL is not a supported install.
 //
 // KNOCKOUT is a dying-layer fork, not a new action. A melee killing blow that deals only
-// Bludgeoning can mark an ordinary NPC Unconscious + Stable for one hour instead of Dead.
-// The prompt is that blow, never every swing. PCs and Important NPCs already fall Unconscious
-// and are never asked. Instant death is still death. XP and loot still treat a knockout as
-// slain — that is a later encounter change (Combat page, planned row).
+// Bludgeoning can leave an ordinary NPC at 1 HP with Unconscious for one hour (a 2024
+// Short Rest) instead of Dead. They are not Stable and do not make death saves. The
+// condition ends when the hour does, or earlier if they regain any Hit Points or someone
+// administers first aid. The prompt is that blow, never every swing. PCs and Important
+// NPCs already fall Unconscious and are never asked. Instant death is still death. XP
+// and loot still treat a knockout as slain — that is a later encounter change.
 //
 // Register on every client: the updating user's client is the one that writes (same gate as bloodied).
 
@@ -32,10 +34,20 @@ import {
   leftoverPastZero,
   usesDeathSaves,
 } from "../system/dnd5e-dying";
-import { knockoutQualifies } from "../system/dnd5e-knockout";
+import { firstAidKind, knockoutQualifies } from "../system/dnd5e-knockout";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { hasStatus } from "../system/dnd5e-conditions";
-import { askKnockout, readKnockoutSwing, stampKnockoutHour } from "./knockout";
+import {
+  askKnockout,
+  isKnockedOut,
+  isKnockoutHpWrite,
+  markEstimateNotDead,
+  readKnockoutSwing,
+  registerKnockoutWatch,
+  setKnockedOut,
+  stampKnockoutHour,
+  writeKnockoutHp,
+} from "./knockout";
 
 interface PendingDamage {
   oldHp: number;
@@ -50,6 +62,7 @@ interface PendingDamage {
   hadStable: boolean;
   /** Damage / attack card, when applyDamage named one. Absent on a raw HP edit. */
   message: any | null;
+  hadKnockout?: boolean;
 }
 
 interface UndoEntry {
@@ -61,6 +74,10 @@ interface UndoEntry {
   dead: boolean;
   stable: boolean;
   combatantDefeated: { id: string; defeated: boolean }[];
+  /** HP before a knockout wrote 1. Restored on undo so the heal hook is not involved. */
+  hp?: number;
+  /** Restore this knockout-flag state. Undefined leaves the flag alone. */
+  knockout?: boolean;
 }
 
 /** One-shot bridge from preApplyDamage → applyDamage (same tick, same client). */
@@ -154,6 +171,7 @@ function capturePending(actor: any, amount: number, options: any): void {
     hadUnconscious: hasStatus(actor, "unconscious"),
     hadDead: hasStatus(actor, "dead"),
     hadStable: hasStatus(actor, "stable"),
+    hadKnockout: isKnockedOut(actor),
     message: originatingMessageOf(options),
   });
 }
@@ -224,6 +242,9 @@ function pushUndo(entry: UndoEntry): void {
 }
 
 async function becomeDead(actor: any, reason: string, before: PendingDamage): Promise<void> {
+  const wasKnocked = isKnockedOut(actor);
+  // Clear the flag before Unconscious, or the delete hook would wake a corpse.
+  if (wasKnocked) await setKnockedOut(actor, false);
   const combatantDefeated = await setCombatantDefeated(actor, true);
   pushUndo({
     uuid: actorKey(actor),
@@ -234,9 +255,11 @@ async function becomeDead(actor: any, reason: string, before: PendingDamage): Pr
     dead: before.hadDead,
     stable: before.hadStable,
     combatantDefeated,
+    knockout: wasKnocked || Boolean(before.hadKnockout),
   });
   if (hasStatus(actor, "unconscious")) await setStatus(actor, "unconscious", false);
   if (hasStatus(actor, "stable")) await setStatus(actor, "stable", false);
+  await markEstimateNotDead(actor, false);
   await setStatus(actor, "dead", true);
   await announce(
     actor,
@@ -273,10 +296,12 @@ async function becomeUnconscious(actor: any, before: PendingDamage): Promise<voi
 }
 
 /**
- * Ordinary NPC knocked out: Unconscious (already on, so they cannot act during the prompt),
- * Stable, defeated, one hour. Undo restores the pre-drop snapshot.
+ * Ordinary NPC knocked out: 1 HP, Unconscious (already on during the prompt), defeated,
+ * one-hour stamp. Not Stable — 2024 never puts them on the death-save track.
+ * Undo restores the pre-knockout snapshot, including HP 0.
  */
 async function becomeKnockedOut(actor: any, before: PendingDamage): Promise<void> {
+  const priorHp = Number(actor.system?.attributes?.hp?.value ?? 0) || 0;
   const combatantDefeated = await setCombatantDefeated(actor, true);
   pushUndo({
     uuid: actorKey(actor),
@@ -287,14 +312,55 @@ async function becomeKnockedOut(actor: any, before: PendingDamage): Promise<void
     dead: before.hadDead,
     stable: before.hadStable,
     combatantDefeated,
+    hp: priorHp,
+    knockout: false,
   });
   if (hasStatus(actor, "dead")) await setStatus(actor, "dead", false);
+  if (hasStatus(actor, "stable")) await setStatus(actor, "stable", false);
   await setStatus(actor, "unconscious", true);
-  await setStatus(actor, "stable", true);
+  await setKnockedOut(actor, true);
+  await writeKnockoutHp(actor, 1);
+  await markEstimateNotDead(actor, true);
   await stampKnockoutHour(actor);
   await announce(
     actor,
     game.i18n.format("NOODLRHOOKS.Combat.Knockout.KnockedOut", {
+      name: String(actor.name ?? "Someone"),
+    }),
+    true,
+  );
+}
+
+/**
+ * Short Rest finished, Unconscious clicked off, or first aid. Flag first so the
+ * delete hook cannot re-enter. We do not run `shortRest` — that dialog spends Hit
+ * Dice and recharges features mid-dungeon.
+ */
+async function wakeFromKnockout(actor: any, opts?: { announce?: boolean }): Promise<void> {
+  if (!actor || !isKnockedOut(actor)) return;
+  const snap = hpSnapshot(actor);
+  await setKnockedOut(actor, false);
+  const combatantDefeated = await setCombatantDefeated(actor, false);
+  pushUndo({
+    uuid: actorKey(actor),
+    reason: "wake",
+    failures: snap.failures,
+    successes: snap.successes,
+    unconscious: hasStatus(actor, "unconscious"),
+    dead: hasStatus(actor, "dead"),
+    stable: hasStatus(actor, "stable"),
+    combatantDefeated,
+    knockout: true,
+    hp: snap.value,
+  });
+  if (hasStatus(actor, "unconscious")) await setStatus(actor, "unconscious", false);
+  if (hasStatus(actor, "stable")) await setStatus(actor, "stable", false);
+  await markEstimateNotDead(actor, false);
+  if (snap.value <= 0) await writeKnockoutHp(actor, 1);
+  if (opts?.announce === false) return;
+  await announce(
+    actor,
+    game.i18n.format("NOODLRHOOKS.Combat.Knockout.Woke", {
       name: String(actor.name ?? "Someone"),
     }),
     true,
@@ -443,9 +509,18 @@ async function resolveAppliedDamage(actor: any): Promise<void> {
       await becomeUnconscious(actor, before);
     }
   } else if (!hasStatus(actor, "dead")) {
-    const knocked = await maybeKnockout(actor, before);
-    if (!knocked) {
+    // A second blow on a 1 HP knockout is a kill, not another prompt.
+    if (isKnockedOut(actor)) {
       await becomeDead(actor, game.i18n.localize("NOODLRHOOKS.Combat.Dying.Reason.ZeroHp"), before);
+    } else {
+      const knocked = await maybeKnockout(actor, before);
+      if (!knocked) {
+        await becomeDead(
+          actor,
+          game.i18n.localize("NOODLRHOOKS.Combat.Dying.Reason.ZeroHp"),
+          before,
+        );
+      }
     }
   }
 }
@@ -462,15 +537,21 @@ async function onHpChanged(
   if (!enabled(actor)) return;
   if (userId !== game.userId) return;
   if (pending.has(actorKey(actor))) return; // applyDamage path owns this update
+  if (isKnockoutHpWrite(actor)) return;
 
   const newHp = Number(actor.system?.attributes?.hp?.value ?? 0) || 0;
   const honor = honorImportantNpcDeathSaves();
   const saves = usesDeathSaves(actor, honor);
 
   // Healed above 0: clear dying marks. Death counters are already reset by stock preUpdateHP.
+  // A 2024 knockout is already at 1 HP, so any further regain also ends Unconscious (RAW).
   if (changes.total > 0 && newHp > 0) {
+    const knocked = isKnockedOut(actor);
     const had =
-      hasStatus(actor, "unconscious") || hasStatus(actor, "dead") || hasStatus(actor, "stable");
+      hasStatus(actor, "unconscious") ||
+      hasStatus(actor, "dead") ||
+      hasStatus(actor, "stable") ||
+      knocked;
     if (!had) return;
     const before: PendingDamage = {
       oldHp: 0,
@@ -483,6 +564,7 @@ async function onHpChanged(
       hadUnconscious: hasStatus(actor, "unconscious"),
       hadDead: hasStatus(actor, "dead"),
       hadStable: hasStatus(actor, "stable"),
+      hadKnockout: knocked,
       message: null,
     };
     const combatantDefeated = await setCombatantDefeated(actor, false);
@@ -495,7 +577,10 @@ async function onHpChanged(
       dead: before.hadDead,
       stable: before.hadStable,
       combatantDefeated,
+      knockout: knocked,
     });
+    if (knocked) await setKnockedOut(actor, false);
+    await markEstimateNotDead(actor, false);
     await setStatus(actor, "dead", false);
     await setStatus(actor, "unconscious", false);
     await setStatus(actor, "stable", false);
@@ -524,6 +609,7 @@ async function onHpChanged(
         hadUnconscious: hasStatus(actor, "unconscious"),
         hadDead: hasStatus(actor, "dead"),
         hadStable: hasStatus(actor, "stable"),
+        hadKnockout: isKnockedOut(actor),
         message: null,
       };
       if (saves) {
@@ -643,9 +729,15 @@ export async function undoDying(): Promise<number> {
       "system.attributes.death.failure": entry.failures,
       "system.attributes.death.success": entry.successes,
     });
+    if (entry.knockout === true) await setKnockedOut(actor, true);
+    else if (entry.knockout === false) await setKnockedOut(actor, false);
+    if (typeof entry.hp === "number") await writeKnockoutHp(actor, entry.hp);
     await setStatus(actor, "dead", entry.dead);
     await setStatus(actor, "unconscious", entry.unconscious);
     await setStatus(actor, "stable", entry.stable);
+    if (entry.reason === "knockout" || entry.reason === "wake") {
+      await markEstimateNotDead(actor, entry.reason === "wake");
+    }
     for (const c of entry.combatantDefeated) {
       const combatant = game.combat?.combatants?.get?.(c.id);
       if (combatant && Boolean(combatant.defeated) !== c.defeated) {
@@ -660,16 +752,14 @@ export async function undoDying(): Promise<number> {
 }
 
 /**
- * Administer First Aid: a DC 10 Wisdom (Medicine) check to stabilise a dying creature.
+ * Administer First Aid: a DC 10 Wisdom (Medicine) check.
  *
- * The other half of `stable`, and the half nothing in the stack offers. Three successful death saves
- * already reach Stable through `onPostDeathSave` above, but the deliberate route — somebody kneeling
- * down and doing something about it — has no button anywhere, because 2024 files it under the Utilize
- * action and dnd5e ships no item for it. Same gap, and the same answer, as the Hide action.
+ * At 0 HP this is still Stabilize. On a 2024 knockout (1 HP + Unconscious) the same
+ * check wakes them — RAW lists first aid as one of the three ways Unconscious ends.
  *
  * Costs whoever is helping their Action, charged after the roll so a cancelled dialog is free and
- * charged whether or not the check succeeded, which is the rule. A creature that is already Stable,
- * dead, or standing up is refused before any dice are asked for.
+ * charged whether or not the check succeeded. Dead, already-Stable, or standing (no knockout)
+ * is refused before any dice are asked for.
  */
 export async function administerFirstAid(
   healer: any,
@@ -685,9 +775,19 @@ export async function administerFirstAid(
   if (!enabled(actor)) return fail("the dying layer is off for this creature");
 
   const snap = hpSnapshot(actor);
-  if (snap.value > 0) return fail(`${String(actor.name)} is not dying`);
-  if (hasStatus(actor, "dead")) return fail(`${String(actor.name)} is beyond first aid`);
-  if (hasStatus(actor, "stable")) return fail(`${String(actor.name)} is already stable`);
+  const kind = firstAidKind({
+    hp: snap.value,
+    knockout: isKnockedOut(actor),
+    unconscious: hasStatus(actor, "unconscious"),
+    dead: hasStatus(actor, "dead"),
+    stable: hasStatus(actor, "stable"),
+  });
+  if (kind === "none") {
+    if (hasStatus(actor, "dead")) return fail(`${String(actor.name)} is beyond first aid`);
+    if (hasStatus(actor, "stable")) return fail(`${String(actor.name)} is already stable`);
+    if (snap.value > 0) return fail(`${String(actor.name)} is not dying`);
+    return fail(`${String(actor.name)} does not need first aid`);
+  }
 
   // Refused rather than asked when there is nothing left to spend, matching the Hide action: the
   // over-budget dialog exists for features that legitimately break the general rule, and kneeling
@@ -721,6 +821,21 @@ export async function administerFirstAid(
       false,
     );
     return { stabilized: false, total, dc, reason: `rolled ${total} against DC ${dc}` };
+  }
+
+  if (kind === "wake") {
+    await wakeFromKnockout(actor, { announce: false });
+    await announce(
+      actor,
+      game.i18n.format("NOODLRHOOKS.Combat.Dying.FirstAidWoke", {
+        healer: String(helper.name ?? "Someone"),
+        name: String(actor.name ?? "someone"),
+        total: String(total),
+        dc: String(dc),
+      }),
+      false,
+    );
+    return { stabilized: true, total, dc, reason: `woke — rolled ${total} against DC ${dc}` };
   }
 
   await setStatus(actor, "stable", true);
@@ -861,6 +976,8 @@ export function registerDyingHooks(): void {
   const renderHook =
     Number((game as any).release?.generation) >= 13 ? "renderChatMessageHTML" : "renderChatMessage";
   Hooks.on(renderHook, wireUndoButton);
+
+  registerKnockoutWatch(wakeFromKnockout);
 }
 
 export function surveyDying(): unknown {
@@ -876,6 +993,7 @@ export function surveyDying(): unknown {
       pc: isDyingAutomationEnabled({ type: "character" }),
     },
     knockout: isKnockoutEnabled(),
+    knockedOut: actor ? isKnockedOut(actor) : null,
     honorImportantNpc: honorImportantNpcDeathSaves(),
     selected: actor?.name ?? null,
     type: actor?.type ?? null,

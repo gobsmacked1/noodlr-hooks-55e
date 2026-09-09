@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.60
+
+**Knockout now matches the 2024 printed rule.** A qualifying melee blow leaves the
+creature at 1 hit point with Unconscious for one hour (a Short Rest), not at 0
+and Stable. They do not make death saves. Unconscious ends when that hour does,
+or earlier if they regain any Hit Points or someone administers first aid. A
+second drop while they are already out is a kill. Experience and loot still
+count a knockout as slain; that is a later change.
+
 ## 0.7.59
 
 **A melee killing blow that deals only Bludgeoning can knock an ordinary NPC

@@ -2527,19 +2527,34 @@ edits closed without saving are lost. Same trade `noodlr` makes.
  and zero `concentration:` lines because `isConcentrating` was false. NPC concentration-on-damage
  is already live.
 
-- **Knockout is a dying-layer fork, not a new action (2026-09-09).** 2024 PHB: when you reduce
- a creature to 0 HP with a melee attack, you can knock it out (Unconscious + Stable). We prompt
- only on that killing blow, and only when the damage types that actually landed are **only
- Bludgeoning** (clubs, fists). Mixed types, ranged / thrown, a save-for-damage, unknown melee,
- leftover ≥ max HP (instant death), and creatures that use death saves are never asked.
- Timeout / no answer is **Kill**. Unconscious is applied *before* the dialog so a 0 HP monster
- cannot take a turn while someone is deciding. House clock: one hour, so the party can leave.
- Setting `combat.knockout`, default on, not split. `src/system/dnd5e-knockout.ts` +
- `src/rules/knockout.ts`; `becomeKnockedOut` lives in `dying.ts`. The Combat page has a
- **planned** row for XP and loot: today a knockout still reads as slain (`isDefeated || hp <= 0`)
- and is paid in full. Taking a key from a spared guard is the specimen. Do not fold that into
- the encounter tally from a live Ready. Diagnostics: `noodlrHooks.surveyDying()` prints
- `knockout`.
+- **Knockout is a dying-layer fork, not a new action (2026-09-09; 2024 RAW in v0.7.60).**
+  Printed rule (PHB Damage and Healing, "Knocking Out a Creature"): when a melee attack
+  *would* drop them to 0, you instead leave them at **1 HP** with Unconscious. They start
+  a Short Rest; Unconscious ends when that hour finishes, or earlier if they **regain any
+  Hit Points** or someone **administers first aid** (DC 10 Medicine). They are never
+  Stable and never make death saves — those are the 0 HP track. The 1d4 hours → 1 HP
+  line is Stabilizing, a different rule; 2014 knockout used that path.
+  We prompt only on that killing blow, and only when the damage types that actually
+  landed are **only Bludgeoning** (clubs, fists). Mixed types, ranged / thrown, a
+  save-for-damage, unknown melee, leftover ≥ max HP (instant death), and creatures that
+  use death saves are never asked. Timeout / no answer is **Kill**. Unconscious is
+  applied *before* the dialog so a 0 HP monster cannot take a turn while someone is
+  deciding. The 0→1 HP write is skipped by the heal hook (`writeKnockoutHp`) so it does
+  not clear Unconscious. A second drop while already knocked out is a kill, not another
+  prompt. We stamp one hour on the Unconscious AE and do **not** run `actor.shortRest()`
+  — that dialog spends Hit Dice and recharges features mid-dungeon. HUD-delete of
+  Unconscious wakes them the same way. Setting `combat.knockout`, default on, not
+  split. `src/system/dnd5e-knockout.ts` + `src/rules/knockout.ts`; `becomeKnockedOut`
+  lives in `dying.ts`. The Combat page has a **planned** row for XP and loot: today a
+  knockout still reads as slain (`defeated` while Unconscious) and is paid in full.
+  Taking a key from a spared guard is the specimen. Do not fold that into the encounter
+  tally from a live Ready. Diagnostics: `noodlrHooks.surveyDying()` prints `knockout`
+  and `knockedOut`.
+ - **The nameplate saying Dead is Health Estimate, not our statuses (2026-09-09).** A
+  2024 knockout is at 1 HP, so `NPCsJustDie` should not fire. We still write
+  `token.setFlag("healthEstimate", "dontMarkDead", true)` as a belt, and unset it on
+  kill / wake / undo. Not a dependency. Do not apply `dead` to "fix" the label, and do
+  not turn `defeated` off just to satisfy a hover phrase.
 
 - **Automated Conditions 5e is a superset of the condition rules — and is incompatible (amended
  2026-09-03).** Read from its source, cloned at `C:\Project\_research\ac5e`; two audits sit in

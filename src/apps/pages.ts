@@ -640,7 +640,7 @@ const SHARED_STATE: Section = {
       label: "Experience and loot for a knockout",
       hint:
         "Knocking someone out is a fourth way a fight can end, beside slain, surrendered, and fled. " +
-        "Today a knockout still counts as slain for the end-of-fight tally (defeated at 0 HP), so " +
+        "Today a knockout still counts as slain for the end-of-fight tally (defeated while Unconscious), so " +
         "the party is paid and may loot as if the body were a corpse. That is wrong for the common " +
         "case — taking a key from a guard nobody meant to murder — and it is a later change to the " +
         "encounter arithmetic, not to the prompt. Do not start it from a live Ready.",

@@ -3,23 +3,30 @@
 // Dying owns the HP write and the Dead / Unconscious marks. This file owns the
 // question: who is asked, on what clock, and what the card said about the swing.
 // Applying Unconscious first (silent) is the caller's job — a 0 HP monster that
-// is still unmarked can take a turn while the dialog is up.
+// is still unmarked can take a turn while the dialog is up. On Knock out, dying
+// writes 1 HP (2024) through `writeKnockoutHp` so the heal hook does not clear
+// Unconscious.
 //
 // THE CLOCK NEVER PICKS KNOCKOUT. Timeout and a missing answer are Kill, which is
 // today's behaviour. Knockout is the deliberate click. A player-character attacker
 // is still asked when the GM clock is 0 (solo table / GM driving the Monk).
 
-import { log } from "../constants";
+import { log, MODULE_ID } from "../constants";
 import { isKnockoutEnabled } from "../settings";
-import { rollerForActor } from "../util/gm";
+import { hasFlag } from "../util/flags";
+import { isPrimaryGM, rollerForActor } from "../util/gm";
 import { DEFAULT_SECONDS, promptChoice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
+import { tokenFor } from "../util/tokens";
 import { owedSecondsFor } from "./owed-roll";
 import { attackMessageOf, damageParts, rollType } from "./cards";
 import { shouldAutomate } from "../tactics/registry";
 import { durationPayload, worldOf } from "../capability/duration";
 import { effectForStatus, stampDuration } from "../capability/timed";
 import {
+  ESTIMATE_NOT_DEAD,
+  ESTIMATE_NS,
+  KNOCKOUT_FLAG,
   KNOCKOUT_HOURS,
   meleeFromParts,
 } from "../system/dnd5e-knockout";
@@ -182,6 +189,125 @@ async function resolveHere(request: KnockoutRequest | undefined): Promise<{ choi
     seconds: request.seconds,
   });
   return { choice: picked === OUT ? OUT : KILL };
+}
+
+function tokenDocsOf(actor: any): any[] {
+  const seen = new Set<string>();
+  const out: any[] = [];
+  const add = (t: any) => {
+    const doc = t?.document ?? t;
+    const id = String(doc?.id ?? "");
+    if (!doc?.setFlag || !id || seen.has(id)) return;
+    seen.add(id);
+    out.push(doc);
+  };
+  add(tokenFor(actor));
+  try {
+    for (const t of actor?.getActiveTokens?.(true, true) ?? []) add(t);
+  } catch {
+    /* getActiveTokens is Foundry-shaped; missing is zero tokens */
+  }
+  return out;
+}
+
+/**
+ * Tell Health Estimate this token is not a corpse. No-op when nothing is placed.
+ * `on` writes the flag; `off` unsets it so a later kill can show Dead again.
+ */
+export async function markEstimateNotDead(actor: any, on: boolean): Promise<number> {
+  let n = 0;
+  for (const doc of tokenDocsOf(actor)) {
+    try {
+      if (on) await doc.setFlag(ESTIMATE_NS, ESTIMATE_NOT_DEAD, true);
+      else await doc.unsetFlag(ESTIMATE_NS, ESTIMATE_NOT_DEAD);
+      n += 1;
+    } catch (err) {
+      log(`knockout: could not ${on ? "set" : "clear"} ${ESTIMATE_NS}.${ESTIMATE_NOT_DEAD}:`, err);
+    }
+  }
+  return n;
+}
+
+function actorKey(actor: any): string {
+  return String(actor?.uuid ?? actor?.id ?? "");
+}
+
+/** True while a 2024 knockout is in effect (1 HP + Unconscious + this flag). */
+export function isKnockedOut(actor: any): boolean {
+  return hasFlag(actor, KNOCKOUT_FLAG);
+}
+
+export async function setKnockedOut(actor: any, on: boolean): Promise<void> {
+  try {
+    if (on) await actor?.setFlag?.(MODULE_ID, KNOCKOUT_FLAG, true);
+    else await actor?.unsetFlag?.(MODULE_ID, KNOCKOUT_FLAG);
+  } catch (err) {
+    log(`knockout: could not ${on ? "set" : "clear"} ${KNOCKOUT_FLAG}:`, err);
+  }
+}
+
+/** HP writes that establish or undo a knockout must not look like a heal / drop. */
+const hpWrites = new Set<string>();
+
+export function isKnockoutHpWrite(actor: any): boolean {
+  const key = actorKey(actor);
+  return Boolean(key) && hpWrites.has(key);
+}
+
+export async function writeKnockoutHp(actor: any, value: number): Promise<void> {
+  const key = actorKey(actor);
+  if (!key || !actor?.update) return;
+  hpWrites.add(key);
+  try {
+    await actor.update({ "system.attributes.hp.value": value });
+  } finally {
+    hpWrites.delete(key);
+  }
+}
+
+function effectHasUnconscious(effect: any): boolean {
+  const statuses = effect?.statuses;
+  if (!statuses) return false;
+  if (typeof statuses.has === "function") return statuses.has("unconscious");
+  if (Array.isArray(statuses)) return statuses.includes("unconscious");
+  return false;
+}
+
+function maybeWakeFromUnconscious(
+  effect: any,
+  wake: (actor: any) => Promise<unknown>,
+  why: string,
+): void {
+  try {
+    if (!isPrimaryGM()) return;
+    const actor = effect?.parent;
+    if (!actor || !isKnockedOut(actor) || !effectHasUnconscious(effect)) return;
+    void Promise.resolve(wake(actor)).catch((err) => {
+      log(`knockout: wake after Unconscious ${why} failed:`, err);
+    });
+  } catch (err) {
+    log(`knockout: ${why} failed:`, err);
+  }
+}
+
+/**
+ * When the one-hour Unconscious stamp expires (or a GM clicks it off), wake them.
+ * Primary GM only — the hook fires everywhere. Expiry may delete or only disable.
+ */
+export function registerKnockoutWatch(wake: (actor: any) => Promise<unknown>): void {
+  Hooks.on("deleteActiveEffect", (effect: any) => {
+    maybeWakeFromUnconscious(effect, wake, "ended");
+  });
+  Hooks.on("updateActiveEffect", (effect: any, changes: any) => {
+    const expired =
+      changes?.disabled === true ||
+      changes?.["duration.expired"] === true ||
+      changes?.duration?.expired === true;
+    if (!expired && !effect?.disabled && !effect?.duration?.expired) return;
+    if (effect?.disabled || effect?.duration?.expired || expired) {
+      maybeWakeFromUnconscious(effect, wake, "expired");
+    }
+  });
 }
 
 /** Stamp the Unconscious effect to one hour. Missing effect is logged, not thrown. */
