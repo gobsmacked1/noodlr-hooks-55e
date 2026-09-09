@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { shouldStand, standCost } from "../src/system/dnd5e-prone";
+import { decidePronePrompt, shouldStand, standCost } from "../src/system/dnd5e-prone";
 
 test("standCost is half Speed, rounded down", () => {
   assert.equal(standCost(30), 15);
@@ -50,4 +50,22 @@ test("Speed 0 cannot stand", () => {
 
 test("not Prone never stands", () => {
   assert.equal(shouldStand({ ...stay, prone: false, keepDistance: false }), false);
+});
+
+test("prone prompt defaults to stand when both are legal", () => {
+  const plan = decidePronePrompt({ canStand: true, canCrawl: true });
+  assert.deepEqual(plan.choices, ["stand", "crawl"]);
+  assert.equal(plan.defaultId, "stand");
+});
+
+test("prone prompt offers only crawl when they cannot stand", () => {
+  const plan = decidePronePrompt({ canStand: false, canCrawl: true });
+  assert.deepEqual(plan.choices, ["crawl"]);
+  assert.equal(plan.defaultId, "crawl");
+});
+
+test("prone prompt stays down when nothing is legal", () => {
+  const plan = decidePronePrompt({ canStand: false, canCrawl: false });
+  assert.deepEqual(plan.choices, []);
+  assert.equal(plan.defaultId, "stay");
 });

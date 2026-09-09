@@ -1437,7 +1437,10 @@ were not in August, because the hard half shipped for unrelated reasons:
 5. ~~**Standing up from Prone costs half Speed**~~ **BUILT in v0.7.15** — `rules/prone.ts` plus
    `system/dnd5e-prone.ts`. Half Speed to stand; crawl while the status stays. The planner stands
    unless `keepDistance` plus no melee within 5 feet plus a stay-put plan. No new setting: it
-   follows the movement cap.
+   follows the movement cap. **A walk while Prone now asks** (veto → stand-or-crawl prompt →
+   replay). The old path was a toast and a hard veto, so the only way off Prone at the table was
+   a HUD right-click — and that was free for the GM. On this creature's turn the HUD delete
+   charges too; the GM is still exempt when staging. Timeout defaults to stand (Speed renews).
 6. Lower value, and several are honest refusals: squeezing, flying without a fly speed (core does not
    prevent it), mounted combat, falling damage (core has no concept of falling at all), the
    suffocation/starvation/extreme-environment clocks, and difficult terrain auto-placed from spell
@@ -2508,6 +2511,18 @@ edits closed without saving are lost. Same trade `noodlr` makes.
  from its own `preUpdateActor` (`Hooks.ts:237`), so suppression becomes a hook-registration-order race.
  Setting midi's concentration handling to "None" hands the whole job to Noodlr. Diagnostics:
  `api.surveyConcentration()`.
+
+- **Beholder Eye Rays are not concentration (2026-09-09).** Reported as leftover Charm / Prone
+ after the Monk killed the Beholder. 2024 MM Charm Ray is a Wis save, 3d8 Psychic, and Charmed
+ for 1 hour **or until the target takes damage** — not until the Beholder dies, and not a
+ Constitution save on the Beholder. The ray's own Psychic does not instantly break the charm
+ it just applied, or that clause would never land. Sleep Ray's Unconscious is 1 minute or until
+ damage / a wake action (that is where Prone came from). 2024 Slowing Ray is necrotic plus Slowed
+ until the end of the *target's next turn*, not a minute. Telekinetic Restrained is the one ray
+ that ends if the Beholder is Incapacitated. 2014 Charm ended only if the *Beholder* harmed the
+ target. Do not clear Charm on caster death. That fight logged Sleep + Slowing, never Charm Ray,
+ and zero `concentration:` lines because `isConcentrating` was false. NPC concentration-on-damage
+ is already live.
 
 - **Automated Conditions 5e is a superset of the condition rules — and is incompatible (amended
  2026-09-03).** Read from its source, cloned at `C:\Project\_research\ac5e`; two audits sit in

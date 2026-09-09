@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.57
+
+**Walking while Prone now asks stand or crawl.** The half-Speed stand and the crawl
+rate were already charged, but a player who dragged was only toasted and blocked —
+the only way off Prone at the table was a HUD right-click, which was free for the
+GM. The prompt is the same veto → ask → replay shape as Lucky. Timeout stands
+(Speed renews). Incapacitated (Sleep) still cannot stand or crawl. The GM is asked
+on that creature's turn and still stages freely off-turn.
+
 ## 0.7.56
 
 **Action Surge grants the extra Action for this turn.** Pressing the feature used

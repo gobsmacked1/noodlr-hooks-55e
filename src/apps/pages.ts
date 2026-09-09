@@ -599,8 +599,10 @@ const SHARED_STATE: Section = {
       label: "Standing from Prone and crawling",
       hint:
         "Standing costs half Speed. Staying Prone means crawling (double cost), because core only " +
-        "charges that when Crawl is selected. Follows the movement cap above. An automated creature " +
-        "stands unless staying down is a real tactic — keepDistance, no melee within 5 feet, acting from here.",
+        "charges that when Crawl is selected. Dragging or WASD while Prone asks which you meant — " +
+        "stand, or crawl for the rest of the turn. Follows the movement cap above. An automated " +
+        "creature stands unless staying down is a real tactic — keepDistance, no melee within 5 " +
+        "feet, acting from here.",
       state: "live",
       ownership: "movement",
     },

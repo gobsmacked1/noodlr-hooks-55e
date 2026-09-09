@@ -61,3 +61,21 @@ export function cannotStandReason(actor: any): string | null {
   if (isIncapacitated(actor)) return "incapacitated";
   return null;
 }
+
+export type ProneMoveIntent = "stand" | "crawl" | "stay";
+
+/**
+ * What the stand-or-crawl prompt may offer. Default is stand when that is legal —
+ * Speed renews each turn, so the clock may spend it. Crawl only when they cannot
+ * stand. An empty list means stay: there is nothing legal to ask.
+ */
+export function decidePronePrompt(input: {
+  canStand: boolean;
+  canCrawl: boolean;
+}): { choices: ProneMoveIntent[]; defaultId: ProneMoveIntent } {
+  const choices: ProneMoveIntent[] = [];
+  if (input.canStand) choices.push("stand");
+  if (input.canCrawl) choices.push("crawl");
+  if (!choices.length) return { choices: [], defaultId: "stay" };
+  return { choices, defaultId: input.canStand ? "stand" : "crawl" };
+}
