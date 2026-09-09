@@ -2527,6 +2527,20 @@ edits closed without saving are lost. Same trade `noodlr` makes.
  and zero `concentration:` lines because `isConcentrating` was false. NPC concentration-on-damage
  is already live.
 
+- **Knockout is a dying-layer fork, not a new action (2026-09-09).** 2024 PHB: when you reduce
+ a creature to 0 HP with a melee attack, you can knock it out (Unconscious + Stable). We prompt
+ only on that killing blow, and only when the damage types that actually landed are **only
+ Bludgeoning** (clubs, fists). Mixed types, ranged / thrown, a save-for-damage, unknown melee,
+ leftover ≥ max HP (instant death), and creatures that use death saves are never asked.
+ Timeout / no answer is **Kill**. Unconscious is applied *before* the dialog so a 0 HP monster
+ cannot take a turn while someone is deciding. House clock: one hour, so the party can leave.
+ Setting `combat.knockout`, default on, not split. `src/system/dnd5e-knockout.ts` +
+ `src/rules/knockout.ts`; `becomeKnockedOut` lives in `dying.ts`. The Combat page has a
+ **planned** row for XP and loot: today a knockout still reads as slain (`isDefeated || hp <= 0`)
+ and is paid in full. Taking a key from a spared guard is the specimen. Do not fold that into
+ the encounter tally from a live Ready. Diagnostics: `noodlrHooks.surveyDying()` prints
+ `knockout`.
+
 - **Automated Conditions 5e is a superset of the condition rules — and is incompatible (amended
  2026-09-03).** Read from its source, cloned at `C:\Project\_research\ac5e`; two audits sit in
  `_research\_audit\` (`ac5e-coexistence.md`, `ac5e-techniques.md`). Its `automateStatuses` setting

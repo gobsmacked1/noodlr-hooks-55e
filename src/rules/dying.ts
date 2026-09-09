@@ -4,6 +4,12 @@
 // failures from damage. Instant death (excess ≥ max HP) is prose only. This layer closes that gap
 // via dnd5e's own applyDamage hooks — no patching. Midi QoL is not a supported install.
 //
+// KNOCKOUT is a dying-layer fork, not a new action. A melee killing blow that deals only
+// Bludgeoning can mark an ordinary NPC Unconscious + Stable for one hour instead of Dead.
+// The prompt is that blow, never every swing. PCs and Important NPCs already fall Unconscious
+// and are never asked. Instant death is still death. XP and loot still treat a knockout as
+// slain — that is a later encounter change (Combat page, planned row).
+//
 // Register on every client: the updating user's client is the one that writes (same gate as bloodied).
 
 import { COMBAT_SETTINGS, log, MODULE_ID } from "../constants";
@@ -15,6 +21,7 @@ import {
   enabledForEither,
   honorImportantNpcDeathSaves,
   isDyingAutomationEnabled,
+  isKnockoutEnabled,
 } from "../settings";
 import { affordable, payBill, turnBill } from "./economy/bill";
 import { firstAidDc } from "../system/dnd5e-checks";
@@ -22,10 +29,13 @@ import {
   deathFailuresFromDamage,
   hpSnapshot,
   isInstantDeath,
+  leftoverPastZero,
   usesDeathSaves,
 } from "../system/dnd5e-dying";
+import { knockoutQualifies } from "../system/dnd5e-knockout";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { hasStatus } from "../system/dnd5e-conditions";
+import { askKnockout, readKnockoutSwing, stampKnockoutHour } from "./knockout";
 
 interface PendingDamage {
   oldHp: number;
@@ -38,6 +48,8 @@ interface PendingDamage {
   hadUnconscious: boolean;
   hadDead: boolean;
   hadStable: boolean;
+  /** Damage / attack card, when applyDamage named one. Absent on a raw HP edit. */
+  message: any | null;
 }
 
 interface UndoEntry {
@@ -109,6 +121,23 @@ function messageIsCritical(options: any): boolean {
   return Boolean(options?.isCritical || options?.critical);
 }
 
+function originatingMessageOf(options: any): any | null {
+  try {
+    const raw = options?.originatingMessage ?? options?.origin;
+    if (raw && typeof raw === "object") return raw;
+    const id =
+      typeof options?.originatingMessage === "string"
+        ? options.originatingMessage
+        : typeof options?.origin === "string"
+          ? options.origin
+          : "";
+    if (!id) return null;
+    return (foundry as any)?.utils?.fromUuidSync?.(id) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function capturePending(actor: any, amount: number, options: any): void {
   if (!enabled(actor) || !(amount > 0)) return;
   const key = actorKey(actor);
@@ -125,6 +154,7 @@ function capturePending(actor: any, amount: number, options: any): void {
     hadUnconscious: hasStatus(actor, "unconscious"),
     hadDead: hasStatus(actor, "dead"),
     hadStable: hasStatus(actor, "stable"),
+    message: originatingMessageOf(options),
   });
 }
 
@@ -242,6 +272,79 @@ async function becomeUnconscious(actor: any, before: PendingDamage): Promise<voi
   );
 }
 
+/**
+ * Ordinary NPC knocked out: Unconscious (already on, so they cannot act during the prompt),
+ * Stable, defeated, one hour. Undo restores the pre-drop snapshot.
+ */
+async function becomeKnockedOut(actor: any, before: PendingDamage): Promise<void> {
+  const combatantDefeated = await setCombatantDefeated(actor, true);
+  pushUndo({
+    uuid: actorKey(actor),
+    reason: "knockout",
+    failures: before.failures,
+    successes: before.successes,
+    unconscious: before.hadUnconscious,
+    dead: before.hadDead,
+    stable: before.hadStable,
+    combatantDefeated,
+  });
+  if (hasStatus(actor, "dead")) await setStatus(actor, "dead", false);
+  await setStatus(actor, "unconscious", true);
+  await setStatus(actor, "stable", true);
+  await stampKnockoutHour(actor);
+  await announce(
+    actor,
+    game.i18n.format("NOODLRHOOKS.Combat.Knockout.KnockedOut", {
+      name: String(actor.name ?? "Someone"),
+    }),
+    true,
+  );
+}
+
+/**
+ * Ask the attacker whether this killing blow knocks the target out.
+ *
+ * Returns true when they chose knockout (already applied). False means the caller should
+ * `becomeDead` — not qualified, automated attacker, timeout, or they picked Kill.
+ *
+ * Unconscious is applied BEFORE the prompt so a 0 HP monster cannot take a turn while the
+ * dialog is up. `becomeDead` clears it if they kill.
+ */
+async function maybeKnockout(actor: any, before: PendingDamage): Promise<boolean> {
+  if (!isKnockoutEnabled()) return false;
+  const swing = readKnockoutSwing(before.message);
+  const leftover = leftoverPastZero(before.oldHp, before.oldTemp, before.amount);
+  const check = knockoutQualifies({
+    types: swing.types,
+    melee: swing.melee,
+    leftover,
+    maxHp: before.maxHp,
+    usesDeathSaves: false,
+  });
+  if (!check.ok) {
+    log(`knockout: ${String(actor?.name)} does not qualify (${check.reason})`);
+    return false;
+  }
+  if (swing.automated) {
+    log(`knockout: ${String(swing.attacker?.name ?? "someone")} is automated — lethal`);
+    return false;
+  }
+  await setStatus(actor, "unconscious", true);
+  try {
+    const choice = await askKnockout({
+      attacker: swing.attacker,
+      victimName: String(actor?.name ?? "Someone"),
+    });
+    if (choice === "knockout") {
+      await becomeKnockedOut(actor, before);
+      return true;
+    }
+  } catch (err) {
+    log(`knockout: ask failed for ${String(actor?.name)}:`, err);
+  }
+  return false;
+}
+
 async function addDeathFailures(actor: any, before: PendingDamage, add: number): Promise<void> {
   const death = actor.system?.attributes?.death;
   if (!death) return;
@@ -340,7 +443,10 @@ async function resolveAppliedDamage(actor: any): Promise<void> {
       await becomeUnconscious(actor, before);
     }
   } else if (!hasStatus(actor, "dead")) {
-    await becomeDead(actor, game.i18n.localize("NOODLRHOOKS.Combat.Dying.Reason.ZeroHp"), before);
+    const knocked = await maybeKnockout(actor, before);
+    if (!knocked) {
+      await becomeDead(actor, game.i18n.localize("NOODLRHOOKS.Combat.Dying.Reason.ZeroHp"), before);
+    }
   }
 }
 
@@ -377,6 +483,7 @@ async function onHpChanged(
       hadUnconscious: hasStatus(actor, "unconscious"),
       hadDead: hasStatus(actor, "dead"),
       hadStable: hasStatus(actor, "stable"),
+      message: null,
     };
     const combatantDefeated = await setCombatantDefeated(actor, false);
     pushUndo({
@@ -417,6 +524,7 @@ async function onHpChanged(
         hadUnconscious: hasStatus(actor, "unconscious"),
         hadDead: hasStatus(actor, "dead"),
         hadStable: hasStatus(actor, "stable"),
+        message: null,
       };
       if (saves) {
         if (!hasStatus(actor, "unconscious") && !hasStatus(actor, "dead")) {
@@ -479,6 +587,7 @@ async function onPostDeathSave(_rolls: any[], data: { subject?: any }): Promise<
         hadUnconscious: hasStatus(actor, "unconscious"),
         hadDead: false,
         hadStable: hasStatus(actor, "stable"),
+        message: null,
       };
       await becomeDead(
         actor,
@@ -766,6 +875,7 @@ export function surveyDying(): unknown {
       npc: isDyingAutomationEnabled({ type: "npc" }),
       pc: isDyingAutomationEnabled({ type: "character" }),
     },
+    knockout: isKnockoutEnabled(),
     honorImportantNpc: honorImportantNpcDeathSaves(),
     selected: actor?.name ?? null,
     type: actor?.type ?? null,

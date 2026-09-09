@@ -211,6 +211,9 @@ export function registerCombatSettings(): void {
     },
   });
   world(COMBAT_SETTINGS.autoEnd, "AutoEnd", Boolean, true);
+  // Shared, not split. It only fires when dying would otherwise mark an ordinary NPC Dead —
+  // characters and Important NPCs already fall Unconscious. Off is today's kill.
+  world(COMBAT_SETTINGS.knockout, "Knockout", Boolean, true);
 
   general(GENERAL_SETTINGS.jump, "Jump", Boolean, true);
   general(GENERAL_SETTINGS.influence, "Influence", Boolean, true);
@@ -488,6 +491,16 @@ export function isFlankingEnabled(): boolean {
  */
 export function isAutoEndEnabled(): boolean {
   return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.autoEnd));
+}
+
+/**
+ * Can a melee killing blow that deals only Bludgeoning knock an ordinary NPC out?
+ *
+ * On by default. Off is today's kill. The prompt only appears when dying is also on for
+ * the victim and would otherwise mark them Dead — PCs and Important NPCs are never asked.
+ */
+export function isKnockoutEnabled(): boolean {
+  return Boolean(game.settings.get(MODULE_ID, COMBAT_SETTINGS.knockout));
 }
 
 /**

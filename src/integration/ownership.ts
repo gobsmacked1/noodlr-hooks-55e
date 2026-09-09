@@ -121,6 +121,7 @@ const AREAS: Area[] = [
   { id: "sneak", setting: COMBAT_SETTINGS.sneak },
   { id: "diceMods", setting: COMBAT_SETTINGS.diceMods },
   { id: "dying", setting: COMBAT_SETTINGS.dying },
+  { id: "knockout", setting: COMBAT_SETTINGS.knockout },
   {
     id: "concentration",
     setting: COMBAT_SETTINGS.concentration,

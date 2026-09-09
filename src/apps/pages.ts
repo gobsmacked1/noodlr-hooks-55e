@@ -626,6 +626,28 @@ const SHARED_STATE: Section = {
       setting: C.autoEnd,
       kind: "boolean",
     },
+    {
+      id: "knockout",
+      label: "NOODLRHOOKS.Combat.Knockout.Name",
+      hint: "NOODLRHOOKS.Combat.Knockout.Hint",
+      state: "live",
+      setting: C.knockout,
+      kind: "boolean",
+      ownership: "knockout",
+    },
+    {
+      id: "knockoutXpLoot",
+      label: "Experience and loot for a knockout",
+      hint:
+        "Knocking someone out is a fourth way a fight can end, beside slain, surrendered, and fled. " +
+        "Today a knockout still counts as slain for the end-of-fight tally (defeated at 0 HP), so " +
+        "the party is paid and may loot as if the body were a corpse. That is wrong for the common " +
+        "case — taking a key from a guard nobody meant to murder — and it is a later change to the " +
+        "encounter arithmetic, not to the prompt. Do not start it from a live Ready.",
+      state: "planned",
+      today:
+        "Full XP for anyone defeated or at 0 HP, including a knockout. Loot is whoever can open the sheet.",
+    },
   ],
 };
 

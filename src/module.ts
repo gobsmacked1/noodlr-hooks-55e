@@ -75,6 +75,7 @@ import { surveyLegendaryActions } from "./tactics/legendary-act";
 import { registerForceAction, shove, undoForcedMovement } from "./rules/shove";
 import { registerConditionHooks, surveyConditions } from "./rules/conditions";
 import { firstAidTargets, registerDyingHooks, surveyDying, undoDying } from "./rules/dying";
+import { registerKnockoutOffers } from "./rules/knockout";
 import { announceJump, registerJumpWatch, surveyJump } from "./rules/jump";
 import { registerProneWatch, surveyProne } from "./rules/prone";
 import { registerInteractReach, surveyInteract } from "./rules/interact";
@@ -528,6 +529,9 @@ Hooks.once("ready", () => {
   registerConditionHooks();
   // Drop-to-0 Unconscious/Dead and damage-at-0 death failures. Writes on the updating client.
   registerDyingHooks();
+  // Knockout prompt: the GM's client sees the killing blow; the attacker's client draws the
+  // dialog. Same every-client registration as Sneak — a player Monk must be able to answer.
+  registerKnockoutOffers();
   // Concentration saves. Deliberately not GM-only: the whole point is that a character's save is
   // rolled on the player's own client, which is also the only client allowed to roll it.
   registerConcentrationHooks();

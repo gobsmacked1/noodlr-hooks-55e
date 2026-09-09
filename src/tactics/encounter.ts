@@ -246,6 +246,11 @@ export async function endEncounterIfOver(combat: any): Promise<void> {
  * addendum's arithmetic runs: full experience for the slain and the surrendered, half for those that
  * escaped, and nothing at all if the party accepted mercy.
  *
+ * KNOCKOUT IS NOT A FOURTH OUTCOME YET. A creature marked Unconscious + defeated at 0 HP reads as
+ * slain (`isDefeated || hp <= 0`) and is paid in full. That is wrong for taking a key from a spared
+ * guard, and the Combat page carries a planned row for it. Do not fold knockout into this tally from
+ * a live Ready — the prompt and the 1-hour Unconscious are a dying-layer change; XP and loot are not.
+ *
  * Awarding experience is not reversible in any tidy way, so it happens once, at the end, from a tally
  * the GM can read in the same card. Clearing the tracker afterwards is governed by a setting, because
  * a GM who wants to loot the bodies in initiative order should be allowed to.

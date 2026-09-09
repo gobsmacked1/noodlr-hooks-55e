@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.59
+
+**A melee killing blow that deals only Bludgeoning can knock an ordinary NPC
+out.** When that swing would drop them to 0 HP — still above the massive-damage
+threshold — the attacker is asked whether to kill or to leave them Unconscious
+and Stable for one hour. Characters and Important NPCs already fall Unconscious
+and are never asked. Instant death is still death. The prompt is that blow,
+not every swing. Experience and loot still count a knockout as slain; that is
+a later change (Combat page, planned row).
+
 ## 0.7.58
 
 **A confirmed hit that still needs its damage dice holds the fight.** The

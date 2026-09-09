@@ -176,6 +176,12 @@ export const COMBAT_SETTINGS = {
   autoRecharge: "combat.autoRecharge",
   /** Whether the tracker clears itself once nothing hostile is left standing. */
   autoEnd: "combat.autoEnd",
+  /**
+   * Whether a melee killing blow that deals only Bludgeoning can knock an ordinary NPC
+   * Unconscious instead of killing them. Shared, not split: it is the attacker's choice
+   * about dropping a mook, and it never runs for creatures that use death saves.
+   */
+  knockout: "combat.knockout",
 } as const;
 
 /**
