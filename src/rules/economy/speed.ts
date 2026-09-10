@@ -77,6 +77,7 @@ import { hasHalted } from "../halt-state";
 import { isForcedMovement } from "../shove";
 import { stoodThisTurn } from "../prone";
 import { isAutomating } from "./enforce";
+import { collapsePartySelection, isLinkedPartyExtra } from "../party-select";
 import { bonusDashSource } from "../../system/dnd5e-dash";
 import { JUMP_ACTION, jumpVeto } from "../jump";
 import { paintMotionFx, restoreMotionFx } from "../../core/motion-fx";
@@ -315,6 +316,9 @@ export function registerMovementCap(): void {
       _getDragConstrainOptions() {
         const options = super._getDragConstrainOptions();
         try {
+          // Before the GM early-return: leftover party select from placing tokens
+          // is exactly who a later GM drag would walk together, out of turn.
+          collapsePartySelection();
           if (game.user?.isGM || isAutomating()) return options;
           const budget = budgetFor(this.document);
           if (!budget) return options;
@@ -427,6 +431,14 @@ export function registerMovementCap(): void {
       const method = String(movement?.method ?? "");
       if (hasHalted(doc?.actor) && method !== "undo" && !isForcedMovement(movement, operation, doc)) {
         ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.Movement.Halted"));
+        return false;
+      }
+      if (
+        (method === "dragging" || method === "keyboard") &&
+        !isForcedMovement(movement, operation, doc) &&
+        isLinkedPartyExtra(doc)
+      ) {
+        collapsePartySelection();
         return false;
       }
       if (game.user?.isGM || isAutomating()) return true;
@@ -559,6 +571,7 @@ export function surveyMovement(): unknown {
     token: String(doc?.name ?? "?"),
     enabled: isMovementCapEnabled(),
     combatStarted: Boolean(game.combat?.started),
+    controlled: [...((canvas as any)?.tokens?.controlled ?? [])].map((t: any) => String(t.name ?? t.id)),
     isTheirTurn: String(doc?.combatant?.id ?? "") === String(game.combat?.combatant?.id ?? ""),
     movementAction: action,
     elevation,

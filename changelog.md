@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.61
+
+**Two player characters no longer walk as a pair in combat.** Foundry moves
+every token you have selected. After the GM places the party — or a player who
+owns two characters box-selects both — that leftover selection survived into
+the fight and they strode in lockstep, out of turn. Out of combat the
+multi-select stays so you can still stage starting positions. Click empty
+canvas to unstick a live fight immediately.
+
 ## 0.7.60
 
 **Knockout now matches the 2024 printed rule.** A qualifying melee blow leaves the

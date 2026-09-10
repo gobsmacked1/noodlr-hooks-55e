@@ -118,6 +118,7 @@ import { openRulesConfig } from "./apps/rules-config";
 import { registerConcentrationHooks, surveyConcentration } from "./rules/concentration";
 import { registerEconomyHooks } from "./rules/economy/enforce";
 import { registerMovementCap, surveyMovement } from "./rules/economy/speed";
+import { registerPartySelect, surveyPartySelect } from "./rules/party-select";
 import { registerWallHeightUi } from "./rules/wall-height-ui";
 import { installTokenBadgeClicks } from "./util/token-badge";
 import { surveyEconomy } from "./rules/economy/survey";
@@ -165,6 +166,7 @@ export interface NoodlrHooksApi {
   surveyPerception(): Promise<Record<string, unknown>>;
   surveyEconomy(): Record<string, unknown>;
   surveyMovement(): unknown;
+  surveyPartySelect(): unknown;
   surveySentinel(): unknown;
   surveyAttackRange(): unknown;
   surveyFlanking(): unknown;
@@ -304,6 +306,7 @@ const api: NoodlrHooksApi = {
   surveyEconomy: () => surveyEconomy(),
   /** How far each combatant has moved this turn against its Speed. */
   surveyMovement: () => surveyMovement(),
+  surveyPartySelect: () => surveyPartySelect(),
   /** Sentinel on the selected creature, Halt, and who else in the fight carries the feat. */
   surveySentinel: () => surveySentinel(),
   /** Whether a use can reach its current targets, and who else already enforces range. */
@@ -558,6 +561,9 @@ Hooks.once("ready", () => {
   // Mount / follow / dismount. Every client: the rider's own drag is the one that must be refused,
   // and a player mounts from their own HUD.
   registerRidingWatch();
+  // Foundry walks every controlled token together. Collapse leftover party
+  // multi-select once combat starts so a GM placing both PCs cannot bind them.
+  registerPartySelect();
   // Dodge: the same watch, plus the expiry nothing in the stack performs. Half of it is GM-only, and
   // that gate is inside.
   registerDodgeHooks();

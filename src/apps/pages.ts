@@ -572,6 +572,17 @@ const SHARED_STATE: Section = {
       kind: "boolean",
       ownership: "movement",
     },
+    {
+      id: "partySelect",
+      label: "Party tokens do not walk as a group in combat",
+      hint:
+        "Foundry moves every token you have selected. After the GM places the party — or a player " +
+        "who owns two characters box-selects both — that leftover selection survives into the fight " +
+        "and they stride in lockstep, out of turn. Out of combat the multi-select stays so you can " +
+        "stage starting positions. Click empty canvas to unstick a live fight immediately.",
+      state: "live",
+      ownership: "movement",
+    },
     // Shared rather than split, unlike death saves and concentration two sections down. Those ask what
     // happens to a creature on its own account; this is the escape clause of an effect somebody else
     // imposed, and a table where the goblins can shake off a Hold Person the party cannot is the same

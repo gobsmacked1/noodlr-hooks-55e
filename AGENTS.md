@@ -847,7 +847,9 @@ From `_research\_audit\overlap-turnflow-and-economy.md`.
   It was therefore *not* implicated in the PHB `Attack` double-charge, which was ours and is now fixed —
   see the declarations note under the Speed invariants below.
 - `combatbooster` releases and re-selects tokens on turn change when `controlToken` is on, which fights
-  GM selection during automated turns but touches no rules state. `blind-skill-rolls` always keeps GM
+  GM selection during automated turns but touches no rules state. With `ignorePlayer` on (this table)
+  it never selects the PCs, so it does not *create* a two-PC bind — and it also never *clears* one
+  left over from placing the party. `blind-skill-rolls` always keeps GM
   ids in the whisper array, so our captures cannot go blind through it — our own care is the reverse,
   not to publicly echo a roll that arrived blinded. `chatlog-prune` deletes no documents.
 
@@ -5284,6 +5286,28 @@ map; the clock expired, then the sprite arrived and flew away.
   no identifier; `flags.<ns>.sentinel`. Never `sentinel-shield`. A weapon named
   Sentinel is not the feat. Glossary declines the feat so the compiler does not
   buy it. `noodlrHooks.surveySentinel()`.
+
+## Two PCs walking as one is Foundry selection, not a mount (2026-09-09)
+
+Reported after the GM placed both player tokens onto the scene from the GM client. They
+rolled different initiatives and then strode in lockstep, including out of turn. Measured
+live: **no `flags.<ns>.riding`**, no group document, Bianca Owner on both sheets, assigned
+character was a third actor not even on the scene. The GM log showed two independent
+`watching the sprite` walks a second apart — that is two real `walk`s, which is Foundry
+moving every **controlled** token together.
+
+Core only auto-controls a newly created owned token when the local user is not a GM and
+controls nothing already (`Token#_onCreate`). So dropping the second PC does not add it
+on the player client. The bind is leftover **multi-select**: the GM box-selects both to
+stage starting squares, or a player who owns two characters box-selects the party when
+the map appears. Selection is per-client and is not synced. Clicking empty canvas unsticks
+a live fight with no code.
+
+`src/rules/party-select.ts` collapses extra **character** tokens once combat has started
+(keep the current combatant, else the assigned character if it is here, else the first).
+Out of combat the multi-select stays so the GM can still place the whole party. NPCs are
+not released. `noodlrHooks.surveyPartySelect()`. Do not treat this as a riding bug and
+do not turn `general.riding` off for it.
 
 ## Mount riding (v0.7.23, initial slice)
 
