@@ -9,8 +9,10 @@
 // no resolvable target, or an unreadable range — a lock nobody can see is worse than a
 // punch from across the room. If any resolved target is in range, allow.
 //
-// Public text names nobody. The GM is warned and allowed (staging / testing), except when
-// this module is playing the creature. We always enforce when the switch is on — Midi QoL
+// Public text names nobody. The GM is warned and allowed (staging / testing) when even a
+// throw cannot reach, except when this module is playing the creature. A dual-mode weapon
+// outside melee reach but inside thrown range asks first — including the GM — so a 35 ft
+// Dagger is never a silent stab. We always enforce when the switch is on — Midi QoL
 // and AC5e are not a supported install, so this layer does not stand aside for them.
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
@@ -22,9 +24,11 @@ import {
   isTooFar,
   reactionRangeAlreadyChecked,
 } from "../system/dnd5e-range";
+import { hasThrownProperty, throwAskNeeded } from "../system/dnd5e-thrown";
 import { matchPointerItem, parseItemPointers } from "../system/dnd5e-pointer";
 import { tokenDistance } from "../core/positioning";
 import { shouldAutomate } from "../tactics/registry";
+import { askThenThrow } from "./thrown";
 
 function gridDistance(): number {
   const grid = (canvas as any)?.grid ?? (canvas as any)?.scene?.grid;
@@ -133,6 +137,7 @@ export function gateActivityRange(
   usageConfig: any,
   messageConfig: any,
   driven = false,
+  dialogConfig?: any,
 ): boolean {
   if (!isAttackRangeEnabled()) return true;
   if (!isDnd5e()) return true;
@@ -187,6 +192,36 @@ export function gateActivityRange(
   );
 
   const automating = driven || shouldAutomate(actor);
+  if (hasThrownProperty(item) && classified.kind === "melee") {
+    const asThrown = classifyActivityRange(activity, item, {
+      grid: gridDistance(),
+      attackMode: "thrown",
+    });
+    let thrownIn = false;
+    if (asThrown.kind === "ranged") {
+      for (const target of targets) {
+        const xy = tokenDistance(from, target);
+        if (!Number.isFinite(xy)) continue;
+        const rise = elevationOf(target) - elevationOf(from);
+        if (!isTooFar(asThrown, xy, rise)) {
+          thrownIn = true;
+          break;
+        }
+      }
+    }
+    const ask = throwAskNeeded(item, usageConfig?.attackMode, true, thrownIn);
+    if (ask === "ask") {
+      askThenThrow(activity, usageConfig, dialogConfig, messageConfig, {
+        name: String(item?.name ?? what),
+        distance: gap,
+        short: asThrown.short ?? asThrown.limit ?? limit,
+        long: asThrown.limit ?? limit,
+        driven: automating,
+      });
+      return false;
+    }
+  }
+
   if (game.user?.isGM && !automating) {
     notify("NOODLRHOOKS.Combat.AttackRange.GmWarn", {
       distance: String(Math.round(gap)),

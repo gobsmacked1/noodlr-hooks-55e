@@ -95,7 +95,8 @@ export function actionFor(loco: Locomotion, verticalChange: boolean): string | u
     if ((loco.modes.fly ?? 0) > 0) wanted = "fly";
     else if ((loco.modes.climb ?? 0) > 0) wanted = "climb";
     else if ((loco.modes.burrow ?? 0) > 0) wanted = "burrow";
-    else if ((loco.modes.swim ?? 0) > 0) wanted = "swim";
+    // Swim is not a dungeon-floor dive. Only an aquatic primary uses it for height.
+    else if (loco.primary === "swim" && (loco.modes.swim ?? 0) > 0) wanted = "swim";
   }
   if (actions[wanted]) return wanted;
   return actions.walk ? "walk" : undefined;

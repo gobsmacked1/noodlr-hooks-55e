@@ -1999,7 +1999,10 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     height. Hover rises to melee-reach + one square (tax is a cost, not a destination — Huge pays 30
     to sit at +10). Fly-by closes, strikes, and keeps going at the height the 3D reach still allows.
     Burrow/swim dive when engaged or emerge from below; same-turn down-and-up is two taxes and is not
-    one plan. No ceiling, no inferred dirt. Spell Fly / Levitate is Layer B, parked.
+    one plan. No ceiling, no inferred dirt **and no inferred water** (Polar Bear, 2026-09-10): a
+    surface dive is burrow only. Swim on the Z axis only when already below 0 (GM placed them in
+    water) or when swim is the primary mode. A walk+swim creature at elevation 0 must not treat the
+    dungeon floor as a lake. Spell Fly / Levitate is Layer B, parked.
   - `api.testMove()` (`combat/auto/diagnose.ts`) is the ground truth when this recurs: it really moves the
     selected token one square, escalating walls-enforced → walls-ignored → `displace` → `noHook`, reports
     core's answer at each stage, and restores the position. Whichever attempt first succeeds names the
@@ -5175,7 +5178,19 @@ or AC5e (2026-09-03): those are not a supported install.
 - **Fail open** when there is no actor token, no resolvable target, or an unreadable range.
   If any resolved target is in range, allow. Public text names nobody.
 - **Never `range.value` as melee reach** — a thrown spear's 20 is not a 20-foot poke
-  (Assassin, 2026-08-20). Dual-mode weapons with no `attackMode` yet are skipped.
+  (Assassin, 2026-08-20). Dual-mode (`thr`) with no `attackMode` is **melee at
+  `range.reach`**. Skipping it let a Dagger stab from 35 feet (Pierce Fighter,
+  2026-09-10). Outside melee reach but inside thrown long range: veto, ask
+  Throw / Cancel (`defaultId: "cancel"` — a timeout must not throw the weapon
+  away), replay `activity.use` with `attackMode: "thrown"` and **no** `cleared`
+  (the first press never reached the ledger). Innate melee-or-ranged (Arcane
+  Burst: `value > reach`, no `thr`) still skips. `thrown-offhand` counts.
+  dnd5e already decrements quantity on a thrown attack that is not `ret`; we
+  drop a loot token near the target unless `ret` or `/returning/i` in the name
+  (name-only Returning is restored if the system already spent it). Pickup is
+  the Token HUD. Do not grant default Owner on the loot actor — Observer plus
+  our button is one copy. `src/system/dnd5e-thrown.ts` + `src/rules/thrown.ts`.
+  `noodlrHooks.surveyThrown()`.
 - **A 5 ft utility or damage rider is melee reach, not a 5-foot bow (v0.7.51).**
   Redirect Attack and Goading Attack Damage ship `type: utility|damage`,
   `range.value: 5`, no `long`. Classifying that `ranged` used 3D hypot, so a

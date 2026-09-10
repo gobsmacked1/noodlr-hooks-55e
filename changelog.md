@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.62
+
+**A Dagger used from 35 feet is a throw, not a 5-foot stab.** Weapons that have
+both melee reach and a thrown range used to skip the range gate when the attack
+dialog had not chosen a mode yet, so a melee swing from across the room
+resolved. Those now measure as melee. Outside reach but inside thrown range,
+you are asked whether to throw; Cancel and a timeout keep the weapon. A throw
+that is not Returning leaves the item near the target to pick up from the Token
+HUD. Returning (`ret`, or the word in the name) stays in hand and is not
+duplicated. Automated monsters throw without a prompt.
+
+**A Polar Bear no longer swims into the dungeon floor.** Walk-and-swim
+creatures at elevation 0 were treated as if the stone were water. A surface
+dive is burrow only. Swim on the Z axis only when already below 0, or when swim
+is the creature's primary mode.
+
 ## 0.7.61
 
 **Two player characters no longer walk as a pair in combat.** Foundry moves

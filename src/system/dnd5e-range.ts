@@ -9,6 +9,11 @@
 // `range.units: self`, `target.affects.type: creature`. Patient Defense is the same Self
 // range with `affects.type: self` and must be skipped. Never read `range.value` as melee
 // reach — a thrown spear's 20 is not a 20-foot poke (Assassin, 2026-08-20).
+// A dual-mode weapon with no `attackMode` is melee at `range.reach`; the throw
+// prompt lives in `rules/attack-range.ts`. Innate melee-or-ranged (Arcane Burst)
+// with no mode stays a skip.
+
+import { attackModeIsThrown } from "./dnd5e-thrown";
 
 export type RangeKind = "melee" | "ranged" | "skip";
 
@@ -95,8 +100,10 @@ function rangedFrom(item: any, range: any): RangeClass {
  * What kind of reach this activity has, from its type and range block — no D&D names.
  *
  * `self` + a creature target is melee (Flurry). `self` + a self target is a skip
- * (Patient Defense / Step of the Wind). A dual-mode weapon with no `attackMode` yet
- * is a skip: refusing it as melee would block a legal throw from 20 feet.
+ * (Patient Defense / Step of the Wind). A dual-mode (`thr`) weapon with no
+ * `attackMode` is melee at item reach — skipping it is how a Dagger stabbed
+ * from 35 feet. An innate melee-or-ranged cantrip (value > reach, no `thr`)
+ * with no mode is still a skip.
  */
 export function classifyActivityRange(
   activity: any,
@@ -127,10 +134,10 @@ export function classifyActivityRange(
       (!Number.isFinite(itemReach) || itemValue > itemReach) &&
       !thrown;
 
-    if (mode === "thrown" || mode === "ranged" || typedRanged) {
+    if (attackModeIsThrown(mode) || mode === "ranged" || typedRanged) {
       return rangedFrom(item, range);
     }
-    if ((thrown || innate) && !mode) return { kind: "skip", reason: "ambiguous-mode" };
+    if (innate && !mode) return { kind: "skip", reason: "ambiguous-mode" };
     return { kind: "melee", reason: "attack", limit: itemMeleeReach(item, grid) };
   }
 

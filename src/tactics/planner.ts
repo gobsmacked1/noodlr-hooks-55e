@@ -210,7 +210,11 @@ function attackOptions(
       const gap = separation - usable.range;
       const inReach = gap <= 0;
       if (!inReach && (board.speed === null || gap > board.speed)) continue;
-      if (!inReach && Math.abs(rise) > 1 && !canReachVertical(board.locomotion, rise)) {
+      if (
+        !inReach &&
+        Math.abs(rise) > 1 &&
+        !canReachVertical(board.locomotion, rise, board.self.elevation)
+      ) {
         continue;
       }
 
@@ -293,7 +297,9 @@ function advanceOptions(board: Board, kit: Usable[], hasBetter: boolean): PlanOp
   if (!target || board.speed === null || board.speed <= 0) return [];
   // Walking hopefully toward something in the air achieves nothing but a wasted turn.
   const rise = target.elevation - board.self.elevation;
-  if (Math.abs(rise) > 1 && !canReachVertical(board.locomotion, rise)) return [];
+  if (Math.abs(rise) > 1 && !canReachVertical(board.locomotion, rise, board.self.elevation)) {
+    return [];
+  }
 
   const attacks = kit.filter(isAttack);
   if (attacks.length === 0) return [];

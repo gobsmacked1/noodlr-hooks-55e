@@ -52,15 +52,21 @@ export function hoverHeight(meleeReach: number, grid: number): number {
   return reach + grid;
 }
 
-/** Can this locomotion change height in the direction of `rise` (target − self)? */
-export function canReachVertical(loco: Locomotion, rise: number): boolean {
+/**
+ * Can this locomotion change height in the direction of `rise` (target − self)?
+ *
+ * `from` is the creature's current elevation. Swim is legal only when already below 0 (the GM
+ * placed them in water) or when swim is the primary mode (a shark). A walk+swim Polar Bear at
+ * elevation 0 must not treat the dungeon floor as a lake.
+ */
+export function canReachVertical(loco: Locomotion, rise: number, from = 0): boolean {
   if (Math.abs(rise) <= EPS) return true;
   if (rise > 0) return (loco.modes.fly ?? 0) > 0 || (loco.modes.climb ?? 0) > 0;
   return (
     (loco.modes.fly ?? 0) > 0 ||
     (loco.modes.climb ?? 0) > 0 ||
     (loco.modes.burrow ?? 0) > 0 ||
-    (loco.modes.swim ?? 0) > 0
+    ((from < -EPS || loco.primary === "swim") && (loco.modes.swim ?? 0) > 0)
   );
 }
 
@@ -71,7 +77,8 @@ export function canReachVertical(loco: Locomotion, rise: number): boolean {
 export function verticalAction(loco: Locomotion, from: number, to: number): string {
   if (to < from - EPS) {
     if ((loco.modes.burrow ?? 0) > 0) return "burrow";
-    if ((loco.modes.swim ?? 0) > 0) return "swim";
+    // Surface swim is a dive into stone. Only go deeper on swim when already below 0.
+    if (from < -EPS && (loco.modes.swim ?? 0) > 0) return "swim";
     if ((loco.modes.fly ?? 0) > 0) return "fly";
     if ((loco.modes.climb ?? 0) > 0) return "climb";
   }
@@ -231,10 +238,12 @@ export function flybyOptions(
 }
 
 /**
- * Burrow or swim on the Z axis. Going under is the escape; coming up is the attack.
+ * Burrow on the Z axis, or swim when already below 0. Going under is the escape; coming up is
+ * the attack.
  *
  * Two taxes in one turn (down and up) is usually the whole Speed for Large+, so those are two
- * plans on two turns, not one clever path. We do not ask whether the floor is dirt.
+ * plans on two turns, not one clever path. We do not ask whether the floor is dirt — and we
+ * also do not invent water. A surface dive is burrow only (Polar Bear, 2026-09-10).
  */
 export function emergeOptions(
   board: Board,
@@ -242,8 +251,9 @@ export function emergeOptions(
   meleeOf: (e: BoardActor) => number,
 ): PlanOption[] {
   const loco = board.locomotion;
-  const canDown = (loco.modes.burrow ?? 0) > 0 || (loco.modes.swim ?? 0) > 0;
-  if (!canDown) return [];
+  const canBurrow = (loco.modes.burrow ?? 0) > 0;
+  const canSwim = (loco.modes.swim ?? 0) > 0;
+  if (!canBurrow && !canSwim) return [];
   const speed = budgetOf(board);
   if (!(speed > 0)) return [];
 
@@ -253,9 +263,10 @@ export function emergeOptions(
   const options: PlanOption[] = [];
 
   if (from > -EPS) {
+    if (!canBurrow) return [];
     const dest = -grid;
     const action = verticalAction(loco, from, dest);
-    if (action !== "burrow" && action !== "swim") return options;
+    if (action !== "burrow") return options;
     const cost = verticalCost(from, dest, action, tax);
     if (cost > 0 && cost <= speed && engaged(board, meleeOf)) {
       options.push({

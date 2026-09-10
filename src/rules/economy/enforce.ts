@@ -244,7 +244,7 @@ function police(activity: any, usageConfig: any, dialogConfig: any, messageConfi
 
   // Reach is a physical fact, not an action-economy one. Before `if (!slot)` so an empty-activation
   // Unarmed Strike enricher is still checked. Fail-open (no token / no target) lives inside the gate.
-  if (!gateActivityRange(activity, usageConfig, messageConfig, isAutomating())) return false;
+  if (!gateActivityRange(activity, usageConfig, messageConfig, isAutomating(), dialogConfig)) return false;
 
   // Action Surge is `activation.type: special` on stock sheets, so `slotFor` would skip it and
   // grant nothing. A DDB copy that claims an Action must not be charged either — the button is the

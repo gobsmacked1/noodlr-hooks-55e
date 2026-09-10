@@ -79,10 +79,35 @@ test("a thrown spear is ranged at long range, not a 20-foot poke", () => {
   assert.equal(got.short, 20);
 });
 
-test("a spear with no attackMode yet is skipped, not refused as melee", () => {
+test("a spear with no attackMode yet is melee at reach, not skipped", () => {
   const got = classifyActivityRange(
     { type: "attack", attack: { type: { value: "melee" } } },
     SPEAR,
+  );
+  assert.equal(got.kind, "melee");
+  assert.equal(got.reason, "attack");
+  assert.equal(got.limit, 5);
+});
+
+test("thrown-offhand is ranged at long range", () => {
+  const got = classifyActivityRange(
+    { type: "attack", attack: { type: { value: "melee" } } },
+    SPEAR,
+    { attackMode: "thrown-offhand" },
+  );
+  assert.equal(got.kind, "ranged");
+  assert.equal(got.limit, 60);
+});
+
+const BURST = {
+  name: "Arcane Burst",
+  system: { range: { value: 150, reach: 5, units: "ft" }, properties: [] },
+};
+
+test("innate melee-or-ranged with no attackMode is still skipped", () => {
+  const got = classifyActivityRange(
+    { type: "attack", attack: { type: { value: "melee" } } },
+    BURST,
   );
   assert.equal(got.kind, "skip");
   assert.equal(got.reason, "ambiguous-mode");

@@ -211,7 +211,24 @@ test("rising needs fly or climb; going down also accepts burrow and swim", () =>
   assert.equal(canReachVertical(burrow, -10), true);
   const fly = loco({ fly: 80, walk: 40 });
   assert.equal(canReachVertical(fly, 10), true);
-  const swim = loco({ swim: 40 });
-  assert.equal(canReachVertical(swim, 10), false);
-  assert.equal(canReachVertical(swim, -5), true);
+  const shark = loco({ swim: 40 }, "swim");
+  assert.equal(canReachVertical(shark, 10), false);
+  assert.equal(canReachVertical(shark, -5), true);
+});
+
+test("a walk+swim Polar Bear at elevation 0 does not invent a dive into the floor", () => {
+  const polar = board({
+    self: {
+      name: "Polar Bear",
+      elevation: 0,
+      hpFraction: 1,
+      actor: { system: { traits: { size: "large" } } },
+    },
+    speed: 40,
+    locomotion: loco({ walk: 40, swim: 40 }, "walk"),
+  });
+  const down = emergeOptions(polar, [kit({ name: "Rend", range: 5 })], () => 5);
+  assert.equal(down.length, 0);
+  assert.equal(canReachVertical(polar.locomotion, -5, 0), false);
+  assert.equal(canReachVertical(polar.locomotion, -5, -10), true, "already submerged may swim deeper");
 });
