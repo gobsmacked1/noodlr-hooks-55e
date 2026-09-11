@@ -35,6 +35,7 @@
 
 import { capabilityNegatedSenses, capabilitySenses } from "../capability/standing";
 import { isDnd5e } from "./dnd5e-rewards";
+import { senseRangeOf } from "./dnd5e-schema";
 
 /** Something making a creature hard to notice. */
 export interface Concealment {
@@ -448,8 +449,8 @@ export function sheetSenses(actor: any): Record<string, number> {
       hearing: "hearing",
     };
     for (const [mode, tag] of Object.entries(map)) {
-      const range = Number(derived[mode]);
-      if (Number.isFinite(range) && range !== 0) out[tag] = range < 0 ? Infinity : range;
+      const range = senseRangeOf(derived[mode]);
+      if (range != null && range !== 0) out[tag] = range < 0 ? Infinity : range;
     }
     if (Object.keys(out).length > 0) return merge(out, compiled);
   }
@@ -462,8 +463,8 @@ export function sheetSenses(actor: any): Record<string, number> {
     blindsight: "blindsight",
     tremorsense: "tremorsense",
   })) {
-    const range = Number(ranges?.[sense]);
-    if (Number.isFinite(range) && range > 0) out[tag] = range;
+    const range = senseRangeOf(ranges?.[sense]);
+    if (range != null && range > 0) out[tag] = range;
   }
   return merge(out, compiled);
 }

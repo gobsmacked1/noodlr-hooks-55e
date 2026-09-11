@@ -55,6 +55,7 @@ import {
 import {
   combinedDamageTotal,
   itemOf,
+  messageSystem,
   readCheck,
   readHits,
   readSave,
@@ -638,6 +639,7 @@ function stillNeedsHelp(ctx: DiceContext): boolean {
 
 function isSpellAttack(message: any): boolean {
   if (String(message?.flags?.dnd5e?.item?.type ?? "") === "spell") return true;
+  if (String(messageSystem(message).item?.type ?? "") === "spell") return true;
   return String(itemOf(message)?.type ?? "") === "spell";
 }
 

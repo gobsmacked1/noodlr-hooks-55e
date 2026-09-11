@@ -112,6 +112,47 @@ Settings migrate once: `migrateLegacySettings()` copies `noodlr.combat.*` into t
 first load, reading through `game.settings.storage` because the old keys are no longer registered and
 `get` throws on an unregistered key.
 
+## dnd5e 6.0.0 (2026-09-10) — dual-read, never 6.0-only
+
+6.0 typed ChatMessage models. **New messages do not write `flags.dnd5e`.** World migrate copies the
+old flags onto `system.*` and then **deletes** them. The system does not write a shim. `module.json`
+dnd5e minimum stays `5.0.0`; every reader prefers the flag when it is present and falls through to
+the typed field.
+
+**`src/rules/cards.ts` is the one door.** Callers that still read `flags.dnd5e` directly go blind on
+6.0. Create hooks must examine even when that object is absent (pass `null`, not `message.flags`).
+Update watches `changed.system` as well as `changed.flags.dnd5e` / `midi-qol`.
+
+| 5.3.3 | 6.0.0 |
+| --- | --- |
+| `flags.dnd5e.roll.type` | `message.type` |
+| `flags.dnd5e.targets` (actor-keyed) | `system.targets` `{ac,actor,img,name,token}` |
+| `flags.dnd5e.originatingMessage` | `system.origin` (id string or ChatMessage) |
+| `flags.dnd5e.item` / `.activity` | `system.item` / `system.activity` |
+| `flags.dnd5e.roll.mastery` | `system.mastery` (`null` = declined) |
+| `flags.dnd5e.roll.forceSuccess` | `system.resisted` (`forceSuccess` is a getter) |
+| `flags.dnd5e.roll.damageOnSave` | `system.onSave` |
+| `flags.dnd5e.roll.ability` / `.skillId` | `system.ability` / `system.skill` |
+| `flags.dnd5e.roll.attackMode` | `system.mode` |
+| usage = `!messageType && activity` | `message.type === "usage"` |
+
+Death save: `type === "save"` + `system.type === "death"`. Concentration: `system.type ===
+"concentration"`. Healing: `type === "healing"`. Hit/miss is still not stored. A null AC stays
+**unresolved** (we diverge from 6.0's renderer treating null as a miss). Midi path is unchanged:
+presence of `flags["midi-qol"].hitTargetUuids` / `failedSaveUuids`.
+
+- **`looksLikeDemandedRoll` uses activity type** (`save` / `check`), not `rollType`. Do not "fix"
+  that by requiring deleted flags.
+- **`dnd5e-concentration.ts` reads `flags.dnd5e.item` on Active Effects**, not chat cards — leave it.
+- **Write only the live Speed key.** 6.0 stores `movement.speeds.walk` and shims the old path until
+  7.0. Writing both double-applies. `movementSpeedKey()` in `src/system/dnd5e-schema.ts`.
+- **Form-mode Wild Shape is an AE.** No new Actor, no `transformActor` on the common path, nothing
+  for `formLoot` to stamp. `isFormModeTransform` skips leftover-actor work. Do not invent leftovers.
+- **Falling is the system's** (`disableFalling`, default unchecked so falling is ON). We do not
+  apply it. `autoApplyDowned` defaults `"none"` — leave it there or dying/knockout double.
+- **A version bump is a REPORT, never a bill.** Do not `recompileWorld` for 6.0. After the world
+  updates, purge the `system_rules` RAG silo and re-ingest — 6.0 rewrote a lot of authored prose.
+
 ## THE SECOND PIVOT (2026-08-09) — the runtime capability compiler
 
 Hand-coding rules ended here, and the number that ended it is `noodlr-rules-corpus`'s own:

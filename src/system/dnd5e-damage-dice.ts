@@ -14,6 +14,7 @@
 
 import { hasFlag, readFlag } from "../util/flags";
 import { usesRemaining } from "../capability/primitives";
+import { itemOf, messageSystem, rollType } from "../rules/cards";
 import { hasInspiration, sorceryItem } from "./dnd5e-dice-mods";
 import { isDnd5e } from "./dnd5e-rewards";
 
@@ -86,11 +87,15 @@ export function empoweredCount(actor: any, diceCount: number): number {
 export function isSpellDamage(message: any): boolean {
   if (String(message?.flags?.dnd5e?.item?.type ?? "") === "spell") return true;
   if (String(message?.flags?.dnd5e?.activity?.type ?? "") === "cast") return true;
-  return false;
+  const sys = messageSystem(message);
+  if (String(sys.item?.type ?? "") === "spell") return true;
+  if (String(sys.activity?.type ?? "") === "cast") return true;
+  return String(itemOf(message)?.type ?? "") === "spell";
 }
 
 export function isHealingRoll(message: any): boolean {
-  return String(message?.flags?.dnd5e?.roll?.type ?? "") === "healing";
+  if (String(message?.flags?.dnd5e?.roll?.type ?? "") === "healing") return true;
+  return rollType(message) === "healing";
 }
 
 export function hasPiercing(dice: ListedDie[]): boolean {

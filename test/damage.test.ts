@@ -70,6 +70,19 @@ test("a critical hits whatever the AC says, and a fumble misses whatever the tot
   assert.equal(fumble.hits.length, 0);
 });
 
+test("6.0 system.targets with a token uuid still hits when the total meets AC", () => {
+  world.set("Scene.s.Token.gob", { name: "Goblin", documentName: "Token", id: "gob" });
+  const reading = readHits({
+    type: "attack",
+    rolls: [{ total: 15, isCritical: false, isFumble: false }],
+    system: {
+      targets: [{ name: "Goblin", ac: 15, token: "Scene.s.Token.gob", actor: "Actor.Goblin" }],
+    },
+  });
+  assert.equal(reading.hits.length, 1);
+  assert.equal(reading.hits[0].name, "Goblin");
+});
+
 test("an unreadable AC is unresolved rather than a hit, which diverges from dnd5e's renderer", () => {
   // The system's own formula scores a null AC as a hit, because `total < null` coerces to `total < 0`.
   // That is fine for a label a human reads and not fine for something that subtracts hit points.

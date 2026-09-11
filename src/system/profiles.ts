@@ -123,7 +123,12 @@ const GENERIC: SystemPaths = {
   hpValue: ["system.attributes.hp.value", "system.hp.value", "system.health.value"],
   hpMax: ["system.attributes.hp.max", "system.hp.max", "system.health.max"],
   armor: ["system.attributes.ac.value", "system.armorClass.value", "system.ac.value"],
-  speed: ["system.attributes.movement.walk", "system.attributes.speed.value", "system.speed.value"],
+  speed: [
+    "system.attributes.movement.speeds.walk",
+    "system.attributes.movement.walk",
+    "system.attributes.speed.value",
+    "system.speed.value",
+  ],
   speedUnits: ["system.attributes.movement.units"],
   altSpeeds: ["system.attributes.movement", "system.attributes.speed.otherSpeeds"],
   senses: ["system.attributes.senses", "system.traits.senses", "system.perception.senses"],

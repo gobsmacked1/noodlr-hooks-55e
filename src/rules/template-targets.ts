@@ -76,10 +76,19 @@ export function placesTemplate(activity: any): boolean {
  * Returns whether anything was there — the hook logs only when it actually dropped a leftover.
  */
 export function stripUsageTargets(messageConfig: any): boolean {
-  const flags = messageConfig?.data?.flags?.dnd5e;
-  if (!flags) return false;
-  const had = Array.isArray(flags.targets) && flags.targets.length > 0;
-  flags.targets = [];
+  const data = messageConfig?.data;
+  if (!data || typeof data !== "object") return false;
+  let had = false;
+  const flags = data.flags?.dnd5e;
+  if (flags) {
+    if (Array.isArray(flags.targets) && flags.targets.length > 0) had = true;
+    flags.targets = [];
+  }
+  const sys = data.system;
+  if (sys && typeof sys === "object") {
+    if (Array.isArray(sys.targets) && sys.targets.length > 0) had = true;
+    sys.targets = [];
+  }
   return had;
 }
 

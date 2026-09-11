@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.63
+
+**dnd5e 6.0 chat cards still automate.** 6.0 stopped writing `flags.dnd5e` on new
+messages. This module now reads the typed `message.type` and `system.*` fields
+as well as the old flags, so auto-damage, saves, masteries, forced movement,
+stealth, owed rolls, and legendary resistance keep working on both 5.3.3 and
+6.0. A world that has not upgraded is unchanged.
+
+**Speed cuts write the nested 6.0 key.** Ray of Frost and friends write
+`movement.speeds.walk` on 6.0, not both keys (that would double). Object-shaped
+sense ranges no longer read as empty.
+
+**Form-mode Wild Shape does not create a leftover actor.** 6.0 applies an
+Active Effect instead of copying the Actor. Loot-copy and leftover cleanup
+skip that path.
+
+**Falling and Auto-apply Downed are the system's.** The Combat page and
+advisories say so. Leave Auto-apply Downed on None while our dying layer is on.
+
+After you update to dnd5e 6.0, purge the `system_rules` memory collection and
+re-ingest the rules books — 6.0 rewrote a lot of that prose. Do not recompile
+the capability cache for this upgrade.
+
 ## 0.7.62
 
 **A Dagger used from 35 feet is a throw, not a 5-foot stab.** Weapons that have

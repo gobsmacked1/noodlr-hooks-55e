@@ -25,7 +25,7 @@ import { sightModifiers } from "./unseen";
 import { flankModifiers, readFlank } from "./flanking";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { blocked, centerOf } from "../core/positioning";
-import { originatingUsageIdFromRoll, targetsOf, tokenFromActorUuid } from "./cards";
+import { originatingMessageData, originatingUsageIdFromRoll, targetsOf, tokenFromActorUuid } from "./cards";
 import {
   applyDamageCritDefault,
   damageActivityMayCrit,
@@ -272,6 +272,7 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
   try {
     const ChatMessage = (globalThis as any).ChatMessage;
     const usageId = originatingUsageIdFromRoll(config, message);
+    const origin = usageId ? originatingMessageData(usageId) : null;
     await ChatMessage.create({
       content: summary,
       speaker: speakerFor(actor?.token ?? actor, name),
@@ -281,8 +282,9 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
         // save. Without it, cancelling the roll leaves `success === null` forever, auto-damage
         // stands aside because auto-saves is on, and Apply sits there — Disintegrate vs a
         // paralyzed target is the specimen.
-        ...(usageId ? { dnd5e: { originatingMessage: usageId } } : {}),
+        ...(origin?.flags ?? {}),
       },
+      ...(origin?.system ? { system: origin.system } : {}),
     });
   } catch (err) {
     log("conditions: failed to post auto-fail message:", err);

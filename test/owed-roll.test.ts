@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  looksLikeDemandedRoll,
   OWED_SECONDS,
   OWED_SECONDS_MAX,
   OWED_SECONDS_MIN,
@@ -119,4 +120,23 @@ test("owed damage holds initiative the same way a demanded save does", () => {
   assert.equal(shouldBlockAdvance(damage, { round: 2 }), true);
   assert.equal(shouldBlockAdvance(damage, { flags: { "noodlr-hooks-55e": { owed: damage } } }), false);
   assert.equal(shouldBlockAdvance([], { turn: 2 }), false);
+});
+
+test("looksLikeDemandedRoll accepts a 6.0 usage card whose activity is a save or check", () => {
+  const save = {
+    type: "usage",
+    getAssociatedActivity: () => ({ type: "save" }),
+  };
+  const check = {
+    type: "usage",
+    getAssociatedActivity: () => ({ type: "check" }),
+  };
+  const attack = {
+    type: "usage",
+    getAssociatedActivity: () => ({ type: "attack" }),
+  };
+  assert.equal(looksLikeDemandedRoll(save), true);
+  assert.equal(looksLikeDemandedRoll(check), true);
+  assert.equal(looksLikeDemandedRoll(attack), false);
+  assert.equal(looksLikeDemandedRoll({ type: "attack" }), false);
 });

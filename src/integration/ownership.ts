@@ -519,6 +519,41 @@ function systemSettingAdvisories(): Advisory[] {
     });
   }
 
+  // 6.0 falling. Default is false (falling ON). We do not model falling. An unreadable
+  // setting is 5.3.3 and says nothing about the next advisory.
+  try {
+    const fallingOff = game.settings.get("dnd5e", "disableFalling");
+    if (fallingOff === false) {
+      out.push({
+        level: "info",
+        title: "dnd5e 6.0 applies falling damage",
+        detail:
+          "The system now drops a creature that leaves the air and applies falling damage. This " +
+          "module does not. Leave Disable Falling unchecked unless the table wants to rule it by hand.",
+      });
+    }
+  } catch {
+    // 5.3.3 has no such setting.
+  }
+
+  // 6.0 auto-downed. Default is "none". Anything else writes Unconscious / Dead at 0 HP
+  // beside our dying and knockout layers.
+  try {
+    const downed = game.settings.get("dnd5e", "autoApplyDowned");
+    if (downed != null && String(downed) !== "none") {
+      out.push({
+        level: "warn",
+        title: "The system will apply Unconscious or Dead at 0 HP",
+        detail:
+          'dnd5e 6.0\'s Auto-apply Downed is not "None". The system will mark creatures at 0 HP ' +
+          "itself, which can double our dying and knockout writes. Set it to None in Configure " +
+          "Settings, dnd5e, Combat, unless you have turned our dying layer off.",
+      });
+    }
+  } catch {
+    // 5.3.3 has no such setting.
+  }
+
   // A TELEPORT THAT LANDS ON AN OCCUPIED SQUARE IS CANCELLED WITH NO MESSAGE, AND IT IS NOT OURS.
   //
   // Read from source rather than inferred, because it was reported as a Noodlr bug. At

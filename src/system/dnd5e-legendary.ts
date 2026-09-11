@@ -24,6 +24,7 @@
 // exactly this reason.
 
 import { log } from "../constants";
+import { isResisted } from "../rules/cards";
 import { isDnd5e } from "./dnd5e-rewards";
 
 /** What a creature has left, when it is the kind of creature that has any. */
@@ -55,7 +56,7 @@ export function canResist(actor: any): boolean {
 
 /** Has this save already been resisted, by us or by a human pressing dnd5e's own button? */
 export function alreadyResisted(message: any): boolean {
-  return message?.flags?.dnd5e?.roll?.forceSuccess === true;
+  return isResisted(message);
 }
 
 /**

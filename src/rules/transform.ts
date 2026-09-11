@@ -16,6 +16,7 @@ import { debug, log, MODULE_ID, warn } from "../constants";
 import { isPrimaryGM } from "../util/gm";
 import { isTransformLootEnabled, transformFolderName } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
+import { isFormModeTransform } from "../system/dnd5e-schema";
 import { askGm, registerQuery } from "../util/queries";
 import {
   COIN_KEYS,
@@ -471,8 +472,9 @@ function wrapRevertOriginalForm(): void {
   proto.revertOriginalForm = wrapped;
 }
 
-function divertCreateData(host: any, _source: any, d: any): void {
+function divertCreateData(host: any, _source: any, d: any, settings?: any): void {
   if (!isDnd5e() || !d) return;
+  if (isFormModeTransform(undefined, settings)) return;
   if (isTransformLootEnabled()) stampFormLootOnCreateData(d, host);
   const folderId = findFormFolderId();
   if (folderId) d.folder = folderId;
@@ -585,6 +587,7 @@ export function surveyTransform(): unknown {
     `transform: sheet restore only — ${tokens.length} token(s)`,
     `  loot=${isTransformLootEnabled() ? "on" : "off"} folder=${folder || "(original)"}` +
       (folder ? ` id=${folderId ?? "MISSING"}` : ""),
+    `  formMode=skip (6.0 AE, no leftover actor)`,
   ];
   for (const token of tokens) {
     const actor = token.actor ?? token.document?.actor;

@@ -36,8 +36,11 @@ import { promptChoice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
 import {
   activityOf,
+  attackModeOf,
+  isUsageCard,
   itemOf,
   originatingId,
+  originatingMessageData,
   rollType,
   speakerToken,
   targetsOf,
@@ -405,10 +408,10 @@ export async function collectOwedDamage(
     dc: 0,
     source,
     usageId,
-    itemUuid: String(item.uuid ?? message?.flags?.dnd5e?.item?.uuid ?? ""),
-    activityId: String(activity.id ?? message?.flags?.dnd5e?.activity?.id ?? ""),
+    itemUuid: String(item.uuid ?? itemOf(message)?.uuid ?? ""),
+    activityId: String(activity.id ?? ""),
     isCritical: Boolean(message?.rolls?.[0]?.isCritical),
-    attackMode: String(message?.flags?.dnd5e?.roll?.attackMode ?? "") || undefined,
+    attackMode: attackModeOf(message) || undefined,
     seconds: owedDamageSeconds(isAutoRollDamageEnabled(actor), owedSecondsFor(actor)),
   };
   const line: OwedLine = {
@@ -532,10 +535,11 @@ async function performOwedRoll(
   const token: any = await resolve(request.tokenUuid);
   if (!actor) return { ok: false, total: null };
   const ChatMessage = (globalThis as any).ChatMessage;
+  const origin = originatingMessageData(request.usageId);
   const messageData = {
     data: {
       speaker: ChatMessage?.getSpeaker?.({ actor, token }) ?? { alias: String(actor.name ?? "") },
-      flags: { dnd5e: { originatingMessage: request.usageId } },
+      ...origin,
     },
   };
   const dialog = { configure: opts.configure };
@@ -586,8 +590,7 @@ async function performOwedRoll(
 
 async function maybeAskCheck(message: any): Promise<void> {
   if (!isAutoSavesEnabled()) return;
-  const dnd5e = message?.flags?.dnd5e ?? {};
-  if (dnd5e.messageType || !dnd5e.activity) return;
+  if (!isUsageCard(message)) return;
   const item = itemOf(message);
   const activity = activityOf(message, item);
   if (String(activity?.type ?? "") !== "check") return;
@@ -760,8 +763,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function looksLikeDemandedRoll(message: any): boolean {
-  const dnd5e = message?.flags?.dnd5e ?? {};
-  if (dnd5e.messageType || !dnd5e.activity) return false;
+  if (!isUsageCard(message)) return false;
   const item = itemOf(message);
   const activity = activityOf(message, item);
   const type = String(activity?.type ?? "");

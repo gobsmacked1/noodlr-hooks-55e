@@ -43,13 +43,18 @@ import { isForcedMovementEnabled } from "../settings";
 import { readHp } from "../core/tracker";
 import {
   activityOf,
+  cardUpdateIsRelevant,
   damageTypesOf,
   itemOf,
   masteryOf,
+  originatingId,
   readHits,
   readSave,
+  rollType,
   speakerToken,
+  targetsOf,
   tokenFromActorUuid,
+  tokenFromTargetUuid,
   tokenFromTokenUuid,
 } from "./cards";
 import {
@@ -77,14 +82,14 @@ const usedOn = new Map<string, string>();
 
 export function registerForcedMovement(): void {
   Hooks.on("createChatMessage", (message: any) => {
-    void examine(message, message?.flags).catch((err) => log("forced movement failed:", err));
+    void examine(message, null).catch((err) => log("forced movement failed:", err));
   });
 
   // Midi fills one card in over several updates, so this fires repeatedly for the same message with
   // different flags each time. `changed` says which phase this update is, and `applied` stops any
-  // overlap with the native path.
+  // overlap with the native path. Pass the whole `changed` — 6.0 writes `system`, not `flags.dnd5e`.
   Hooks.on("updateChatMessage", (message: any, changed: any) => {
-    void examine(message, changed?.flags).catch((err) => log("forced movement failed:", err));
+    void examine(message, changed).catch((err) => log("forced movement failed:", err));
   });
 
   // A grappler that walks takes its captive with it. Nothing in dnd5e models this: `grappled` zeroes the
@@ -267,23 +272,23 @@ async function applyRule(
 
 // ── The two reading paths ────────────────────────────────────────────────────────────────────────────
 
-async function examine(message: any, changedFlags: any): Promise<void> {
+async function examine(message: any, changed: any): Promise<void> {
   if (!active()) return;
 
-  const midi = changedFlags?.["midi-qol"];
+  const midi = changed == null ? message?.flags?.["midi-qol"] : changed?.flags?.["midi-qol"];
   if (midi?.hitTargetUuids || midi?.failedSaveUuids) {
     await fromMidi(message, midi);
     return;
   }
 
-  const rollType = String(message?.flags?.dnd5e?.roll?.type ?? "");
   // Only act on a change that actually brought this information with it, or a midi card would be
-  // re-examined on every unrelated update it receives.
-  if (changedFlags && !changedFlags?.dnd5e) return;
+  // re-examined on every unrelated update it receives. Create passes null (always examine).
+  if (!cardUpdateIsRelevant(changed)) return;
 
-  if (rollType === "attack") await fromAttack(message);
-  else if (rollType === "save") await fromSave(message);
-  else if (rollType === "damage") await fromDamage(message);
+  const kind = rollType(message);
+  if (kind === "attack") await fromAttack(message);
+  else if (kind === "save") await fromSave(message);
+  else if (kind === "damage") await fromDamage(message);
 }
 
 /** Midi has already decided who was hit and who failed; both lists are token uuids. */
@@ -385,7 +390,7 @@ async function fromSave(message: any): Promise<void> {
   // sliding 5 ft for a save it already paid to undo.
   if (verdict.success !== false) return;
 
-  const originId = String(message?.flags?.dnd5e?.originatingMessage ?? "");
+  const originId = originatingId(message);
   if (!originId) return;
   const origin: any = (game.messages as any)?.get?.(originId);
   if (!origin) return;
@@ -402,7 +407,7 @@ async function fromSave(message: any): Promise<void> {
       trigger: "save",
       itemName: String(item?.name ?? ""),
       activityName: String(activity?.name ?? ""),
-      ability: String(message?.flags?.dnd5e?.roll?.ability ?? ""),
+      ability: verdict.ability,
       pusher: pusherDoc?.actor,
     }),
   );
@@ -438,8 +443,8 @@ async function fromDamage(message: any): Promise<void> {
   if (!rule) return;
 
   const activationId = String(message?.id ?? "");
-  for (const target of message?.flags?.dnd5e?.targets ?? []) {
-    const targetDoc = tokenFromActorUuid(String((target as any)?.uuid ?? ""));
+  for (const target of targetsOf(message)) {
+    const targetDoc = tokenFromTargetUuid(target.uuid);
     if (targetDoc) await applyRule(rule, pusherDoc, targetDoc, activationId);
   }
 }

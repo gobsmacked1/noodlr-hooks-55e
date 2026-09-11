@@ -58,6 +58,16 @@ test("a bought success survives an unreadable DC, because somebody paid for it e
   assert.equal(readSave(save(4, null, { forceSuccess: true })).success, true);
 });
 
+test("6.0 system.resisted is the same bought success as forceSuccess", () => {
+  const resisted = readSave({
+    type: "save",
+    system: { ability: "wis", resisted: true },
+    rolls: [{ total: 4, options: { target: 20 } }],
+  });
+  assert.equal(resisted.success, true);
+  assert.equal(resisted.forced, true);
+});
+
 /* -------------------------------------------- */
 /*  Whether the GM is worth interrupting         */
 /* -------------------------------------------- */

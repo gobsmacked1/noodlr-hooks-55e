@@ -22,6 +22,7 @@
 // silently stops for a reason nobody can find.
 
 import { debug, log } from "../constants";
+import { targetsOf } from "../rules/cards";
 
 // Re-exported rather than declared, because the vocabulary is what closes it: `window` is a required
 // parameter of a predicate in the closed set, so its legal values belong beside the kinds they qualify.
@@ -106,9 +107,9 @@ function messageTargets(message: any): string[] {
   const out: string[] = [];
   // Midi writes token uuids unconditionally, which is the better identity for unlinked tokens.
   for (const uuid of message?.flags?.["midi-qol"]?.hitTargetUuids ?? []) out.push(String(uuid));
-  // dnd5e keys by ACTOR uuid, which collapses two linked tokens of one actor into a single entry.
-  for (const target of message?.flags?.dnd5e?.targets ?? []) {
-    if (target?.uuid) out.push(String(target.uuid));
+  // 5.3.3 actor uuid or 6.0 token/actor uuid — same dual-read as every other card reader.
+  for (const target of targetsOf(message)) {
+    if (target.uuid) out.push(target.uuid);
   }
   return out;
 }

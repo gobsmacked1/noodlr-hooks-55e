@@ -19,7 +19,7 @@ import { DEFAULT_SECONDS, promptChoice } from "../util/prompt";
 import { askUser, registerQuery } from "../util/queries";
 import { tokenFor } from "../util/tokens";
 import { owedSecondsFor } from "./owed-roll";
-import { attackMessageOf, damageParts, rollType } from "./cards";
+import { attackMessageOf, attackModeOf, damageParts, rollType } from "./cards";
 import { shouldAutomate } from "../tactics/registry";
 import { durationPayload, worldOf } from "../capability/duration";
 import { effectForStatus, stampDuration } from "../capability/timed";
@@ -77,9 +77,7 @@ export function typesFromMessage(message: any): string[] {
 export function meleeFromMessage(message: any): boolean | null {
   const card = attackCardOf(message);
   if (!card) return null;
-  const mode = String(
-    card?.flags?.dnd5e?.roll?.attackMode ?? card?.rolls?.[0]?.options?.attackMode ?? "",
-  );
+  const mode = String(attackModeOf(card) || card?.rolls?.[0]?.options?.attackMode || "");
   const activity = card?.getAssociatedActivity?.();
   const item = card?.getAssociatedItem?.();
   return meleeFromParts({

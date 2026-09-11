@@ -71,7 +71,7 @@ function dispositions(): Disposition[] {
       key: "hazards",
       rule: "Burning, falling, suffocating and the rest.",
       enforcedBy: MODULE_ID,
-      why: "Already built, before this list was worked: `core/hazards.ts` moves a creature out of a persistent harmful area, with which areas hurt quarantined in `system/dnd5e-hazards.ts`.",
+      why: "Already built, before this list was worked: `core/hazards.ts` moves a creature out of a persistent harmful area, with which areas hurt quarantined in `system/dnd5e-hazards.ts`. Falling in 6.0 is the system's (`disableFalling`, default off so falling is ON); we do not apply it.",
     },
     {
       key: "breakingobjects",

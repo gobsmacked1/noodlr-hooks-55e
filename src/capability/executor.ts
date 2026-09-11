@@ -31,6 +31,7 @@ import {
   type TriggerEvent,
 } from "../integration/capability";
 import { readRest } from "../system/dnd5e-rest";
+import { movementSpeedKey } from "../system/dnd5e-schema";
 import { bindingsFor } from "./bindings";
 import { bindingShouldFire, damageTakenGrantAllowed } from "./live-item";
 import { conditionsMet, type EvalContext, type Subject } from "./predicates";
@@ -561,7 +562,7 @@ async function applyEffect(
     case "modify_speed": {
       const who = subject?.actor ?? self.actor;
       if (!who) return { ok: false, reason: "no target for the Speed change" };
-      const changes = speedChanges(effect);
+      const changes = speedChanges(effect, who);
       if ("error" in changes) return { ok: false, reason: changes.error };
       const timed = grantDuration(effect, ctx);
       if ("error" in timed) return { ok: false, reason: timed.error };
@@ -608,6 +609,7 @@ function grantDuration(
 
 function speedChanges(
   effect: CapabilityRule["effect"],
+  actor?: any,
 ): { changes: Array<{ key: string; mode: number; value: string }> } | { error: string } {
   if (effect.costMultiplier != null) {
     return { error: "costMultiplier has no Active Effect key — refusing" };
@@ -619,16 +621,16 @@ function speedChanges(
   const amount = asQuantity(effect.amount);
   if (setTo && typeof setTo.value === "number" && Number.isFinite(setTo.value)) {
     for (const t of types) {
-      changes.push({ key: `system.attributes.movement.${t}`, mode: modes.override, value: String(setTo.value) });
+      changes.push({ key: movementSpeedKey(t, actor), mode: modes.override, value: String(setTo.value) });
     }
   } else if (amount && typeof amount.value === "number" && Number.isFinite(amount.value)) {
     for (const t of types) {
-      changes.push({ key: `system.attributes.movement.${t}`, mode: modes.add, value: String(amount.value) });
+      changes.push({ key: movementSpeedKey(t, actor), mode: modes.add, value: String(amount.value) });
     }
   } else if (typeof effect.multiplier === "number" && Number.isFinite(effect.multiplier)) {
     for (const t of types) {
       changes.push({
-        key: `system.attributes.movement.${t}`,
+        key: movementSpeedKey(t, actor),
         mode: modes.multiply,
         value: String(effect.multiplier),
       });

@@ -46,6 +46,7 @@ import {
   type CounterspellReady,
 } from "../system/dnd5e-counterspell";
 import { canResist } from "../system/dnd5e-legendary";
+import { isResisted } from "./cards";
 import { considerResistance } from "./legendary";
 import { offerReaction } from "./offer";
 import { hasReaction } from "./economy/ledger";
@@ -268,7 +269,7 @@ async function contest(
 
 /** dnd5e stamps a hand-pressed resistance on the message rather than posting a new one. */
 function alreadyForced(message: any): boolean {
-  return message?.flags?.dnd5e?.roll?.forceSuccess === true;
+  return isResisted(message);
 }
 
 /**

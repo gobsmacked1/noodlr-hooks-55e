@@ -153,6 +153,19 @@ test("a leftover roll.mastery flag still needs the wielder's feature", () => {
   assert.equal(masteryOf(card, staff(), monk(["quarterstaff"])), "topple");
 });
 
+test("6.0 system.mastery is the dialog choice, including a decline", () => {
+  const trained = monk(["quarterstaff"]);
+  assert.equal(
+    masteryOf({ type: "attack", system: { mastery: "topple" } }, staff(), trained),
+    "topple",
+  );
+  assert.equal(
+    masteryOf({ type: "attack", system: { mastery: null } }, staff(), trained),
+    "",
+    "null on the typed card is a decline — do not fall through to the weapon tag",
+  );
+});
+
 test("Weapon Master extras only apply on a weapon the wielder already masters", () => {
   const feat = monk(["quarterstaff"]);
   feat.system.traits.weaponProf.mastery.bonus = new Set(["sap"]);

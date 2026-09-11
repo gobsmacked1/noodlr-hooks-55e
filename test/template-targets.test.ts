@@ -83,6 +83,14 @@ test("stripUsageTargets empties the snapshot dnd5e wrote before the hook", () =>
   assert.deepEqual(messageConfig.data.flags.dnd5e.targets, []);
 });
 
+test("stripUsageTargets empties 6.0 system.targets when flags.dnd5e is absent", () => {
+  const messageConfig = {
+    data: { system: { targets: [{ name: "Dire Wolf", token: "Scene.s.Token.w" }] } },
+  };
+  assert.equal(stripUsageTargets(messageConfig), true);
+  assert.deepEqual(messageConfig.data.system.targets, []);
+});
+
 test("stripUsageTargets is a no-op when nothing was targeted", () => {
   const empty = { data: { flags: { dnd5e: { targets: [] } } } };
   assert.equal(stripUsageTargets(empty), false);

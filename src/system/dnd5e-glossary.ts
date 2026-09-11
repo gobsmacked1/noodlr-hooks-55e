@@ -61,7 +61,7 @@ const OVERRIDE = "compileAnyway";
  */
 const GLOSSARY: { id: string; name: RegExp; why: string; types?: readonly string[] }[] = [
   { id: "check-cover", name: /^\s*check\s+cover\s*$/i, why: "simplecover5e owns cover; see pages.ts" },
-  { id: "fall", name: /^\s*fall(ing)?\s*$/i, why: "core models no falling; refused in general.ts" },
+  { id: "fall", name: /^\s*fall(ing)?\s*$/i, why: "dnd5e 6.0 models falling unless disableFalling; refused in general.ts" },
   { id: "underwater", name: /^\s*underwater\s*$/i, why: "environmental; refused in general.ts" },
   { id: "long-rest", name: /^\s*long\s+rest\s*$/i, why: "the system owns rests; noteRest reads the hook" },
   { id: "short-rest", name: /^\s*short\s+rest\s*$/i, why: "the system owns rests; noteRest reads the hook" },

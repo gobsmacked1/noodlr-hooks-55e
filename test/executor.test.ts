@@ -887,3 +887,37 @@ test("modify_speed writes an ADD change on walk Speed", async () => {
   assert.equal(victim.effects[0].changes[0].key, "system.attributes.movement.walk");
   assert.equal(victim.effects[0].changes[0].value, "-10");
 });
+
+test("modify_speed writes the 6.0 nested Speed key, never both", async () => {
+  (globalThis as any).game.system.version = "6.0.0";
+  const actor = withEffects(troll());
+  bindCapabilities(actor.uuid, [
+    {
+      capability: {
+        id: "hash-frost-6",
+        label: "Ray of Frost",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_hit" },
+            condition: [],
+            effect: { kind: "modify_speed", amount: { value: -10 }, target: "target" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  const victim = withEffects(troll());
+  const outcomes = await fireTrigger("on_hit", {
+    self: { actor },
+    target: { actor: victim },
+    activity: FIRE_BOLT_ACTIVITY,
+  });
+  assert.equal(outcomes[0].fired, true, outcomes[0].reason);
+  assert.equal(victim.effects[0].changes[0].key, "system.attributes.movement.speeds.walk");
+  assert.equal(
+    victim.effects[0].changes.some((c: { key: string }) => c.key === "system.attributes.movement.walk"),
+    false,
+  );
+});

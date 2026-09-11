@@ -50,8 +50,11 @@ import {
   activityOf,
   damageOnSave,
   damageParts,
+  isSaveDamage,
+  isUsageCard,
   itemOf,
   originatingId,
+  originatingMessageData,
   readSave,
   rollType,
   saveMultiplier,
@@ -187,7 +190,13 @@ export function registerSaveResolution(): void {
   // worst version of this bug, because they had intervened and been ignored.
   Hooks.on("updateChatMessage", (message: any, changed: any) => {
     if (!active()) return;
-    if (changed?.flags?.dnd5e?.roll?.forceSuccess !== true) return;
+    if (
+      changed?.flags?.dnd5e?.roll?.forceSuccess !== true &&
+      changed?.system?.resisted !== true &&
+      changed?.system?.forceSuccess !== true
+    ) {
+      return;
+    }
     void route(message);
   });
 
@@ -207,8 +216,6 @@ function active(): boolean {
 /** Send a message to whichever half of this cares about it. */
 async function route(message: any): Promise<void> {
   try {
-    const dnd5e = message?.flags?.dnd5e ?? {};
-
     // A cancelled auto-fail is a failed save. The condition layer posts this instead of a
     // roll, because a dialog would invite a total that contradicts Paralyzed / Unconscious.
     // It has to be read here — `preRollSavingThrow` is client-local, so a player's auto-fail
@@ -218,9 +225,10 @@ async function route(message: any): Promise<void> {
       return;
     }
 
-    // A usage card: no `messageType`, but an activity. This is the earliest moment the NPCs' saves can be
-    // rolled, which is the whole point of watching it — a Hold Person has no damage roll to wait for.
-    if (!dnd5e.messageType && dnd5e.activity) {
+    // A usage card. 5.3.3: no `messageType` plus an activity flag. 6.0: `type: "usage"`.
+    // This is the earliest moment the NPCs' saves can be rolled — a Hold Person has no
+    // damage roll to wait for.
+    if (isUsageCard(message)) {
       await onUsage(message);
       return;
     }
@@ -228,10 +236,9 @@ async function route(message: any): Promise<void> {
       await onSave(message);
       return;
     }
-    // A damage roll belonging to a save activity, which is what `damageOnSave` marks and nothing else
-    // sets. Read from the roll rather than from the activity, because an unlinked token's item is not
-    // always reachable by uuid and this answer is on the message either way.
-    if (rollType(message) === "damage" && dnd5e.roll?.damageOnSave) {
+    // A damage roll belonging to a save activity. `isSaveDamage` requires the field to
+    // be stamped — `damageOnSave()` defaults to "half" and cannot be the gate.
+    if (isSaveDamage(message)) {
       await onSaveDamage(message);
     }
   } catch (err) {
@@ -883,7 +890,7 @@ async function rollForTarget(act: Activation, state: TargetState): Promise<void>
           speaker: ChatMessage.getSpeaker({ actor, token: state.doc }),
           // Stamped by hand because we did not click a button, and this is the only thread back to the
           // activation. Without it our own roll would arrive as an unjoinable save.
-          flags: { dnd5e: { originatingMessage: act.usageId } },
+          ...originatingMessageData(act.usageId),
         },
       },
     );

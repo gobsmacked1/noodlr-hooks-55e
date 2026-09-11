@@ -46,9 +46,11 @@ import {
 import { collectDemanded, owedSecondsFor } from "./owed-roll";
 import {
   activityOf,
+  cardUpdateIsRelevant,
   itemOf,
   masteryOf,
   readHits,
+  rollType,
   speakerToken,
   tokenFromTokenUuid,
   type DamagePart,
@@ -109,11 +111,11 @@ export function registerMasteries(): void {
 
   Hooks.on("createChatMessage", (message: any) => {
     stampCleaveCard(message);
-    void examine(message, message?.flags).catch((err) => log("masteries failed:", err));
+    void examine(message, null).catch((err) => log("masteries failed:", err));
   });
   Hooks.on("updateChatMessage", (message: any, changed: any) => {
     stampCleaveCard(message);
-    void examine(message, changed?.flags).catch((err) => log("masteries failed:", err));
+    void examine(message, changed).catch((err) => log("masteries failed:", err));
   });
   // Every client: the Apply button runs `applyDamage` where it was pressed. A pending Map
   // that only the primary GM holds never reaches a player's click.
@@ -135,18 +137,17 @@ export function registerMasteries(): void {
   });
 }
 
-async function examine(message: any, changedFlags: any): Promise<void> {
+async function examine(message: any, changed: any): Promise<void> {
   if (!active()) return;
 
-  const midi = changedFlags?.["midi-qol"];
+  const midi = changed == null ? message?.flags?.["midi-qol"] : changed?.flags?.["midi-qol"];
   if (midi?.hitTargetUuids) {
     await fromHits(message, midiHits(midi.hitTargetUuids));
     return;
   }
 
-  const rollType = String(message?.flags?.dnd5e?.roll?.type ?? "");
-  if (changedFlags && !changedFlags?.dnd5e) return;
-  if (rollType !== "attack") return;
+  if (!cardUpdateIsRelevant(changed)) return;
+  if (rollType(message) !== "attack") return;
 
   const reading = readHits(message);
   await fromHits(message, reading.hits);
@@ -266,7 +267,7 @@ export function trimCleaveDamage(actor: any, parts: DamagePart[], message?: any)
 
 function stampCleaveCard(message: any): void {
   if (!isPrimaryGM()) return;
-  if (String(message?.flags?.dnd5e?.roll?.type ?? "") !== "damage") return;
+  if (rollType(message) !== "damage") return;
   if (Number(message?.flags?.[MODULE_ID]?.cleaveCut) > 0) return;
   const attacker = speakerToken(message?.speaker)?.actor;
   const uuid = String(attacker?.uuid ?? "");

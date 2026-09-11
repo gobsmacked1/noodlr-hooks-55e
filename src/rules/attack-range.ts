@@ -94,9 +94,18 @@ function targetedTokens(usageConfig: any, messageConfig: any): any[] {
     ...(Array.isArray(messageConfig?.data?.flags?.dnd5e?.targets)
       ? messageConfig.data.flags.dnd5e.targets
       : []),
+    ...(Array.isArray(messageConfig?.data?.system?.targets) ? messageConfig.data.system.targets : []),
   ];
   for (const row of rows) {
-    const uuid = typeof row === "string" ? row : String((row as { uuid?: unknown })?.uuid ?? "");
+    const uuid =
+      typeof row === "string"
+        ? row
+        : String(
+            (row as { token?: unknown; actor?: unknown; uuid?: unknown })?.token ||
+              (row as { uuid?: unknown })?.uuid ||
+              (row as { actor?: unknown })?.actor ||
+              "",
+          );
     if (!uuid) continue;
     addToken(out, seen, resolveUuid(uuid));
   }

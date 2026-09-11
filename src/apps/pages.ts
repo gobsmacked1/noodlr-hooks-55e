@@ -772,6 +772,28 @@ const SHARED_ROLLS: Section = {
         "dnd5e, and it ships ON: Configure Settings, dnd5e, Visibility, Bloodied. The default " +
         '("Players") hides the icon from the party on hostile tokens while keeping the status.',
     },
+    {
+      id: "falling",
+      label: "Falling damage",
+      hint:
+        "A creature that leaves the air takes falling damage. We do not apply it. dnd5e 6.0 does, " +
+        "unless Disable Falling is checked.",
+      state: "system",
+      today:
+        "dnd5e 6.0 (Configure Settings, dnd5e, Combat, Disable Falling — default unchecked, so " +
+        "falling is ON). 5.3.3 modelled none. We still refuse a compiled Fall glossary item.",
+    },
+    {
+      id: "autoDowned",
+      label: "Unconscious or Dead at 0 HP",
+      hint:
+        "Who the system marks when hit points hit zero. Our dying and knockout layers already do " +
+        "this; leaving the system on as well can double-apply.",
+      state: "system",
+      today:
+        'dnd5e 6.0 Auto-apply Downed (Configure Settings, dnd5e, Combat). Default "None". ' +
+        "Leave it there while our dying layer is on.",
+    },
   ],
 };
 

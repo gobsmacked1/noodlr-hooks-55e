@@ -130,8 +130,11 @@ function messageIsCritical(options: any): boolean {
         }
       }
     }
-    const targets = doc?.flags?.dnd5e?.targets;
-    if (Array.isArray(targets) && targets.some((t: any) => t?.isCritical)) return true;
+    const flagTargets = doc?.flags?.dnd5e?.targets;
+    const sysTargets = doc?.system?.targets;
+    for (const targets of [flagTargets, sysTargets]) {
+      if (Array.isArray(targets) && targets.some((t: any) => t?.isCritical)) return true;
+    }
   } catch {
     // ignore
   }

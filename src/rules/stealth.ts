@@ -61,6 +61,7 @@ import {
 } from "../system/dnd5e-concealment";
 import { HIDING_STATUS, isVerbalSpell, keepsHiddenOnMiss } from "../system/dnd5e-stealth";
 import { screensBetween } from "../core/screens";
+import { readCheck, rollType, targetsOf } from "./cards";
 
 /** What we store when a declared hider rolls Stealth. Never read unless the status is up. */
 interface Banked {
@@ -126,9 +127,8 @@ const OUTCOME_MS = 15_000;
 export function registerStealthWatch(): void {
   Hooks.on("createChatMessage", (message: any) => {
     if (!isPrimaryGM()) return;
-    const roll: any = message?.flags?.dnd5e?.roll;
-    if (String(roll?.type ?? "") !== "skill") return;
-    if (String(roll?.skillId ?? "") !== "ste") return;
+    if (rollType(message) !== "skill") return;
+    if (String(readCheck(message).skill ?? "") !== "ste") return;
     const total = Number(message?.rolls?.[0]?.total);
     if (Number.isFinite(total)) void noteStealthRoll(message?.speaker, total);
   });
@@ -190,12 +190,12 @@ function attackConnected(message: any, changes?: any): boolean | null {
   const hitUuids = midi?.hitTargetUuids;
   if (Array.isArray(hitUuids)) return hitUuids.length > 0;
 
-  if (String(message?.flags?.dnd5e?.roll?.type ?? "") !== "attack") return null;
+  if (rollType(message) !== "attack") return null;
   const roll: any = message?.rolls?.[0];
   const total = Number(roll?.total);
   if (!Number.isFinite(total)) return null;
 
-  const targets = message?.flags?.dnd5e?.targets ?? [];
+  const targets = targetsOf(message);
   if (targets.length === 0) return null;
 
   // Ahead of the AC comparison, because neither depends on it: a natural 20 hits whatever it was aimed
