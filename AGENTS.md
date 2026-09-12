@@ -122,7 +122,7 @@ A flags-only reader goes blind on the only version we support.
 
 **`src/rules/cards.ts` is the one door.** Read `message.type` + `system.*`. Create hooks must
 examine even when `flags.dnd5e` is absent (pass `null`, not `message.flags`). Update watches
-`changed.system` and leftover `changed.flags.dnd5e` / `midi-qol`.
+`changed.system` only.
 
 Migrate glossary (old flag → live field) — not a dual-read contract:
 
@@ -141,8 +141,9 @@ Migrate glossary (old flag → live field) — not a dual-read contract:
 
 Death save: `type === "save"` + `system.type === "death"`. Concentration: `system.type ===
 "concentration"`. Healing: `type === "healing"`. Hit/miss is still not stored. A null AC stays
-**unresolved** (we diverge from 6.0's renderer treating null as a miss). Midi path is unchanged:
-presence of `flags["midi-qol"].hitTargetUuids` / `failedSaveUuids`.
+**unresolved** (we diverge from 6.0's renderer treating null as a miss). Do not read
+`flags["midi-qol"]`. Midi QoL is incompatible; a card is a 6.0.1 dnd5e card or it is
+not our problem.
 
 Keep (not chat-card forks): `flags.dnd5e` on **items / AEs / tokens** — `cachedFor`,
 `isPolymorphed`, `originalActor`, template `origin` / `item`, `isTemporary`, `halflingLucky`,

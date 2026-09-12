@@ -28,7 +28,6 @@ import { log } from "../constants";
 import {
   activityOf,
   itemOf,
-  messageSystem,
   rollType,
   speakerToken,
   targetsOf,
@@ -42,12 +41,7 @@ const dispatched = new Set<string>();
 const DISPATCH_LIMIT = 64;
 
 export function isAttackRollMessage(message: any): boolean {
-  if (rollType(message) === "attack") return true;
-  // Midi merges the attack into its workflow card. The native type is often still stamped; when it
-  // is not, the presence of hit-target uuids on a card that also names an item is the same event.
-  const midi = message?.flags?.["midi-qol"];
-  if (midi && (midi.hitTargetUuids || midi.hitTargets) && messageSystem(message).item) return true;
-  return false;
+  return rollType(message) === "attack";
 }
 
 export function firstTargetOf(message: any): Subject | undefined {
@@ -95,7 +89,7 @@ export async function fireAttackRollTriggers(message: any): Promise<void> {
 }
 
 export function registerAttackRollTriggers(): void {
-  // `updateChatMessage` as well as `create`: midi fills the roll onto an existing workflow card.
+  // `updateChatMessage` as well as `create`: a Resist or a later fill-in on the same card.
   const consider = (message: any) => {
     void fireAttackRollTriggers(message);
   };

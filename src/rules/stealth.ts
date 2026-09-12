@@ -181,15 +181,9 @@ export function registerStealthWatch(): void {
  * untargeted swing into a miss and hand a Skulker permanent concealment — the exact failure this whole
  * release is about. Null therefore reveals.
  *
- * Midi is read from its own flags on `updateChatMessage`, because it merges everything into one card and
- * writes `hitTargetUuids` unconditionally; those are TOKEN uuids, and their presence is what selects this
- * path rather than the presence of the module, since midi can have its automation switched off.
+ * A 6.0.1 attack card is the only verdict. Do not read Midi QoL flags.
  */
-function attackConnected(message: any, changes?: any): boolean | null {
-  const midi = (changes?.flags ?? message?.flags)?.["midi-qol"];
-  const hitUuids = midi?.hitTargetUuids;
-  if (Array.isArray(hitUuids)) return hitUuids.length > 0;
-
+function attackConnected(message: any, _changes?: any): boolean | null {
   if (rollType(message) !== "attack") return null;
   const roll: any = message?.rolls?.[0];
   const total = Number(roll?.total);
@@ -421,8 +415,8 @@ async function onAttackRolled(actor: any): Promise<void> {
  * The outcome of a Skulker's attack arrived. A hit reveals; a miss does not.
  *
  * Called from the same message readers `forced.ts` uses, because hit-or-miss is stored nowhere and has to
- * be recomputed the way the chat card renders it — or read out of midi's flags when midi is the one
- * deciding. Only the client that recorded the pending attack acts, which is the client that rolled it.
+ * be recomputed the way the chat card renders it. Only the client that recorded the pending attack
+ * acts, which is the client that rolled it.
  */
 export async function resolveSniperOutcome(
   actorId: string,

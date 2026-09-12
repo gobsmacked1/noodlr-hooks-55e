@@ -1,14 +1,13 @@
 // Reading other modules' state, in one place.
 //
-// Advisories and conflicts still have to answer the same two questions — is that module active, and
-// what is it configured to do — and each one used to answer them itself. Three copies of the midi
-// config lookup was the point at which that stopped being acceptable, because the lookup is not
-// obvious: midi exposes a live object through its global that is NOT always the same as the stored
-// setting, and reading only the stored setting misses a runtime change.
+// Advisories still have to answer "is that module active" and, for a few house-rule packages,
+// "what is it configured to do". Nothing here throws. A module we do not own may be absent,
+// half-initialised, or storing a shape we have never seen, and the correct answer in all three
+// cases is "I could not tell". These helpers never switch our rules off — they only name a live
+// conflict so the GM can see two referees.
 //
-// Nothing here throws. A module we do not own may be absent, half-initialised, or storing a shape we
-// have never seen, and the correct answer in all three cases is "I could not tell". These helpers
-// never switch our rules off — they only name a live conflict so the GM can see two referees.
+// Do not add Midi QoL config readers. That package is incompatible; `moduleActive("midi-qol")`
+// is enough to say so.
 
 /** Is a module installed AND enabled in this world? */
 export function moduleActive(id: string): boolean {
@@ -16,25 +15,6 @@ export function moduleActive(id: string): boolean {
     return Boolean((game as any)?.modules?.get?.(id)?.active);
   } catch {
     return false;
-  }
-}
-
-/**
- * midi-qol's live configuration, or null when midi is absent or unreadable.
- *
- * Prefers `MidiQOL.configSettings()` over the stored world setting: midi mutates that object at
- * runtime, so a GM who changed a switch without reloading has a stored value that is already stale.
- * Falls back to the setting because the global does not exist until midi's own ready hook has run,
- * and our advisories are consulted from paths that can run earlier.
- */
-export function midiConfig(): any | null {
-  if (!moduleActive("midi-qol")) return null;
-  try {
-    const MidiQOL = (globalThis as any).MidiQOL;
-    const live = typeof MidiQOL?.configSettings === "function" ? MidiQOL.configSettings() : null;
-    return live ?? game.settings.get("midi-qol", "ConfigSettings") ?? null;
-  } catch {
-    return null;
   }
 }
 
@@ -50,14 +30,4 @@ export function moduleSetting(moduleId: string, key: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-/**
- * midi's own "is this switch on" idiom.
- *
- * Almost every mechanical setting midi has is a string enum whose off position is the literal
- * `"none"`, so a plain truthiness test reports `"none"` as enabled.
- */
-export function midiOn(value: unknown): boolean {
-  return Boolean(value && value !== "none");
 }

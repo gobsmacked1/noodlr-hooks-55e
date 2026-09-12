@@ -13,9 +13,8 @@
 //   * OWNERSHIP — for one rule area, who acts: us, the system, or nobody. This is what a settings
 //     row needs to show beside its checkbox.
 //   * ADVISORIES — cross-cutting conditions that are nobody's rule area but change what the GM sees
-//     at the table. Midi's live range check is the important one: it cancels an item use with only a
-//     log line, which is indistinguishable from our automation failing to fire. The advice there is
-//     to disable midi, not to turn us off.
+//     at the table. Midi QoL (and the rest of that stack) is incompatible: if it is active, say so
+//     once and stop. Do not parse its settings or stand aside for it.
 //   * CONFLICTS — two packages that will both act on one event. Not a stand-aside, because standing
 //     aside needs certainty and these are suspicions; the GM is told and decides.
 
@@ -29,7 +28,7 @@ import {
 } from "../constants";
 import { AUDIENCES, type Audience } from "../util/audience";
 import { isDnd5e } from "../system/dnd5e-rewards";
-import { midiConfig, midiOn, moduleActive, moduleSetting } from "../util/modules";
+import { moduleActive, moduleSetting } from "../util/modules";
 import { getAutoRecharge } from "../settings";
 import { systemOwnsRecharge } from "../rules/recharge";
 
@@ -284,10 +283,8 @@ export interface Advisory {
 /**
  * Cross-cutting conditions the GM should know about, whether or not they touch a setting of ours.
  *
- * The first two exist because of a measured trap: midi ships with nearly every mechanical automation
- * OFF, and a GM reading its config panel reasonably concludes otherwise. Both range rules, by
- * contrast, ARE live at stock settings and cancel an item use with only a console line — which at the
- * table is indistinguishable from this module failing to fire.
+ * Midi QoL is incompatible. If it is active we say so once and stop — we do not parse its
+ * settings or share a rule with it.
  */
 export function advisories(): Advisory[] {
   const out: Advisory[] = [];
@@ -302,44 +299,19 @@ export function advisories(): Advisory[] {
     return out;
   }
 
-  const midi = midiConfig();
-  if (midi) {
-    const range = midi.optionalRules?.checkRange ?? midi.checkRange;
-    if (midiOn(range)) {
-      out.push({
-        level: "warn",
-        title: "Midi QoL is not compatible — disable it",
-        detail:
-          `Its Check Range is "${String(range)}", live at stock, and it cancels an out-of-range ` +
-          "use with only a log line. This module already refuses that use itself. Running both " +
-          "is an unsupported install: disable Midi QoL (and the rest of the automation stack " +
-          "named in the README) rather than trying to share the rule.",
-      });
-    }
-    const walls = midi.optionalRules?.wallsBlockRange ?? midi.wallsBlockRange;
-    if (midiOn(walls)) {
-      out.push({
-        level: "info",
-        title: "Midi QoL is treating walls as blocking range",
-        detail:
-          `Walls Block Range is "${String(walls)}". Same path as Check Range above: live regardless ` +
-          "of the Optional Rules switch, and it cancels quietly.",
-      });
-    }
-    if (midi.optionalRulesEnabled) {
-      out.push({
-        level: "info",
-        title: "Midi QoL optional rules are on",
-        detail:
-          "Its house rules (invisibility advantage, critical saves, hidden-attacker advantage, " +
-          "nearby-foe disadvantage) are actively modifying rolls. Worth knowing before attributing " +
-          "an unexpected advantage to this module.",
-      });
-    }
+  if (moduleActive("midi-qol")) {
+    out.push({
+      level: "warn",
+      title: "Midi QoL is not compatible — disable it",
+      detail:
+        "This module and Midi QoL both referee the same fight. We do not stand aside, share a " +
+        "chat-card path, or test that pairing. Disable Midi QoL (and Chris's Premades, Gambit's, " +
+        "and Automated Conditions 5e) rather than trying to run both.",
+    });
   }
 
-  // Same shape of trap as midi's range check: nothing here is wrong, but a whole class of roll stops
-  // reaching us and the symptom is a rule of ours quietly not firing.
+  // Nothing here is wrong, but a whole class of roll stops reaching us and the symptom is a rule
+  // of ours quietly not firing.
   if (moduleActive("arms-reach")) {
     const gmDoorsExempt = moduleSetting("arms-reach", "globalInteractionDistanceForGMOnDoors") !== true;
     if (gmDoorsExempt) {

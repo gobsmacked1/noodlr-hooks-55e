@@ -361,8 +361,7 @@ function storedValue(fullKey: string): unknown {
  * activity type has a field that could express a distance, the Push weapon mastery is a tooltip, and
  * every distance in the published content sits in description prose (verified against 5.3.3,
  * 2026-08-06). Repelling Blast is shipped as an enchantment whose entire mechanical content is appending
- * ", Repelling" to the cantrip's name as a reminder for the human. midi-qol ships two movement helpers
- * and calls them from nothing. The premades packages cover about a dozen items between them.
+ * ", Repelling" to the cantrip's name as a reminder for the human.
  *
  * On by default, because a battlefield-control build that never moves anybody is not a build. Applied
  * automatically with an undo control on every card, rather than by prompting: most of these rules are
@@ -532,10 +531,9 @@ export function getEconomyMode(subject: unknown): "off" | "warn" | "block" {
  * Nothing in the stack does this. dnd5e computes whether an attack hit inside its chat card's renderer
  * and stores the answer nowhere, so it has no basis on which to apply anything; what it ships instead is
  * the damage tray, a button per target for a human to press. That is a deliberate position rather than a
- * gap — "Range, reach, & cover" and hit determination are both unshipped roadmap items — and midi-qol is
- * the module that used to fill it. On a supported install that package is off, so every hit would
- * otherwise cost the GM a click and a subtraction — which is precisely the arithmetic nobody came
- * to the table for.
+ * gap — "Range, reach, & cover" and hit determination are both unshipped roadmap items. Every hit
+ * would otherwise cost the GM a click and a subtraction — which is precisely the arithmetic nobody
+ * came to the table for.
  *
  * On by default for BOTH sides. The asymmetry a GM might expect — automate the monsters, leave the party
  * alone — is the wrong way round: a player watching their own hit points move is watching the fiction

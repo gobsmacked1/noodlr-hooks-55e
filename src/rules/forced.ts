@@ -7,25 +7,10 @@
 // the GM's client, because the per-roll hooks (`dnd5e.rollAttack`, `dnd5e.rollSavingThrow`) are ordinary
 // local hooks that fire only on the client that rolled — a player's attack is invisible through them.
 //
-// WHAT IS LISTENED TO, therefore: chat messages, which every client receives. Two paths, because midi
-// changes not the data but which event carries it.
-//
-//   NATIVE. `createChatMessage`. An attack message is `flags.dnd5e.roll.type === "attack"` and carries
-//   `flags.dnd5e.targets` as `{name, img, uuid, ac}`; the verdict is dnd5e's own formula applied to
-//   `rolls[0]`. A save message is `roll.type === "save"` with the DC at `rolls[0].options.target`, and is
-//   tied back to its cause through `flags.dnd5e.originatingMessage` — the id of the usage card whose
-//   button was clicked.
-//
-//   MIDI. `updateChatMessage`. Midi suppresses the separate roll messages (`message.create ??= false`)
-//   and instead fills one card in, writing the verdicts into flags as it goes:
-//   `flags["midi-qol"].hitTargetUuids` and `.failedSaveUuids`. Those are TOKEN uuids, which is strictly
-//   better than dnd5e's actor uuids, and they are unconditional — not subject to midi's SaveToChatCard
-//   setting. When they are present they are used in preference to anything recomputed, because they are
-//   the real answer rather than a reconstruction of one.
-//
-// Presence of the flags is what selects the path, not presence of the module: midi has settings that
-// turn its own automation off, and a card without those flags needs the native reading even in a world
-// where midi is installed.
+// WHAT IS LISTENED TO, therefore: chat messages, which every client receives. A 6.0.1 attack is
+// `message.type === "attack"` with `system.targets`; the verdict is dnd5e's own formula applied to
+// `rolls[0]`. A save is `type === "save"` with the DC at `rolls[0].options.target`, tied back through
+// `system.origin`. Do not read Midi QoL flags. That package is incompatible.
 //
 // THREE THINGS ARE HEURISTICS AND ARE LOGGED AS SUCH, never presented as certainties:
 //   * A target whose recorded AC is null (total cover, or an AC we could not read — dnd5e conflates the
@@ -38,7 +23,6 @@
 
 import { log } from "../constants";
 import { isPrimaryGM } from "../util/gm";
-import { moduleActive } from "../util/modules";
 import { isForcedMovementEnabled } from "../settings";
 import { readHp } from "../core/tracker";
 import {
@@ -53,9 +37,7 @@ import {
   rollType,
   speakerToken,
   targetsOf,
-  tokenFromActorUuid,
   tokenFromTargetUuid,
-  tokenFromTokenUuid,
 } from "./cards";
 import {
   forcedDistance,
@@ -275,69 +257,14 @@ async function applyRule(
 async function examine(message: any, changed: any): Promise<void> {
   if (!active()) return;
 
-  const midi = changed == null ? message?.flags?.["midi-qol"] : changed?.flags?.["midi-qol"];
-  if (midi?.hitTargetUuids || midi?.failedSaveUuids) {
-    await fromMidi(message, midi);
-    return;
-  }
-
-  // Only act on a change that actually brought this information with it, or a midi card would be
-  // re-examined on every unrelated update it receives. Create passes null (always examine).
+  // Only act on a change that actually brought this information with it. Create passes null
+  // (always examine). An update that only renamed the card is not a new verdict.
   if (!cardUpdateIsRelevant(changed)) return;
 
   const kind = rollType(message);
   if (kind === "attack") await fromAttack(message);
   else if (kind === "save") await fromSave(message);
   else if (kind === "damage") await fromDamage(message);
-}
-
-/** Midi has already decided who was hit and who failed; both lists are token uuids. */
-async function fromMidi(message: any, midi: any): Promise<void> {
-  const item = itemOf(message);
-  const activity = activityOf(message, item);
-
-  const pusherDoc =
-    speakerToken(message?.speaker) ?? tokenFromActorUuid(String(midi?.sourceActorUuid ?? ""));
-  // Midi assembles one card per activation, so the card IS the activation identity.
-  const activationId = String(message?.id ?? "");
-  const query = {
-    itemName: String(item?.name ?? ""),
-    activityName: String(activity?.name ?? ""),
-    pusher: pusherDoc?.actor,
-  };
-
-  const tokensFor = (uuids: unknown): any[] =>
-    (Array.isArray(uuids) ? uuids : []).map((u) => tokenFromTokenUuid(String(u))).filter(Boolean);
-
-  // A hit can satisfy a mastery, a plain on-hit rider and a damage-type rider all at once. Exactly one
-  // is taken, in that order of authority, for the same reason as the native path: applying two at once
-  // would be a rules interpretation rather than an automation.
-  const hits = tokensFor(midi?.hitTargetUuids);
-  if (hits.length > 0) {
-    const rule =
-      chooseRule(
-        forcedRules({
-          ...query,
-          trigger: "mastery",
-          mastery: masteryOf(message, item, pusherDoc?.actor),
-        }),
-      ) ??
-      chooseRule(forcedRules({ ...query, trigger: "hit" })) ??
-      chooseRule(forcedRules({ ...query, trigger: "damage", damageTypes: damageTypesOf(message) }));
-    if (rule) {
-      for (const targetDoc of hits) await applyRule(rule, pusherDoc, targetDoc, activationId);
-    }
-  }
-
-  // Saves are a separate question with a separate answer: a spell can push everyone who failed without
-  // any attack roll being involved at all.
-  const failures = tokensFor(midi?.failedSaveUuids);
-  if (failures.length > 0) {
-    const rule = chooseRule(forcedRules({ ...query, trigger: "save" }));
-    if (rule) {
-      for (const targetDoc of failures) await applyRule(rule, pusherDoc, targetDoc, activationId);
-    }
-  }
 }
 
 /** An attack roll, with the hit recomputed the way the chat card would render it. */
@@ -536,6 +463,5 @@ export function surveyForced(): unknown {
     grappledBy: actor ? (grapplerUuidOf(actor) ?? "— nobody —") : "—",
     undoableDisplacements: pendingUndoCount(),
     appliedThisFight: applied.size,
-    midiPresent: moduleActive("midi-qol"),
   };
 }

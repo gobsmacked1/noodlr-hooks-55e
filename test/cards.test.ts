@@ -67,7 +67,7 @@ test("originatingId and originatingMessageData write system.origin only", () => 
 
 test("cardUpdateIsRelevant treats a system write as a verdict change", () => {
   assert.equal(cardUpdateIsRelevant(null), true);
-  assert.equal(cardUpdateIsRelevant({ flags: { dnd5e: { roll: {} } } }), true);
+  assert.equal(cardUpdateIsRelevant({ flags: { dnd5e: { roll: {} } } }), false);
   assert.equal(cardUpdateIsRelevant({ system: { resisted: true } }), true);
   assert.equal(cardUpdateIsRelevant({ name: "renamed" }), false);
 });

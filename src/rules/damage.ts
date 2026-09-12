@@ -3,9 +3,8 @@
 // WHY THIS HAS TO EXIST. dnd5e decides whether an attack hit inside its chat card's RENDERER and stores
 // the answer nowhere (see `cards.ts`), so it has no basis on which to apply anything, and what it ships
 // instead is the damage tray: a button per target for a human to press. That is a deliberate position —
-// hit determination and "Range, reach, & cover" are both unshipped roadmap items — and midi-qol is the
-// module that has always filled the gap. On a table without midi, every single hit costs the GM a click
-// and a subtraction.
+// hit determination and "Range, reach, & cover" are both unshipped roadmap items. Without this
+// layer every hit costs the GM a click and a subtraction.
 //
 // WHAT IT UNBLOCKS IS LARGER THAN ITSELF, and that is the real argument for building it first. Death
 // saves, instant death, Unconscious at zero and the concentration save all hang off dnd5e's own
@@ -51,7 +50,6 @@ import {
   damageParts,
   isHealing,
   itemOf,
-  midiHits,
   originatingId,
   readHits,
   rollType,
@@ -97,14 +95,13 @@ const undoable = new Map<string, HpSnapshot[]>();
 
 export function registerDamageApplication(): void {
   Hooks.on("createChatMessage", (message: any) => {
-    void consider(message, message?.flags).catch((err) => log("auto damage failed:", err));
+    void consider(message).catch((err) => log("auto damage failed:", err));
   });
 
-  // Midi fills one card in over several updates rather than posting separate roll messages, so the
-  // verdict can arrive on an update to a message we have already seen. Same two-path shape as the
-  // forced-movement layer, and for the same reason.
-  Hooks.on("updateChatMessage", (message: any, changed: any) => {
-    void consider(message, changed?.flags).catch((err) => log("auto damage failed:", err));
+  // Legendary Resistance stamps `system.resisted` onto the existing save; a second render can
+  // also rewrite the same card. Create already examined it; this pass sees the new verdict.
+  Hooks.on("updateChatMessage", (message: any) => {
+    void consider(message).catch((err) => log("auto damage failed:", err));
   });
 
   Hooks.on("deleteCombat", () => {
@@ -131,18 +128,10 @@ function active(): boolean {
   );
 }
 
-async function consider(message: any, flags: any): Promise<void> {
+async function consider(message: any): Promise<void> {
   if (!active()) return;
   const id = String(message?.id ?? "");
   if (!id || handled.has(id)) return;
-
-  // Midi's own verdict, when it left one. Token uuids, and the real answer rather than a reconstruction.
-  const fromMidi = midiHits(flags);
-  if (fromMidi.length > 0) {
-    // Token uuids from a midi-shaped card. Midi is not a supported install; this only reads flags
-    // if they happen to be on the message. No margins — the flag is a verdict, not the arithmetic.
-    remember(message, { hits: fromMidi, missed: [], unresolved: [], margin: {} });
-  }
 
   const kind = rollType(message);
   if (kind === "attack") {

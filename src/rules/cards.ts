@@ -23,12 +23,8 @@
 // `flags.dnd5e`. This file reads those fields only. Floor is 6.0.1 — do not add a 5.3.3 flag
 // fallback. Callers that still read flags directly go blind; route them through here.
 //
-// Midi, when a table runs it, changes not the data but which event carries it: it suppresses the
-// separate roll messages and fills one card in, writing `flags["midi-qol"].hitTargetUuids` and
-// `.failedSaveUuids` as it goes. Those are token uuids, which is strictly better than dnd5e's actor
-// uuids, and they are the real answer rather than a reconstruction of one. Callers select the path by
-// the PRESENCE of those flags, never by the presence of the module: midi has settings that turn its own
-// automation off, and a card without the flags needs the native reading even in a world that has it.
+// Do not read `flags["midi-qol"]`. Midi QoL is incompatible; a card is a 6.0.1 dnd5e card or it
+// is not our problem. Do not restore a second referee "so Midi tables still work."
 
 import { log } from "../constants";
 import { canUseWeaponMastery } from "../system/dnd5e-masteries";
@@ -124,7 +120,6 @@ export function isResisted(message: any): boolean {
  */
 export function cardUpdateIsRelevant(changed: any): boolean {
   if (!changed) return true;
-  if (changed.flags?.dnd5e || changed.flags?.["midi-qol"]) return true;
   if (changed.system != null) return true;
   return false;
 }
@@ -344,12 +339,6 @@ export function damageTypesOf(message: any): string[] {
     const type = String((roll as any)?.options?.type ?? "");
     if (type) out.push(type.toLowerCase());
   }
-  // Midi summarises the same information in its own flags, which is the only reading available when the
-  // rolls live on a card it assembled rather than on a dedicated damage message.
-  for (const entry of message?.flags?.["midi-qol"]?.damageDetail ?? []) {
-    const type = String(entry?.type ?? "");
-    if (type) out.push(type.toLowerCase());
-  }
   return out;
 }
 
@@ -552,22 +541,6 @@ export function saveMultiplier(onSave: string): number {
   if (onSave === "none") return 0;
   if (onSave === "full") return 1;
   return 0.5;
-}
-
-/** Midi's own verdict, when it left one: token uuids of everything it decided was hit. */
-export function midiHits(flags: any): any[] {
-  const uuids = flags?.["midi-qol"]?.hitTargetUuids;
-  return (Array.isArray(uuids) ? uuids : [])
-    .map((u) => tokenFromTokenUuid(String(u)))
-    .filter(Boolean);
-}
-
-/** Midi's own verdict on saves: token uuids of everything that failed one. */
-export function midiFailedSaves(flags: any): any[] {
-  const uuids = flags?.["midi-qol"]?.failedSaveUuids;
-  return (Array.isArray(uuids) ? uuids : [])
-    .map((u) => tokenFromTokenUuid(String(u)))
-    .filter(Boolean);
 }
 
 /**

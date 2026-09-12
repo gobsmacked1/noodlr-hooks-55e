@@ -95,19 +95,12 @@ function messageDamageTypes(message: any): string[] {
     const type = String((roll as any)?.options?.type ?? "");
     if (type) out.push(type.toLowerCase());
   }
-  for (const entry of message?.flags?.["midi-qol"]?.damageDetail ?? []) {
-    const type = String(entry?.type ?? "");
-    if (type) out.push(type.toLowerCase());
-  }
   return out;
 }
 
 /** Who a damage card was aimed at, in whichever of the three shapes is present. */
 function messageTargets(message: any): string[] {
   const out: string[] = [];
-  // Midi writes token uuids unconditionally, which is the better identity for unlinked tokens.
-  for (const uuid of message?.flags?.["midi-qol"]?.hitTargetUuids ?? []) out.push(String(uuid));
-  // 6.0.1 `system.targets` token/actor uuids — same door as every other card reader.
   for (const target of targetsOf(message)) {
     if (target.uuid) out.push(target.uuid);
   }

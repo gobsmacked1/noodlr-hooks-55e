@@ -18,12 +18,9 @@
 // Rewritten 2026-08-03 against the system's real behaviour rather than inference, after a second play
 // test. Three findings drove it, and each had produced a visible symptom:
 //
-//  1. "Midi Attack" was NOT a bogus duplicate. midi-qol replaces the system's activity document
-//     classes and, with its Activity Prefix setting on, an activity's name shows midi's localized TYPE
-//     TITLE. So it was the creature's real attack all along, wearing a confusing label. Nothing to
-//     skip — but names are now reported as "Mace (Midi Attack)" so this is never mistaken again.
-//     What DOES need skipping is different and specific: `canUse === false`, riders, and midi's
-//     `midiProperties.automationOnly` (activities that exist only for automation internals).
+//  1. An activity name is not identity. Classify by what it carries (`attack`, `damage.parts`,
+//     `save`), never by a localized type title. Skip `canUse === false` and riders. Do not
+//     classify Midi-invented types — that package is incompatible.
 //  2. `activity.range.units` defaults to the string "self", and `range.override: false` means "this
 //     activity states no range, use the item's". Reading that literally gave the Dire Wolf's Bite a
 //     range of ZERO, so nothing was ever in reach and it could only bellow for help. Fixed at source.
@@ -68,8 +65,7 @@ const OUT_OF_COMBAT = new Set([
   "longrest",
   "crew",
 ]);
-/** midi-qol adds its own reaction flavours alongside the system's one. */
-const REACTIONS = new Set(["reaction", "reactiondamage", "reactionmanual"]);
+const REACTIONS = new Set(["reaction"]);
 const OFF_TURN = new Set(["legendary", "mythic", "lair"]);
 const TRIGGERS = new Set(["turnstart", "turnend", "encounter"]);
 
@@ -394,41 +390,38 @@ function outOfAmmunition(item: any): boolean {
 /**
  * Is this activity something a creature can be told to do?
  *
- * These are the system's and midi's own tests, not heuristics of ours:
+ * These are the system's own tests, not heuristics of ours:
  *   - `canUse === false` covers unmet attunement, unidentified items, and level windows.
  *   - a "rider" is a dependent piece of another activity, never used on its own.
- *   - `midiProperties.automationOnly` is midi's explicit "for automation internals, not for humans".
  *
  * Worth noting: Argon's dnd5e implementation checks none of these, so its buttons can surface
- * automation-only activities. We check them because an automated creature has no human to notice.
+ * activities a creature cannot use. We check them because an automated creature has no human to notice.
  */
 function usableActivity(activity: any): boolean {
   if (activity?.canUse === false) return false;
   if (activity?.isRider === true) return false;
-  if (activity?.midiProperties?.automationOnly === true) return false;
   return true;
 }
 
 /**
  * Classify by what the activity CARRIES rather than what it is called.
  *
- * Duck-typing matters here: with midi-qol configured to add its own activity types instead of replacing
- * the system's classes, the same capability arrives as `midiAttack` rather than `attack`. Matching the
- * type string alone would silently drop every attack on every sheet in that configuration — the exact
- * class of failure that cost the first two releases.
+ * Type equality is the dnd5e name; `attack` / `healing` / `save` / `damage.parts` are the
+ * structural fallback when a sheet forgot to set `type`. Do not match `includes("attack")` —
+ * that was how a Midi type title became a second referee.
  */
 function kindOfActivity(activity: any): ActionKind {
   const type = String(activity?.type ?? "").toLowerCase();
   const damaging = (activity?.damage?.parts?.length ?? 0) > 0;
 
-  if (type.includes("attack") || activity?.attack?.type) return "attack";
-  if (type.includes("heal") || activity?.healing) return "heal";
-  if (type.includes("save") || activity?.save?.ability) {
+  if (type === "attack" || activity?.attack?.type) return "attack";
+  if (type === "heal" || activity?.healing) return "heal";
+  if (type === "save" || activity?.save?.ability) {
     // A fireball is a save that hurts; a hold person is a save that does not. The presence of damage is
     // the only distinction available without knowing what any particular spell means.
     return damaging ? "attack" : "control";
   }
-  if (type.includes("damage") || damaging) return "attack";
+  if (type === "damage" || damaging) return "attack";
   return "utility";
 }
 

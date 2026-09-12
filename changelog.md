@@ -16,6 +16,10 @@ documents (the system's own "Active Effects" pack). DDB Importer created a match
 destination pack the way it creates DDB Spells / DDB Items. Nothing has been munched
 into it yet. We do not walk UUID-linked pack effects in this release.
 
+**Midi QoL is not a second referee.** Chat cards, damage, forced movement, masteries,
+stealth, and attack-roll triggers no longer read `flags["midi-qol"]`. If that module
+is enabled we say so once and stop. Disable it.
+
 ## 0.7.63
 
 **dnd5e 6.0 chat cards still automate.** 6.0 stopped writing `flags.dnd5e` on new

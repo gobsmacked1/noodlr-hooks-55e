@@ -2,9 +2,7 @@
 //
 // The veto point is dnd5e's own `dnd5e.preUseActivity` hook, which fires before the usage dialog and
 // before any chat card, and cancels the use cleanly when a handler returns false (verified in 5.3.3,
-// `Activity#use`). Nothing is patched and no other module's pipeline is displaced, which matters because
-// midi-qol's activity `use()` calls `super.use()` and so runs this hook too — the same veto works with
-// midi, without midi, and alongside anything else listening on it.
+// `Activity#use`). Nothing is patched. The veto is ours; we do not share this hook with Midi QoL.
 //
 // WHO GETS STOPPED, AND HOW HARD. Three audiences, deliberately not treated alike (user, 2026-08-05):
 //

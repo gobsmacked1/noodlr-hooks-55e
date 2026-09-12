@@ -5,7 +5,7 @@
 // and measures each path's cost through difficult terrain — but it never compares any of that to a
 // creature's Speed, because core has no idea what a creature's Speed is. dnd5e supplies the number and
 // uses it for exactly one thing: colouring the drag ruler green, amber or red (`module/canvas/ruler.mjs`
-// in 5.3.3). midi-qol does not touch movement at all. So the ruler turns red and the token keeps going,
+// in 5.3.3). So the ruler turns red and the token keeps going,
 // which is what the table saw: a player crossing the whole map on one turn, never once made to choose
 // between moving and acting (user, 2026-08-05).
 //

@@ -86,7 +86,6 @@ interface Survey {
   skippable: {
     canUseFalse: number;
     riders: number;
-    midiAutomationOnly: number;
     castActivities: number;
     cachedSpellClones: number;
   };
@@ -216,7 +215,6 @@ export async function surveyActions(
     skippable: {
       canUseFalse: 0,
       riders: 0,
-      midiAutomationOnly: 0,
       castActivities: 0,
       cachedSpellClones: 0,
     },
@@ -314,8 +312,6 @@ export async function surveyActions(
         activationTypes.add(activity?.activation?.type);
         if (activity?.canUse === false) survey.skippable.canUseFalse++;
         if (activity?.isRider === true) survey.skippable.riders++;
-        if (activity?.midiProperties?.automationOnly === true)
-          survey.skippable.midiAutomationOnly++;
         if (String(activity?.type ?? "").toLowerCase() === "cast")
           survey.skippable.castActivities++;
         activityNames.add(activity?.name || `(item name: ${item?.name})`);

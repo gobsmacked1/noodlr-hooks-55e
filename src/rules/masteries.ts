@@ -52,7 +52,6 @@ import {
   readHits,
   rollType,
   speakerToken,
-  tokenFromTokenUuid,
   type DamagePart,
 } from "./cards";
 
@@ -140,23 +139,11 @@ export function registerMasteries(): void {
 async function examine(message: any, changed: any): Promise<void> {
   if (!active()) return;
 
-  const midi = changed == null ? message?.flags?.["midi-qol"] : changed?.flags?.["midi-qol"];
-  if (midi?.hitTargetUuids) {
-    await fromHits(message, midiHits(midi.hitTargetUuids));
-    return;
-  }
-
   if (!cardUpdateIsRelevant(changed)) return;
   if (rollType(message) !== "attack") return;
 
   const reading = readHits(message);
   await fromHits(message, reading.hits);
-}
-
-function midiHits(uuids: unknown): any[] {
-  return (Array.isArray(uuids) ? uuids : [])
-    .map((u) => tokenFromTokenUuid(String(u)))
-    .filter(Boolean);
 }
 
 async function fromHits(message: any, hits: any[]): Promise<void> {

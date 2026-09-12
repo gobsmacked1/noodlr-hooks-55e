@@ -361,7 +361,7 @@ export async function performPlan(plan: TurnPlan): Promise<Performed> {
   const actor = plan.board.self.actor;
   const result: Performed = { moved: 0 };
 
-  /** Aim at whoever the option names, both ways: the user's targets and midi's explicit list. */
+  /** Aim at whoever the option names. */
   const at = (who: { token?: any; tokenId?: string } | undefined) =>
     withTarget(tokenIdOf(who), () => useAction(option as any, who));
 
