@@ -26,6 +26,7 @@ import {
   restoreForfeited,
   xpForActor,
 } from "../system/dnd5e-rewards";
+import { recoverSpentAmmunition } from "../rules/ammo";
 
 export type Outcome = "fled" | "surrendered" | "mercy";
 
@@ -316,6 +317,10 @@ async function announceEncounterEndIfOver(combat: any): Promise<void> {
     speaker: narrator(),
     whisper: ChatMessage.getWhisperRecipients("GM").map((u: any) => u.id),
   });
+
+  // Half of spent ammo, RAW, only when the party held the field. Mercy is a
+  // loss — they do not search. deleteCombat is a second door and no-ops after this.
+  await recoverSpentAmmunition(combat, { victory: !spared });
 
   if (!isAutoEndEnabled()) return;
   // Deleted rather than ended: `Combat#endCombat` raises a confirmation dialog, and a prompt is exactly

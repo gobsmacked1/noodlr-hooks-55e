@@ -62,6 +62,7 @@ import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { surveyAttackRange } from "./rules/attack-range";
 import { pickupThrown, registerThrown, surveyThrown } from "./rules/thrown";
+import { registerAmmo, surveyAmmo } from "./rules/ammo";
 import { surveyFlanking } from "./rules/flanking";
 import { registerMasteries, surveyMasteries } from "./rules/masteries";
 import { registerDamageApplication, surveyDamage } from "./rules/damage";
@@ -171,6 +172,7 @@ export interface NoodlrHooksApi {
   surveySentinel(): unknown;
   surveyAttackRange(): unknown;
   surveyThrown(): unknown;
+  surveyAmmo(): unknown;
   pickupThrown(token?: unknown): Promise<boolean>;
   surveyFlanking(): unknown;
   surveyForced(): unknown;
@@ -316,6 +318,8 @@ const api: NoodlrHooksApi = {
   surveyAttackRange: () => surveyAttackRange(),
   /** Dropped thrown weapons on this scene, and any pending throw replay. */
   surveyThrown: () => surveyThrown(),
+  /** Spent ammunition waiting to come back as half after a won fight. */
+  surveyAmmo: () => surveyAmmo(),
   pickupThrown: (token) => pickupThrown(token ?? (canvas as any)?.tokens?.controlled?.[0]),
   /** Whether the selected token and an ally flank the current target (2014 Advantage rule). */
   surveyFlanking: () => surveyFlanking(),
@@ -621,6 +625,8 @@ Hooks.once("ready", () => {
   // Thrown weapons: the prompt and the roll hooks fire on the clicking / rolling
   // client. Token create is asked of the GM inside.
   registerThrown();
+  // Ammo spend is noted on the rolling client; recover writes on the primary GM.
+  registerAmmo();
   // And the feature being pressed from the sheet is watched everywhere, because the press happens on
   // whichever client owns the rogue and the turn has to be marked spent from there.
   registerSneakWatch();

@@ -440,10 +440,12 @@ const MECHANICS: Page = {
           id: "ammo",
           label: "Ammunition",
           hint:
-            "dnd5e resolves ammunition against the actor's stock at roll time and marks empty stacks " +
-            "unusable. Recovering spent ammunition after a fight is not modelled by anything.",
-          state: "system",
-          today: "Recovery is unbuilt on all sides.",
+            "dnd5e spends one piece on the attack roll and never gives any back. After a fight the " +
+            "party won, a living shooter spends a minute and recovers half of what they spent " +
+            "(round down). Thrown weapons are pinned tiles, not this. Rides combat.attackRange.",
+          state: "live",
+          today:
+            "Half returns after a won fight if that shooter can still search. Mercy and the dead do not recover.",
         },
         {
           id: "components",

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.65
+
+**A thrown weapon is a tile on the scene, not a creature.** v0.7.64 dropped the dagger as
+an `npc` actor because `"loot"` is an Item type. That made a Huge token, a creature sheet,
+and a loot-randomizer prompt — and a token on the target would have left with a fleeing
+creature. Handaxe, Javelin, Light Hammer, Spear, Trident, and Dart use the same path.
+Returning stays in hand. Pick it up from the chat card when you are next to it, or from
+the Token HUD. Leftover giant npc-loot tokens from 0.7.64 still pick up.
+
+**After a fight the party won, half the spent ammunition comes back.** A living shooter
+searches for a minute and recovers ⌊spent / 2⌋ of each stack (one arrow spent is gone).
+Knocked out, dead, or a mercy ending does not search. Hostile archers do not pick theirs
+up. Thrown weapons stay on the tile path — they are not counted as ammo.
+
 ## 0.7.64
 
 **dnd5e 6.0.1 is required.** Chat cards are read as `message.type` and `system.*` only.

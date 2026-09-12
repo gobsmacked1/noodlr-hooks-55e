@@ -1,12 +1,17 @@
-// Thrown weapons: reach vs range, and whether the weapon comes back.
+// Thrown weapons: reach vs range, spend, and the pin size.
 //
-// dnd5e already decrements `system.quantity` on an attack whose `attackMode`
-// starts with `"thrown"`, and it skips that decrement when the item has the
-// `ret` (Returning) property (`attack.mjs`). It never asks, never drops a
-// placeable, and never treats a dual-mode weapon without a mode as melee — so
-// a Dagger (reach 5, thrown 20/60) used from 35 feet was a legal stab. The
-// ask, the ground token, and the name-only Returning match live in `rules/thrown.ts`.
+// dnd5e decrements `system.quantity` on an attack whose `attackMode` starts
+// with `"thrown"`, and it skips that when the item has `ret` (`attack.mjs`).
+// It never asks, never leaves a pin, and never treats a dual-mode weapon
+// without a mode as melee — so a Dagger (reach 5, thrown 20/60) used from
+// 35 feet was a legal stab. The ask, the spend-if-needed, the scene Tile,
+// and the name-only Returning match live in `rules/thrown.ts`.
 // This file is the sheet reading, with no Foundry.
+//
+// Do not create an Actor for a dropped weapon. `"loot"` is an Item type in
+// dnd5e, not an Actor type. Dropping as `npc` made a Huge dagger token, a
+// creature sheet, and a "add randomized loot" prompt — and a Token on the
+// target is what a flee would carry away.
 
 export type ThrowAsk = "none" | "melee" | "ask" | "too-far" | "already";
 
@@ -21,6 +26,17 @@ function hasProp(item: any, key: string): boolean {
 export function hasThrownProperty(item: any): boolean {
   return hasProp(item, "thr");
 }
+
+/** Stock 2024 weapons with `thr` — all share the Dagger pin path, not just Dagger. */
+export const THROWN_STOCK = [
+  "Dagger",
+  "Handaxe",
+  "Javelin",
+  "Light Hammer",
+  "Spear",
+  "Trident",
+  "Dart",
+] as const;
 
 export function hasReturningProperty(item: any): boolean {
   return hasProp(item, "ret");
@@ -60,20 +76,47 @@ export function throwAskNeeded(
 }
 
 /**
- * Actor type for the dropped-weapon placeable.
- *
- * `"loot"` is an **Item** type in dnd5e, not an Actor type. Stock Actor types
- * are `character | npc | vehicle | group`. `loot` is only legal when another
- * module (Item Piles) registers it — creating it on a stock 6.0 world throws
- * validation, and `Actor.create` can return nothing without rejecting, so a
- * catch-then-npc fallback never runs. Prefer `loot` when it is actually
- * registered; otherwise `npc`.
+ * Quantity after one throw. dnd5e may already have decremented; we must not
+ * spend a second time. If the live count is still the snapshot, we spend.
  */
-export function lootActorType(types: readonly string[]): string | null {
-  const list = types.map((t) => String(t ?? "").trim()).filter((t) => t && t !== "base");
-  if (list.includes("loot")) return "loot";
-  if (list.includes("npc")) return "npc";
-  return list[0] ?? null;
+export function quantityAfterThrow(before: number, afterSystem: number): {
+  next: number;
+  alreadySpent: boolean;
+} {
+  if (!Number.isFinite(before) || before < 0) {
+    const fallback = Number.isFinite(afterSystem) ? afterSystem : 0;
+    return { next: Math.max(0, fallback), alreadySpent: false };
+  }
+  if (Number.isFinite(afterSystem) && afterSystem < before) {
+    return { next: Math.max(0, afterSystem), alreadySpent: true };
+  }
+  return { next: Math.max(0, before - 1), alreadySpent: false };
+}
+
+/** Pixel size of the scene pin. A fraction of one square, never a creature footprint. */
+export function pinSizePx(gridSize: number): number {
+  const size = Number.isFinite(gridSize) && gridSize > 0 ? gridSize : 100;
+  return Math.min(64, Math.max(32, Math.round(size * 0.35)));
+}
+
+/**
+ * Whether a token can reach a pin. Token `width`/`height` are grid squares;
+ * tile `width`/`height` are pixels. Adjacent includes a diagonal.
+ */
+export function withinPickupReach(
+  token: { x: number; y: number; width: number; height: number },
+  tile: { x: number; y: number; width: number; height: number },
+  gridSize: number,
+): boolean {
+  const size = Number.isFinite(gridSize) && gridSize > 0 ? gridSize : 100;
+  const tw = Number(token.width) > 0 ? Number(token.width) : 1;
+  const th = Number(token.height) > 0 ? Number(token.height) : 1;
+  const tx = Number(token.x) + (tw * size) / 2;
+  const ty = Number(token.y) + (th * size) / 2;
+  const gx = Number(tile.x) + Number(tile.width) / 2;
+  const gy = Number(tile.y) + Number(tile.height) / 2;
+  if (![tx, ty, gx, gy].every(Number.isFinite)) return false;
+  return Math.hypot(tx - gx, ty - gy) <= size * 1.5;
 }
 
 /** One copy of the weapon as it should land on the ground — new id, quantity 1, unequipped. */

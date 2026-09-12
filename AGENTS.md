@@ -5267,19 +5267,28 @@ or AC5e (2026-09-03): those are not a supported install.
   away), replay `activity.use` with `attackMode: "thrown"` and **no** `cleared`
   (the first press never reached the ledger). Innate melee-or-ranged (Arcane
   Burst: `value > reach`, no `thr`) still skips. `thrown-offhand` counts.
-  dnd5e already decrements quantity on a thrown attack that is not `ret`; we
-  drop a placeable near the target unless `ret` or `/returning/i` in the name
-  (name-only Returning is restored if the system already spent it). Pickup is
-  the Token HUD. Do not grant default Owner on the loot actor — Observer plus
-  our button is one copy. **The Actor type is never hardcoded `"loot"`**
-  (Pierce Fighter dagger, 2026-09-11): that is an Item type in dnd5e;
-  stock Actor types are `character | npc | vehicle | group`. `Actor.create`
-  can log the validation error and return nothing without rejecting, so a
-  catch-then-npc fallback never ran and `restoreThrown` put the dagger
-  back. `lootActorType()` prefers `loot` only when a module registered it
-  (Item Piles); otherwise `npc`. Skip `thrownLoot` tokens in the capability
-  collector. `src/system/dnd5e-thrown.ts` + `src/rules/thrown.ts`.
+  dnd5e decrements quantity on a thrown attack that is not `ret`; we
+  snapshot the count in `preRollAttack` and spend only if that decrement
+  never landed. A name-only Returning match is restored if the system
+  already spent it. **The pin is a scene Tile, never an Actor.** `"loot"`
+  is an Item type in dnd5e, not an Actor type (Pierce Fighter dagger,
+  2026-09-11). Dropping as `npc` (v0.7.64) made a Huge token, a creature
+  sheet, and a loot-randomizer prompt — and stamping the item on the
+  *target* would destroy a prized weapon if that creature fled. Tile
+  create/delete is `askGm`. Recover is the chat card when adjacent, or
+  the Token HUD at the thrower's feet. GM Tile HUD ignores distance
+  (staging). Leftover `npc` loot tokens from v0.7.64 still pick up.
+  Skip `thrownLoot` tokens in the capability collector.
+  `src/system/dnd5e-thrown.ts` + `src/rules/thrown.ts`.
   `noodlrHooks.surveyThrown()`.
+  **Every `thr` weapon is the Dagger path** — Handaxe, Javelin, Light Hammer,
+  Spear, Trident, Dart (simple ranged, also `thr`). Magical copies too.
+  **Ammunition is not a pin.** After a won fight, a living party shooter
+  recovers ⌊spent / 2⌋ of each stack (1 spent → 0). Track only while combat
+  is started; skip thrown-weapon consume and Returning. Mercy / dead /
+  Unconscious (knockout) do not search. Hostile archers do not. Rides
+  `combat.attackRange`. `src/system/dnd5e-ammo.ts` + `src/rules/ammo.ts`.
+  `noodlrHooks.surveyAmmo()`.
 - **A 5 ft utility or damage rider is melee reach, not a 5-foot bow (v0.7.51).**
   Redirect Attack and Goading Attack Damage ship `type: utility|damage`,
   `range.value: 5`, no `long`. Classifying that `ranged` used 3D hypot, so a

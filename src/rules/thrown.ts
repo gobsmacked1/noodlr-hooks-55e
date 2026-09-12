@@ -1,4 +1,4 @@
-// Dual-mode weapons: ask before a throw, drop a placeable unless Returning.
+// Dual-mode weapons: ask before a throw, spend one, pin a Tile unless Returning.
 //
 // `preUseActivity` is synchronous, so the prompt cannot live inside the hook.
 // Same shape as the economy over-budget dialog: veto, ask, replay with
@@ -6,12 +6,17 @@
 // never reached the ledger (range sits before the charge), so the retry has to
 // be a normal use.
 //
-// dnd5e decrements quantity on a thrown attack that is not `ret`. We still
-// create the ground token (the system never does) and delete a stack that
-// hit zero. A name-only "Returning" match is restored if dnd5e already spent it.
+// dnd5e decrements quantity on a thrown attack that is not `ret`. We snapshot
+// the count in `preRollAttack` and spend only if that decrement never landed.
+// A name-only "Returning" match is restored if dnd5e already spent it.
 //
-// Token create is world rights: `askGm`. Pickup writes the item on the
-// picker's own sheet, then asks the GM to delete the loot actor + token.
+// The pin is a scene Tile, not an Actor/Token. Dropping as `npc` made a Huge
+// dagger, a creature sheet, and a loot-randomizer prompt — and a Token riding
+// the target would vanish if that creature fled. Tiles stay on the scene.
+// Tile create/delete is world rights: `askGm`. Pickup writes the item on the
+// picker's own sheet, then asks the GM to delete the pin. Recover on the chat
+// card is the player path (Tiles layer is GM-oriented). Nearby Token HUD is
+// the walk-over path. Leftover `npc` loot tokens from v0.7.64 still pick up.
 
 import { MODULE_ID, log } from "../constants";
 import { isAttackRangeEnabled } from "../settings";
@@ -19,20 +24,24 @@ import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   attackModeIsThrown,
   hasReturningProperty,
+  hasThrownProperty,
   isReturningWeapon,
-  lootActorType,
+  pinSizePx,
+  quantityAfterThrow,
   thrownLootPayload,
+  withinPickupReach,
 } from "../system/dnd5e-thrown";
 import { shouldAutomate } from "../tactics/registry";
 import { isPrimaryGM } from "../util/gm";
 import { promptChoice } from "../util/prompt";
 import { askGm, registerQuery } from "../util/queries";
+import { speakerFor } from "../util/speaker";
 
 const DROP_QUERY = "thrown-drop";
 const CLEAR_QUERY = "thrown-clear";
-const FOLDER_NAME = "Dropped weapons";
 const asking = new Set<string>();
 const pendingThrow = new Set<string>();
+const qtyBefore = new Map<string, { qty: number; at: number }>();
 
 interface DropRequest {
   item: Record<string, unknown>;
@@ -44,8 +53,9 @@ interface DropRequest {
 }
 
 interface ClearRequest {
-  tokenId: string;
-  actorId: string;
+  tileId?: string;
+  tokenId?: string;
+  actorId?: string;
   sceneId: string;
 }
 
@@ -58,6 +68,17 @@ export function notePendingThrow(activityUuid: string): void {
 export function isPendingThrow(activity: any): boolean {
   const uuid = String(activity?.uuid ?? "");
   return Boolean(uuid && pendingThrow.has(uuid));
+}
+
+function snapshotQuantity(item: any): void {
+  const uuid = String(item?.uuid ?? "");
+  const qty = Number(item?.system?.quantity);
+  if (!uuid || !Number.isFinite(qty)) return;
+  qtyBefore.set(uuid, { qty, at: Date.now() });
+  setTimeout(() => {
+    const rec = qtyBefore.get(uuid);
+    if (rec && Date.now() - rec.at >= 14_000) qtyBefore.delete(uuid);
+  }, 15_000);
 }
 
 /**
@@ -125,6 +146,7 @@ async function replayThrown(
 ): Promise<void> {
   const uuid = String(activity?.uuid ?? "");
   notePendingThrow(uuid);
+  snapshotQuantity(activity?.item);
   const nextUsage = { ...(usageConfig ?? {}), attackMode: "thrown" };
   try {
     const last = activity?.item?.getFlag?.("dnd5e", `last.${activity.id}`);
@@ -147,11 +169,11 @@ async function replayThrown(
 export function registerThrown(): void {
   registerQuery(DROP_QUERY, async (data: any) => {
     if (!isPrimaryGM()) return { ok: false };
-    return await dropLoot(data?.request as DropRequest | undefined);
+    return await dropPin(data?.request as DropRequest | undefined);
   });
   registerQuery(CLEAR_QUERY, async (data: any) => {
     if (!isPrimaryGM()) return { ok: false };
-    return await clearLoot(data?.request as ClearRequest | undefined);
+    return await clearPin(data?.request as ClearRequest | undefined);
   });
 
   if (!isDnd5e()) return;
@@ -169,39 +191,67 @@ export function registerThrown(): void {
     }
   });
 
+  const generation = Number((game as any).release?.generation) || 0;
+  Hooks.on(generation >= 13 ? "renderChatMessageHTML" : "renderChatMessage", wireRecover);
+
   Hooks.on("renderTokenHUD", (app: any, html: any) => {
     if (!isAttackRangeEnabled()) return;
     const token = app?.object ?? app?.token;
     const doc = token?.document ?? token;
-    if (!isLootToken(doc)) return;
     const root: HTMLElement | null = html instanceof HTMLElement ? html : (html?.[0] ?? null);
     if (!root) return;
-    const col = root.querySelector(".col.left");
-    if (!col || col.querySelector("[data-noodlr-pickup]")) return;
-    const btn = document.createElement("div");
-    btn.className = "control-icon";
-    btn.setAttribute("data-noodlr-pickup", "1");
-    btn.title = game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.HudPickup");
-    btn.innerHTML = `<i class="fa-solid fa-hand"></i>`;
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      void pickupThrown(doc);
-    });
-    col.appendChild(btn);
+    if (isLootToken(doc)) {
+      addHudPickup(root, () => void pickupLeftoverToken(doc));
+      return;
+    }
+    const pin = nearestReachableTile(doc);
+    if (pin) addHudPickup(root, () => void pickupTile(pin, { ignoreDistance: false }));
   });
+
+  Hooks.on("renderTileHUD", (app: any, html: any) => {
+    if (!isAttackRangeEnabled()) return;
+    const tile = app?.object ?? app?.document;
+    const doc = tile?.document ?? tile;
+    if (!isLootTile(doc)) return;
+    const root: HTMLElement | null = html instanceof HTMLElement ? html : (html?.[0] ?? null);
+    if (!root) return;
+    addHudPickup(root, () => void pickupTile(doc, { ignoreDistance: Boolean(game.user?.isGM) }));
+  });
+}
+
+function addHudPickup(root: HTMLElement, onClick: () => void): void {
+  const col = root.querySelector(".col.left");
+  if (!col || col.querySelector("[data-noodlr-pickup]")) return;
+  const btn = document.createElement("div");
+  btn.className = "control-icon";
+  btn.setAttribute("data-noodlr-pickup", "1");
+  btn.title = game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.HudPickup");
+  btn.innerHTML = `<i class="fa-solid fa-hand"></i>`;
+  btn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    onClick();
+  });
+  col.appendChild(btn);
 }
 
 function applyPendingMode(config: any, dialog?: any): void {
   const subject = config?.subject;
   const activity = subject?.type ? subject : subject?.activity ?? subject;
-  if (!isPendingThrow(activity)) return;
-  config.attackMode = "thrown";
-  const opts = config.rolls?.[0]?.options;
-  if (opts && typeof opts === "object") opts.attackMode = "thrown";
-  // They already answered Throw. Leaving the attack dialog open lets them pick
-  // oneHanded and stab from 35 feet after the range gate has passed.
-  if (dialog && typeof dialog === "object") dialog.configure = false;
+  const pending = isPendingThrow(activity);
+  if (pending) {
+    config.attackMode = "thrown";
+    const opts = config.rolls?.[0]?.options;
+    if (opts && typeof opts === "object") opts.attackMode = "thrown";
+    // They already answered Throw. Leaving the attack dialog open lets them pick
+    // oneHanded and stab from 35 feet after the range gate has passed.
+    if (dialog && typeof dialog === "object") dialog.configure = false;
+  }
+  const item = activity?.item;
+  const mode = config?.attackMode ?? config?.rolls?.[0]?.options?.attackMode;
+  if (pending || attackModeIsThrown(mode) || hasThrownProperty(item)) {
+    snapshotQuantity(item);
+  }
 }
 
 async function afterThrownRoll(rolls: any[], data: any): Promise<void> {
@@ -231,24 +281,15 @@ async function afterThrownRoll(rolls: any[], data: any): Promise<void> {
 
   const payload = thrownLootPayload(item);
   if (!payload) return;
+  const actor = item.actor;
+  const emptied = await spendThrown(item, actor);
+
   const target = landingSpot(activity);
   const scene = (canvas as any)?.scene;
   if (!scene || !target) {
     log("thrown: no scene or landing to drop on");
-    await restoreThrown(item.actor, item, payload, false);
+    await restoreThrown(actor, item, payload, emptied);
     return;
-  }
-
-  const actor = item.actor;
-  const qty = Number(item.system?.quantity);
-  let emptied = false;
-  if (Number.isFinite(qty) && qty <= 0 && actor?.isOwner) {
-    try {
-      await actor.deleteEmbeddedDocuments("Item", [item.id]);
-      emptied = true;
-    } catch (err) {
-      log("thrown: could not remove the empty stack:", err);
-    }
   }
 
   const request: DropRequest = {
@@ -259,10 +300,100 @@ async function afterThrownRoll(rolls: any[], data: any): Promise<void> {
     name: String(item.name ?? payload.name ?? "weapon"),
     img: String(item.img ?? payload.img ?? ""),
   };
-  const result = await askGm<{ ok: boolean }>(DROP_QUERY, { request }, { timeout: 20_000 });
-  if (result?.ok) return;
-  log(`thrown: could not drop ${request.name} on the scene`);
-  await restoreThrown(actor, item, payload, emptied);
+  const result = await askGm<{ ok: boolean; tileId?: string }>(
+    DROP_QUERY,
+    { request },
+    { timeout: 20_000 },
+  );
+  if (!result?.ok) {
+    log(`thrown: could not pin ${request.name} on the scene`);
+    await restoreThrown(actor, item, payload, emptied);
+    return;
+  }
+  await announceLanded(actor, request.name, target.name, result.tileId, request.sceneId, payload);
+}
+
+async function spendThrown(item: any, actor: any): Promise<boolean> {
+  const uuid = String(item?.uuid ?? "");
+  const snap = qtyBefore.get(uuid);
+  if (uuid) qtyBefore.delete(uuid);
+  const live = actor?.items?.get?.(item.id) ?? item;
+  const after = Number(live?.system?.quantity);
+  const before = snap?.qty ?? after;
+  const { next, alreadySpent } = quantityAfterThrow(before, after);
+  if (!actor?.isOwner) return Number.isFinite(next) && next <= 0;
+  try {
+    if (!alreadySpent && live && Number.isFinite(after) && next !== after) {
+      await live.update({ "system.quantity": next });
+    }
+    if (next <= 0 && live?.id) {
+      await actor.deleteEmbeddedDocuments("Item", [live.id]);
+      return true;
+    }
+  } catch (err) {
+    log("thrown: could not spend the thrown weapon:", err);
+  }
+  return false;
+}
+
+async function announceLanded(
+  actor: any,
+  name: string,
+  targetName: string | undefined,
+  tileId: string | undefined,
+  sceneId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const line = targetName
+    ? game.i18n.format("NOODLRHOOKS.Combat.AttackRange.LandsNear", {
+        name: escape(name),
+        target: escape(targetName),
+      })
+    : game.i18n.format("NOODLRHOOKS.Combat.AttackRange.Dropped", { name: escape(name) });
+  const recover = game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.Recover");
+  try {
+    const ChatMessage = (globalThis as any).ChatMessage;
+    await ChatMessage.create({
+      content:
+        `<p>${line}</p>` +
+        `<button type="button" data-action="noodlr-recover-thrown">${recover}</button>`,
+      speaker: speakerFor(actor, String(actor?.name ?? "")),
+      flags: {
+        [MODULE_ID]: {
+          thrownRecover: true,
+          sceneId,
+          tileId: tileId ?? "",
+          item: payload,
+        },
+      },
+    });
+  } catch (err) {
+    log("thrown: could not announce the landing:", err);
+  }
+}
+
+function wireRecover(message: any, html: unknown): void {
+  const flags = message?.flags?.[MODULE_ID];
+  if (!flags?.thrownRecover) return;
+  const root: HTMLElement | undefined =
+    html instanceof HTMLElement ? html : ((html as any)?.[0] as HTMLElement | undefined);
+  const button = root?.querySelector<HTMLButtonElement>('[data-action="noodlr-recover-thrown"]');
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    const ok = await recoverFromCard(flags);
+    if (!ok) button.disabled = false;
+  });
+}
+
+async function recoverFromCard(flags: any): Promise<boolean> {
+  const scene = (game as any)?.scenes?.get?.(flags?.sceneId) ?? (canvas as any)?.scene;
+  const tile = scene?.tiles?.get?.(flags?.tileId);
+  if (!tile) {
+    ui.notifications?.info(game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.AlreadyGone"));
+    return true;
+  }
+  return pickupTile(tile, { ignoreDistance: Boolean(game.user?.isGM) });
 }
 
 async function restoreThrown(
@@ -280,11 +411,11 @@ async function restoreThrown(
       if (live && Number.isFinite(now)) await live.update({ "system.quantity": now + 1 });
     }
   } catch (err) {
-    log("thrown: could not put the weapon back after a failed drop:", err);
+    log("thrown: could not put the weapon back after a failed pin:", err);
   }
 }
 
-function landingSpot(activity: any): { x: number; y: number } | null {
+function landingSpot(activity: any): { x: number; y: number; name?: string } | null {
   const live = [...((game as any)?.user?.targets ?? [])];
   const token = live[0] ?? null;
   const doc = token?.document ?? token;
@@ -292,7 +423,11 @@ function landingSpot(activity: any): { x: number; y: number } | null {
   const y = Number(doc?.y);
   const size = Number((canvas as any)?.grid?.size) || 100;
   if (Number.isFinite(x) && Number.isFinite(y)) {
-    return { x: Math.round(x + size * 0.25), y: Math.round(y + size * 0.25) };
+    return {
+      x: Math.round(x + size * 0.25),
+      y: Math.round(y + size * 0.25),
+      name: String(doc?.name ?? token?.name ?? ""),
+    };
   }
   const from = activity?.actor?.getActiveTokens?.()?.[0] ?? activity?.actor?.token;
   const fx = Number(from?.document?.x ?? from?.x);
@@ -301,115 +436,108 @@ function landingSpot(activity: any): { x: number; y: number } | null {
   return null;
 }
 
-function actorTypes(): string[] {
-  const ctor = (CONFIG as any).Actor?.documentClass ?? (globalThis as any).Actor;
-  const listed = ctor?.TYPES ?? (CONFIG as any).Actor?.types ?? [];
-  return [...listed].map((t: unknown) => String(t ?? ""));
-}
-
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err ?? "unknown");
 }
 
-async function dropLoot(request: DropRequest | undefined): Promise<{ ok: boolean }> {
+function escape(value: string): string {
+  return value.replace(/[&<>"']/g, (ch) =>
+    ch === "&"
+      ? "&amp;"
+      : ch === "<"
+        ? "&lt;"
+        : ch === ">"
+          ? "&gt;"
+          : ch === '"'
+            ? "&quot;"
+            : "&#39;",
+  );
+}
+
+async function dropPin(request: DropRequest | undefined): Promise<{ ok: boolean; tileId?: string }> {
   if (!request?.sceneId || !request.item) return { ok: false };
   const scene = (game as any)?.scenes?.get?.(request.sceneId);
-  if (!scene) return { ok: false };
-  const folder = await ensureFolder();
-  const Actor = (CONFIG as any).Actor?.documentClass ?? (globalThis as any).Actor;
-  if (!Actor?.create) return { ok: false };
-  const type = lootActorType(actorTypes());
-  if (!type) {
-    log("thrown: no Actor type is available to hold a dropped weapon");
-    return { ok: false };
-  }
-  const img = request.img || String(request.item.img ?? "");
-  const observer = (globalThis as any).CONST?.DOCUMENT_OWNERSHIP_LEVELS?.OBSERVER ?? 2;
-  const base = {
-    name: request.name,
-    type,
-    img,
-    folder: folder?.id ?? null,
-    ownership: { default: observer },
-    items: [request.item],
-    flags: { [MODULE_ID]: { thrownLoot: true } },
-    prototypeToken: {
-      actorLink: false,
-      name: request.name,
-      texture: { src: img },
-      width: 0.5,
-      height: 0.5,
-      disposition: 0,
-      displayName: 30,
-    },
-  };
-  let actor: any;
+  if (!scene?.createEmbeddedDocuments) return { ok: false };
+  const size = pinSizePx(Number(scene.grid?.size ?? (canvas as any)?.grid?.size) || 100);
+  const img = request.img || String(request.item.img ?? "") || "icons/svg/item-bag.svg";
   try {
-    actor = await Actor.create(base);
-  } catch (err) {
-    log(`thrown: loot actor create failed (${type}): ${reason(err)}`);
-    return { ok: false };
-  }
-  if (!actor?.id) {
-    log(`thrown: loot actor create returned nothing (${type})`);
-    return { ok: false };
-  }
-  try {
-    await scene.createEmbeddedDocuments("Token", [
+    const created = await scene.createEmbeddedDocuments("Tile", [
       {
-        actorId: actor.id,
-        actorLink: false,
-        name: request.name,
         texture: { src: img },
         x: request.x,
         y: request.y,
-        width: 0.5,
-        height: 0.5,
-        disposition: 0,
-        displayName: 30,
+        width: size,
+        height: size,
+        z: 100,
+        hidden: false,
+        locked: false,
+        overhead: false,
         flags: { [MODULE_ID]: { thrownLoot: true, item: request.item } },
       },
     ]);
-  } catch (err) {
-    log(`thrown: loot token create failed: ${reason(err)}`);
-    try {
-      await actor.delete();
-    } catch {
-      /* leftover actor is recoverable */
+    const tile = created?.[0];
+    if (!tile?.id) {
+      log(`thrown: tile create returned nothing for ${request.name}`);
+      return { ok: false };
     }
+    log(`thrown: ${request.name} pinned at ${request.x},${request.y} (${size}px)`);
+    return { ok: true, tileId: String(tile.id) };
+  } catch (err) {
+    log(`thrown: tile create failed: ${reason(err)}`);
     return { ok: false };
   }
-  log(`thrown: ${request.name} lands at ${request.x},${request.y}`);
-  try {
-    ui.notifications?.info(
-      game.i18n.format("NOODLRHOOKS.Combat.AttackRange.Dropped", { name: request.name }),
-    );
-  } catch {
-    /* a toast is courtesy */
-  }
-  return { ok: true };
 }
 
-async function ensureFolder(): Promise<any | null> {
-  const existing = [...((game as any)?.folders ?? [])].find(
-    (f: any) => f?.type === "Actor" && f.name === FOLDER_NAME,
-  );
-  if (existing) return existing;
-  const FolderCls = (CONFIG as any).Folder?.documentClass ?? (globalThis as any).Folder;
-  if (typeof FolderCls?.create !== "function") return null;
-  try {
-    return await FolderCls.create({ name: FOLDER_NAME, type: "Actor", sorting: "a" });
-  } catch (err) {
-    log("thrown: could not create the dropped-weapons folder:", err);
-    return null;
-  }
+function isLootTile(doc: any): boolean {
+  const flags = doc?.flags?.[MODULE_ID] ?? doc?.document?.flags?.[MODULE_ID];
+  if (!flags?.thrownLoot) return false;
+  if (doc?.documentName === "Token" || doc?.actor || doc?.actorId) return false;
+  return true;
 }
 
 function isLootToken(doc: any): boolean {
+  if (isLootTile(doc)) return false;
   const flags = doc?.flags?.[MODULE_ID] ?? doc?.document?.flags?.[MODULE_ID];
   if (flags?.thrownLoot) return true;
   const actor = doc?.actor ?? doc?.document?.actor;
   return Boolean(actor?.flags?.[MODULE_ID]?.thrownLoot);
+}
+
+function thrownTiles(scene?: any): any[] {
+  const tiles = scene?.tiles?.contents ?? scene?.tiles ?? [];
+  return [...tiles].filter((t: any) => t?.flags?.[MODULE_ID]?.thrownLoot);
+}
+
+function nearestReachableTile(token: any): any | null {
+  const doc = token?.document ?? token;
+  const scene = doc?.parent ?? (canvas as any)?.scene;
+  const size = Number(scene?.grid?.size ?? (canvas as any)?.grid?.size) || 100;
+  let best: any = null;
+  let bestDist = Infinity;
+  for (const tile of thrownTiles(scene)) {
+    if (
+      !withinPickupReach(
+        { x: Number(doc?.x), y: Number(doc?.y), width: Number(doc?.width), height: Number(doc?.height) },
+        {
+          x: Number(tile.x),
+          y: Number(tile.y),
+          width: Number(tile.width),
+          height: Number(tile.height),
+        },
+        size,
+      )
+    ) {
+      continue;
+    }
+    const dx = Number(doc?.x) - Number(tile.x);
+    const dy = Number(doc?.y) - Number(tile.y);
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) {
+      best = tile;
+      bestDist = dist;
+    }
+  }
+  return best;
 }
 
 function pickerActor(): any | null {
@@ -423,7 +551,81 @@ function pickerActor(): any | null {
   return null;
 }
 
-export async function pickupThrown(token: any): Promise<boolean> {
+function pickerTokenDoc(): any | null {
+  const controlled = [...((canvas as any)?.tokens?.controlled ?? [])];
+  for (const token of controlled) {
+    const doc = token?.document ?? token;
+    if (doc && !isLootToken(doc) && !isLootTile(doc)) return doc;
+  }
+  const assigned = (game as any)?.user?.character;
+  const token = assigned?.getActiveTokens?.()?.[0];
+  return token?.document ?? token ?? null;
+}
+
+async function pickupTile(
+  tile: any,
+  opts: { ignoreDistance: boolean },
+): Promise<boolean> {
+  const doc = tile?.document ?? tile;
+  if (!doc?.flags?.[MODULE_ID]?.thrownLoot) return false;
+  const picker = pickerActor();
+  if (!picker) {
+    ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.NoHands"));
+    return false;
+  }
+  if (!opts.ignoreDistance) {
+    const from = pickerTokenDoc();
+    const scene = doc.parent ?? (canvas as any)?.scene;
+    const size = Number(scene?.grid?.size ?? (canvas as any)?.grid?.size) || 100;
+    if (
+      !from ||
+      !withinPickupReach(
+        { x: Number(from.x), y: Number(from.y), width: Number(from.width), height: Number(from.height) },
+        {
+          x: Number(doc.x),
+          y: Number(doc.y),
+          width: Number(doc.width),
+          height: Number(doc.height),
+        },
+        size,
+      )
+    ) {
+      ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.RecoverTooFar"));
+      return false;
+    }
+  }
+  const payload = doc.flags?.[MODULE_ID]?.item;
+  if (!payload) return false;
+  try {
+    await picker.createEmbeddedDocuments("Item", [payload]);
+  } catch (err) {
+    log("thrown: could not add the picked-up item:", err);
+    return false;
+  }
+  const result = await askGm<{ ok: boolean }>(
+    CLEAR_QUERY,
+    {
+      request: {
+        tileId: String(doc.id),
+        sceneId: String(doc.parent?.id ?? (canvas as any)?.scene?.id ?? ""),
+      },
+    },
+    { timeout: 20_000 },
+  );
+  if (!result?.ok) log("thrown: pin was not cleared after pickup");
+  try {
+    ui.notifications?.info(
+      game.i18n.format("NOODLRHOOKS.Combat.AttackRange.PickedUp", {
+        name: String(payload.name ?? "weapon"),
+      }),
+    );
+  } catch {
+    /* courtesy */
+  }
+  return true;
+}
+
+async function pickupLeftoverToken(token: any): Promise<boolean> {
   const doc = token?.document ?? token;
   if (!isLootToken(doc)) return false;
   const picker = pickerActor();
@@ -438,7 +640,7 @@ export async function pickupThrown(token: any): Promise<boolean> {
   try {
     await picker.createEmbeddedDocuments("Item", [payload]);
   } catch (err) {
-    log("thrown: could not add the picked-up item:", err);
+    log("thrown: could not add the leftover item:", err);
     return false;
   }
   const result = await askGm<{ ok: boolean }>(
@@ -452,7 +654,7 @@ export async function pickupThrown(token: any): Promise<boolean> {
     },
     { timeout: 20_000 },
   );
-  if (!result?.ok) log("thrown: loot token was not cleared after pickup");
+  if (!result?.ok) log("thrown: leftover loot token was not cleared after pickup");
   try {
     ui.notifications?.info(
       game.i18n.format("NOODLRHOOKS.Combat.AttackRange.PickedUp", {
@@ -465,21 +667,40 @@ export async function pickupThrown(token: any): Promise<boolean> {
   return true;
 }
 
-async function clearLoot(request: ClearRequest | undefined): Promise<{ ok: boolean }> {
-  if (!request?.tokenId) return { ok: false };
+/**
+ * Pick up a pin, a leftover npc-loot token, or whatever is at the selected token's feet.
+ */
+export async function pickupThrown(target?: any): Promise<boolean> {
+  const doc = target?.document ?? target;
+  if (isLootTile(doc)) return pickupTile(doc, { ignoreDistance: Boolean(game.user?.isGM) });
+  if (isLootToken(doc)) return pickupLeftoverToken(doc);
+  const pin = nearestReachableTile(doc);
+  if (pin) return pickupTile(pin, { ignoreDistance: false });
+  return false;
+}
+
+async function clearPin(request: ClearRequest | undefined): Promise<{ ok: boolean }> {
+  if (!request) return { ok: false };
   const scene = (game as any)?.scenes?.get?.(request.sceneId) ?? (canvas as any)?.scene;
-  try {
-    if (scene?.deleteEmbeddedDocuments) {
-      await scene.deleteEmbeddedDocuments("Token", [request.tokenId]);
+  if (request.tileId) {
+    try {
+      await scene?.deleteEmbeddedDocuments?.("Tile", [request.tileId]);
+    } catch (err) {
+      log("thrown: could not delete the pin:", err);
     }
-  } catch (err) {
-    log("thrown: could not delete the loot token:", err);
+  }
+  if (request.tokenId) {
+    try {
+      await scene?.deleteEmbeddedDocuments?.("Token", [request.tokenId]);
+    } catch (err) {
+      log("thrown: could not delete the leftover loot token:", err);
+    }
   }
   if (request.actorId) {
     try {
       await (game as any)?.actors?.get?.(request.actorId)?.delete?.();
     } catch (err) {
-      log("thrown: could not delete the loot actor:", err);
+      log("thrown: could not delete the leftover loot actor:", err);
     }
   }
   return { ok: true };
@@ -487,15 +708,22 @@ async function clearLoot(request: ClearRequest | undefined): Promise<{ ok: boole
 
 export function surveyThrown(): unknown {
   const token: any = (canvas as any)?.tokens?.controlled?.[0];
-  const loot = [...((canvas as any)?.tokens?.placeables ?? [])].filter((t: any) =>
+  const scene = (canvas as any)?.scene;
+  const pins = thrownTiles(scene);
+  const leftovers = [...((canvas as any)?.tokens?.placeables ?? [])].filter((t: any) =>
     isLootToken(t.document ?? t),
   );
   const lines = [
     `module: ${MODULE_ID}`,
     `pending throws: ${pendingThrow.size}`,
-    `dropped on this scene: ${loot.map((t: any) => String(t.name)).join(" | ") || "none"}`,
+    `pins on this scene: ${pins.map((t: any) => String(t.flags?.[MODULE_ID]?.item?.name ?? "pin")).join(" | ") || "none"}`,
+    `leftover npc drops: ${leftovers.map((t: any) => String(t.name)).join(" | ") || "none"}`,
     `selected: ${String(token?.name ?? "—")}`,
   ];
   console.log(lines.join("\n"));
-  return { pending: pendingThrow.size, dropped: loot.map((t: any) => String(t.name)) };
+  return {
+    pending: pendingThrow.size,
+    pins: pins.map((t: any) => String(t.flags?.[MODULE_ID]?.item?.name ?? t.id)),
+    leftovers: leftovers.map((t: any) => String(t.name)),
+  };
 }
