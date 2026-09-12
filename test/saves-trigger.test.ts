@@ -86,12 +86,13 @@ function creature(name: string, uuid: string) {
   return { actor, doc };
 }
 
-/** A usage card shaped the way dnd5e writes one, with the speaker naming the caster. */
+/** A usage card shaped the way 6.0.1 writes one, with the speaker naming the caster. */
 function usageMessage(id: string, casterToken: any, item?: any) {
   return {
     id,
+    type: "usage",
     speaker: { scene: "scene-1", token: casterToken.id },
-    flags: { dnd5e: item ? { item: { uuid: "Item.spell" }, activity: { id: "a1" } } : {} },
+    system: item ? { item: { uuid: "Item.spell" }, activity: { id: "a1" } } : {},
   };
 }
 

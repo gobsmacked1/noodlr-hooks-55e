@@ -28,6 +28,7 @@ import { log } from "../constants";
 import {
   activityOf,
   itemOf,
+  messageSystem,
   rollType,
   speakerToken,
   targetsOf,
@@ -45,7 +46,7 @@ export function isAttackRollMessage(message: any): boolean {
   // Midi merges the attack into its workflow card. The native type is often still stamped; when it
   // is not, the presence of hit-target uuids on a card that also names an item is the same event.
   const midi = message?.flags?.["midi-qol"];
-  if (midi && (midi.hitTargetUuids || midi.hitTargets) && message?.flags?.dnd5e?.item) return true;
+  if (midi && (midi.hitTargetUuids || midi.hitTargets) && messageSystem(message).item) return true;
   return false;
 }
 

@@ -91,9 +91,6 @@ function targetedTokens(usageConfig: any, messageConfig: any): any[] {
   }
   const rows: unknown[] = [
     ...(Array.isArray(usageConfig?.targets) ? usageConfig.targets : []),
-    ...(Array.isArray(messageConfig?.data?.flags?.dnd5e?.targets)
-      ? messageConfig.data.flags.dnd5e.targets
-      : []),
     ...(Array.isArray(messageConfig?.data?.system?.targets) ? messageConfig.data.system.targets : []),
   ];
   for (const row of rows) {

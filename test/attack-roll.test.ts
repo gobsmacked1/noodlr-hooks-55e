@@ -77,13 +77,11 @@ function creature(name: string, uuid: string) {
 function attackMessage(id: string, attackerToken: any, extras?: { targets?: any[]; item?: any }) {
   return {
     id,
+    type: "attack",
     speaker: { scene: "scene-1", token: attackerToken.id },
-    flags: {
-      dnd5e: {
-        roll: { type: "attack" },
-        targets: extras?.targets ?? [],
-        ...(extras?.item ? { item: { uuid: "Item.weapon" }, activity: { id: "a1" } } : {}),
-      },
+    system: {
+      targets: extras?.targets ?? [],
+      ...(extras?.item ? { item: { uuid: "Item.weapon" }, activity: { id: "a1" } } : {}),
     },
   };
 }
@@ -132,9 +130,9 @@ function place(...docs: any[]) {
 }
 
 test("only an attack-roll card is an attack-roll card", () => {
-  assert.equal(isAttackRollMessage({ flags: { dnd5e: { roll: { type: "attack" } } } }), true);
-  assert.equal(isAttackRollMessage({ flags: { dnd5e: { roll: { type: "save" } } } }), false);
-  assert.equal(isAttackRollMessage({ flags: {} }), false);
+  assert.equal(isAttackRollMessage({ type: "attack" }), true);
+  assert.equal(isAttackRollMessage({ type: "save" }), false);
+  assert.equal(isAttackRollMessage({}), false);
 });
 
 test("the carrier is the attacker and the mark lands on the first target", async () => {
@@ -149,7 +147,7 @@ test("the carrier is the attacker and the mark lands on the first target", async
   bindCapabilities(hunter.actor.uuid, [{ capability: MARK }]);
 
   const message = attackMessage("m1", hunter.doc, {
-    targets: [{ name: "Deer", uuid: prey.actor.uuid, ac: 12 }],
+    targets: [{ name: "Deer", actor: prey.actor.uuid, ac: 12 }],
   });
   assert.equal(firstTargetOf(message)?.actor, prey.actor);
 
@@ -166,7 +164,7 @@ test("a self-targeted rule lands on the attacker, and trigger is the attacker to
 
   await fireAttackRollTriggers(
     attackMessage("m2", barbarian.doc, {
-      targets: [{ name: "Goblin", uuid: goblin.actor.uuid, ac: 13 }],
+      targets: [{ name: "Goblin", actor: goblin.actor.uuid, ac: 13 }],
     }),
   );
   assert.equal(barbarian.actor.statuses.has("reckless"), true);
@@ -188,8 +186,8 @@ test("one message is one event, even when it names two targets", async () => {
 
   const message = attackMessage("m3", hunter.doc, {
     targets: [
-      { name: "Deer A", uuid: a.actor.uuid, ac: 12 },
-      { name: "Deer B", uuid: b.actor.uuid, ac: 12 },
+      { name: "Deer A", actor: a.actor.uuid, ac: 12 },
+      { name: "Deer B", actor: b.actor.uuid, ac: 12 },
     ],
   });
   await fireAttackRollTriggers(message);
@@ -202,7 +200,8 @@ test("one message is one event, even when it names two targets", async () => {
 test("a card with no token on the scene is skipped rather than thrown over", async () => {
   await fireAttackRollTriggers({
     id: "m4",
+    type: "attack",
     speaker: { scene: "scene-1", token: "nobody" },
-    flags: { dnd5e: { roll: { type: "attack" } } },
+    system: {},
   });
 });

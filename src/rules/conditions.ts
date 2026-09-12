@@ -282,7 +282,6 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
         // save. Without it, cancelling the roll leaves `success === null` forever, auto-damage
         // stands aside because auto-saves is on, and Apply sits there — Disintegrate vs a
         // paralyzed target is the specimen.
-        ...(origin?.flags ?? {}),
       },
       ...(origin?.system ? { system: origin.system } : {}),
     });

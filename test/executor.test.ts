@@ -884,12 +884,12 @@ test("modify_speed writes an ADD change on walk Speed", async () => {
   });
   assert.equal(outcomes[0].fired, true, outcomes[0].reason);
   assert.equal(victim.effects.length, 1);
-  assert.equal(victim.effects[0].changes[0].key, "system.attributes.movement.walk");
+  assert.equal(victim.effects[0].changes[0].key, "system.attributes.movement.speeds.walk");
   assert.equal(victim.effects[0].changes[0].value, "-10");
 });
 
 test("modify_speed writes the 6.0 nested Speed key, never both", async () => {
-  (globalThis as any).game.system.version = "6.0.0";
+  (globalThis as any).game.system.version = "6.0.1";
   const actor = withEffects(troll());
   bindCapabilities(actor.uuid, [
     {

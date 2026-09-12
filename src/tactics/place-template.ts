@@ -7,7 +7,6 @@
 
 import { log } from "../constants";
 import { inTemplate } from "../core/screens";
-import { dnd5eMajor } from "../system/dnd5e-schema";
 import { systemTargetsFromDocs } from "../rules/cards";
 import { placesTemplate, templateActivityOf, templateSpecOf } from "../rules/template-targets";
 import { adoptTemplateCatch } from "../rules/saves";
@@ -184,24 +183,10 @@ export async function placeAimedTemplate(
 
 export async function stampCatch(message: any, docs: any[]): Promise<void> {
   if (!message) return;
-  const targets = docs
-    .map((doc) => {
-      const actor = doc?.actor;
-      if (!actor?.uuid) return null;
-      const ac = Number(actor.system?.attributes?.ac?.value);
-      return {
-        name: String(doc?.name ?? actor.name ?? ""),
-        img: actor.img,
-        uuid: actor.uuid,
-        ac: Number.isFinite(ac) ? ac : null,
-      };
-    })
-    .filter(Boolean);
   try {
-    const update: Record<string, unknown> = { "flags.dnd5e.targets": targets };
-    if (dnd5eMajor() >= 6) update["system.targets"] = systemTargetsFromDocs(docs);
-    if (typeof message.update === "function") await message.update(update);
-    else if (typeof message.setFlag === "function") await message.setFlag("dnd5e", "targets", targets);
+    if (typeof message.update === "function") {
+      await message.update({ "system.targets": systemTargetsFromDocs(docs) });
+    }
   } catch (err) {
     log("aim: could not stamp who the area caught:", err);
   }

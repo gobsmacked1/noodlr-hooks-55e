@@ -107,7 +107,7 @@ function messageTargets(message: any): string[] {
   const out: string[] = [];
   // Midi writes token uuids unconditionally, which is the better identity for unlinked tokens.
   for (const uuid of message?.flags?.["midi-qol"]?.hitTargetUuids ?? []) out.push(String(uuid));
-  // 5.3.3 actor uuid or 6.0 token/actor uuid — same dual-read as every other card reader.
+  // 6.0.1 `system.targets` token/actor uuids — same door as every other card reader.
   for (const target of targetsOf(message)) {
     if (target.uuid) out.push(target.uuid);
   }

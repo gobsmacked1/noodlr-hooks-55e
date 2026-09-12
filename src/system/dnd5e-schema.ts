@@ -1,9 +1,8 @@
-// dnd5e 5.3.3 vs 6.0.0 schema facts that more than one file has to agree on.
+// dnd5e 6.0.1 schema facts that more than one file has to agree on.
 //
-// Dual-read, never 6.0-only: a world still on 5.3.3 must keep working. Detect the live
-// shape first (an actor that already has `movement.speeds`, a sense stored as `{value}`),
-// then fall back to the system major version, then to the 5.3.3 key. Writing BOTH the
-// shimmed key and the nested key on 6.0 would double-apply if the shim copies.
+// Floor is 6.0.1. Do not add a 5.3.3 fallback. Writing BOTH the shimmed Speed key and
+// the nested key would double-apply: 6.0 still copies `movement.speeds.walk` onto
+// `movement.walk` until 7.0.
 
 import { isDnd5e } from "./dnd5e-rewards";
 
@@ -15,25 +14,15 @@ export function dnd5eMajor(): number {
   return match ? Number(match[1]) : 0;
 }
 
-/**
- * Does this actor (or this world) store Speed under `movement.speeds.*`?
- *
- * 6.0 moved `movement.walk` there and shims the old path until 7.0. Prefer the nested
- * key when the live object already has it, so a test world that set the version but
- * not the field still writes what 6.0 will persist.
- */
-export function usesNestedMovementSpeeds(actor?: any): boolean {
-  const speeds = actor?.system?.attributes?.movement?.speeds;
-  if (speeds && typeof speeds === "object") return true;
-  return dnd5eMajor() >= 6;
+/** 6.0.1 stores Speed under `movement.speeds.*`. */
+export function usesNestedMovementSpeeds(_actor?: any): boolean {
+  return true;
 }
 
 /** Active Effect change key for one movement mode. */
-export function movementSpeedKey(type: string, actor?: any): string {
+export function movementSpeedKey(type: string, _actor?: any): string {
   const mode = String(type || "walk").trim() || "walk";
-  return usesNestedMovementSpeeds(actor)
-    ? `system.attributes.movement.speeds.${mode}`
-    : `system.attributes.movement.${mode}`;
+  return `system.attributes.movement.speeds.${mode}`;
 }
 
 /**

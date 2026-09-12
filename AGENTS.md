@@ -112,18 +112,21 @@ Settings migrate once: `migrateLegacySettings()` copies `noodlr.combat.*` into t
 first load, reading through `game.settings.storage` because the old keys are no longer registered and
 `get` throws on an unregistered key.
 
-## dnd5e 6.0.0 (2026-09-10) — dual-read, never 6.0-only
+## dnd5e 6.0.1 is the floor (2026-09-11)
 
-6.0 typed ChatMessage models. **New messages do not write `flags.dnd5e`.** World migrate copies the
-old flags onto `system.*` and then **deletes** them. The system does not write a shim. `module.json`
-dnd5e minimum stays `5.0.0`; every reader prefers the flag when it is present and falls through to
-the typed field.
+`module.json` dnd5e minimum is **6.0.1**. Do not add a 5.3.3 chat-card fallback. Supporting two
+system versions in one module is the complexity this repo already refused for a second game
+system. 6.0 typed ChatMessage models: **new messages do not write `flags.dnd5e`.** World migrate
+copies the old flags onto `system.*` and then **deletes** them. The system does not write a shim.
+A flags-only reader goes blind on the only version we support.
 
-**`src/rules/cards.ts` is the one door.** Callers that still read `flags.dnd5e` directly go blind on
-6.0. Create hooks must examine even when that object is absent (pass `null`, not `message.flags`).
-Update watches `changed.system` as well as `changed.flags.dnd5e` / `midi-qol`.
+**`src/rules/cards.ts` is the one door.** Read `message.type` + `system.*`. Create hooks must
+examine even when `flags.dnd5e` is absent (pass `null`, not `message.flags`). Update watches
+`changed.system` and leftover `changed.flags.dnd5e` / `midi-qol`.
 
-| 5.3.3 | 6.0.0 |
+Migrate glossary (old flag → live field) — not a dual-read contract:
+
+| Was (5.3.3) | Is (6.0.1) |
 | --- | --- |
 | `flags.dnd5e.roll.type` | `message.type` |
 | `flags.dnd5e.targets` (actor-keyed) | `system.targets` `{ac,actor,img,name,token}` |
@@ -141,8 +144,12 @@ Death save: `type === "save"` + `system.type === "death"`. Concentration: `syste
 **unresolved** (we diverge from 6.0's renderer treating null as a miss). Midi path is unchanged:
 presence of `flags["midi-qol"].hitTargetUuids` / `failedSaveUuids`.
 
-- **`looksLikeDemandedRoll` uses activity type** (`save` / `check`), not `rollType`. Do not "fix"
-  that by requiring deleted flags.
+Keep (not chat-card forks): `flags.dnd5e` on **items / AEs / tokens** — `cachedFor`,
+`isPolymorphed`, `originalActor`, template `origin` / `item`, `isTemporary`, `halflingLucky`,
+concentration `flags.dnd5e.item` on AEs. `stripUsageTargets` still empties a leftover
+`flags.dnd5e.targets` snapshot so a Fireball does not inherit the last Ray of Frost.
+
+- **`looksLikeDemandedRoll` uses activity type** (`save` / `check`), not `rollType`.
 - **`dnd5e-concentration.ts` reads `flags.dnd5e.item` on Active Effects**, not chat cards — leave it.
 - **Write only the live Speed key.** 6.0 stores `movement.speeds.walk` and shims the old path until
   7.0. Writing both double-applies. `movementSpeedKey()` in `src/system/dnd5e-schema.ts`.
@@ -152,6 +159,39 @@ presence of `flags["midi-qol"].hitTargetUuids` / `failedSaveUuids`.
   apply it. `autoApplyDowned` defaults `"none"` — leave it there or dying/knockout double.
 - **A version bump is a REPORT, never a bill.** Do not `recompileWorld` for 6.0. After the world
   updates, purge the `system_rules` RAG silo and re-ingest — 6.0 rewrote a lot of authored prose.
+
+### DDB Effects (2026-09-11) — empty pack, 6.0 standalone Active Effects
+
+The empty world pack **DDB Effects** created during the 6.0.0 migration is **dnd5e's new
+packable `ActiveEffect` document type**, not a DDB product dump. 6.0 ships a system pack
+`packs/effects` (label "Active Effects") of canned reusable AEs. Activities can now link an
+effect by UUID (`applied-effect-field.mjs`: `_id` **or** `uuid`, `getEffect()` is async when
+UUID). PR [#6800](https://github.com/foundryvtt/dnd5e/pull/6800) / issue [#6641](https://github.com/foundryvtt/dnd5e/issues/6641):
+reuse common effects across features instead of embedding a copy on every item.
+
+DDB Importer auto-creates one world dest pack per document type it knows (DDB Spells, DDB
+Items, …). When Foundry/dnd5e added `ActiveEffect` as a packable type, migrate /
+`compendiumCreationComplete` created **DDB Effects** as the empty destination. Empty is
+expected until something is munched into it.
+
+Parked, not this release: collectors that only walk `item.effects` miss UUID-linked pack
+effects; `getApplicableEffects()` is async. Do not implement pack-effect resolution until a
+live card fails. Do not `recompileWorld` for this.
+
+### 6.0.1 (2026-09-11) — five commits, no schema change
+
+[release-6.0.1](https://github.com/foundryvtt/dnd5e/releases/tag/release-6.0.1) (`1403702`) is a
+patch on 6.0.0 (`2e913fb`). Corpus: `_research/dnd5e600` stays 6.0.0; `_research/dnd5e601` is a
+worktree on `release-6.0.1`. Compare is five files. The table above is still the live schema.
+Do not `recompileWorld` for this either.
+
+| Issue | What they changed | Us |
+| --- | --- | --- |
+| [#7427](https://github.com/foundryvtt/dnd5e/issues/7427) | Usage card `_prepareContext` returns early when `parent.content` is set; `getAssociatedActivity()` is resolved once and the metadata / effects tray is skipped when it is null | `activityOf` already try/catches and returns null. Do not start dereferencing `.metadata` / `.target` on a missing activity |
+| [#7428](https://github.com/foundryvtt/dnd5e/issues/7428) | `compact` class is added only when there is no legacy `content` HTML | Our `noodlr-compact-cards` CSS is body-scoped and still pads every `.message`. Watch: in-character / jumbo leftovers looking too tight. Not a ship |
+| [#7429](https://github.com/foundryvtt/dnd5e/issues/7429) | `TokenPlacement` now stamps `actorId: t.parent.id` so a non-GM owner can place a summon | Our `summonCreature` uses `getTokenDocument` + `createEmbeddedDocuments`, GM-gated. A player Summon activity now working is `createToken` as usual |
+| [#7430](https://github.com/foundryvtt/dnd5e/issues/7430) | Filter JSON editor no longer throws on a non-object | Sheet UI only |
+| [#7439](https://github.com/foundryvtt/dnd5e/issues/7439) | Token-delta migrate reads `effect.statuses?.[0]` so a missing array no longer fails world load | We already optional-chain `effect.statuses`. Their migrate, not ours |
 
 ## THE SECOND PIVOT (2026-08-09) — the runtime capability compiler
 
@@ -5227,10 +5267,17 @@ or AC5e (2026-09-03): those are not a supported install.
   (the first press never reached the ledger). Innate melee-or-ranged (Arcane
   Burst: `value > reach`, no `thr`) still skips. `thrown-offhand` counts.
   dnd5e already decrements quantity on a thrown attack that is not `ret`; we
-  drop a loot token near the target unless `ret` or `/returning/i` in the name
+  drop a placeable near the target unless `ret` or `/returning/i` in the name
   (name-only Returning is restored if the system already spent it). Pickup is
   the Token HUD. Do not grant default Owner on the loot actor — Observer plus
-  our button is one copy. `src/system/dnd5e-thrown.ts` + `src/rules/thrown.ts`.
+  our button is one copy. **The Actor type is never hardcoded `"loot"`**
+  (Pierce Fighter dagger, 2026-09-11): that is an Item type in dnd5e;
+  stock Actor types are `character | npc | vehicle | group`. `Actor.create`
+  can log the validation error and return nothing without rejecting, so a
+  catch-then-npc fallback never ran and `restoreThrown` put the dagger
+  back. `lootActorType()` prefers `loot` only when a module registered it
+  (Item Piles); otherwise `npc`. Skip `thrownLoot` tokens in the capability
+  collector. `src/system/dnd5e-thrown.ts` + `src/rules/thrown.ts`.
   `noodlrHooks.surveyThrown()`.
 - **A 5 ft utility or damage rider is melee reach, not a 5-foot bow (v0.7.51).**
   Redirect Attack and Goading Attack Damage ship `type: utility|damage`,

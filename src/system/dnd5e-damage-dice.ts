@@ -85,8 +85,6 @@ export function empoweredCount(actor: any, diceCount: number): number {
 }
 
 export function isSpellDamage(message: any): boolean {
-  if (String(message?.flags?.dnd5e?.item?.type ?? "") === "spell") return true;
-  if (String(message?.flags?.dnd5e?.activity?.type ?? "") === "cast") return true;
   const sys = messageSystem(message);
   if (String(sys.item?.type ?? "") === "spell") return true;
   if (String(sys.activity?.type ?? "") === "cast") return true;
@@ -94,7 +92,6 @@ export function isSpellDamage(message: any): boolean {
 }
 
 export function isHealingRoll(message: any): boolean {
-  if (String(message?.flags?.dnd5e?.roll?.type ?? "") === "healing") return true;
   return rollType(message) === "healing";
 }
 

@@ -26,11 +26,12 @@ beforeEach(() => {
   (globalThis as any).game = { system: { id: "dnd5e" } };
 });
 
-/** A save message as it appears in chat: a d20 total, a DC on the roll, and the flags around it. */
-function save(total: number, dc: number | null, roll: Record<string, unknown> = {}) {
+/** A save message as 6.0.1 writes it: type, system.ability, optional system.resisted. */
+function save(total: number, dc: number | null, extra: Record<string, unknown> = {}) {
   return {
+    type: "save",
     rolls: [{ total, options: dc === null ? {} : { target: dc } }],
-    flags: { dnd5e: { roll: { type: "save", ability: "wis", ...roll } } },
+    system: { ability: "wis", ...extra },
   };
 }
 
@@ -48,14 +49,14 @@ test("no DC means cannot say, which is not the same as failed", () => {
   assert.equal(readSave(save(9, null)).success, null);
 });
 
-test("forceSuccess outranks the arithmetic, so a spent resistance is not overruled", () => {
-  const resisted = readSave(save(4, 20, { forceSuccess: true }));
+test("system.resisted outranks the arithmetic, so a spent resistance is not overruled", () => {
+  const resisted = readSave(save(4, 20, { resisted: true }));
   assert.equal(resisted.success, true);
   assert.equal(resisted.forced, true);
 });
 
 test("a bought success survives an unreadable DC, because somebody paid for it explicitly", () => {
-  assert.equal(readSave(save(4, null, { forceSuccess: true })).success, true);
+  assert.equal(readSave(save(4, null, { resisted: true })).success, true);
 });
 
 test("6.0 system.resisted is the same bought success as forceSuccess", () => {

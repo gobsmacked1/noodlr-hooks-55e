@@ -27,12 +27,10 @@ function targetActor(uuid: string, name: string) {
 
 function attack(total: number, targets: Array<{ name: string; ac: number | null }>, extra = {}) {
   return {
+    type: "attack",
     rolls: [{ total, isCritical: false, isFumble: false, ...extra }],
-    flags: {
-      dnd5e: {
-        roll: { type: "attack" },
-        targets: targets.map((t) => ({ name: t.name, ac: t.ac, uuid: `Actor.${t.name}` })),
-      },
+    system: {
+      targets: targets.map((t) => ({ name: t.name, ac: t.ac, actor: `Actor.${t.name}` })),
     },
   };
 }

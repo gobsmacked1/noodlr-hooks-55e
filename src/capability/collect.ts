@@ -911,6 +911,7 @@ function actorsOn(scene?: any): any[] {
     [];
   for (const doc of documents) {
     const actor = doc?.actor;
+    if (doc?.flags?.[MODULE_ID]?.thrownLoot || actor?.flags?.[MODULE_ID]?.thrownLoot) continue;
     const uuid = String(actor?.uuid ?? "");
     if (actor && uuid && !seen.has(uuid)) seen.set(uuid, actor);
   }
@@ -1071,6 +1072,7 @@ export function registerCapabilityCollector(): void {
   // pack of six wolves is six hooks in a second and they should cost one batch.
   Hooks.on("createToken", (doc: any) => {
     if (doc?.parent?.id !== (canvas as any)?.scene?.id) return;
+    if (doc?.flags?.[MODULE_ID]?.thrownLoot) return;
     schedule(doc.parent, itemDelayMs);
   });
 

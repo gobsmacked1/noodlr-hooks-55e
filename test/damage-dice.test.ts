@@ -92,13 +92,11 @@ function damageCard(opts: {
   });
   return {
     id: "dmg",
+    type: opts.rollType ?? "damage",
     rolls,
-    flags: {
-      dnd5e: {
-        roll: { type: opts.rollType ?? "damage" },
-        item: { type: opts.itemType ?? "weapon" },
-        activity: { type: opts.activityType ?? "attack" },
-      },
+    system: {
+      item: { type: opts.itemType ?? "weapon" },
+      activity: { type: opts.activityType ?? "attack" },
     },
     update: async (data: any) => {
       if (Array.isArray(data.rolls)) {

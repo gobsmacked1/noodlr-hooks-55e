@@ -184,19 +184,14 @@ export function registerSaveResolution(): void {
     void route(message);
   });
 
-  // A legendary resistance spent by hand is an UPDATE to a save we have already read: dnd5e's own button
-  // stamps `roll.forceSuccess` on the existing message rather than posting anything. Without this, a GM who
-  // pressed it during the pause before the damage roll would still watch the full amount land — which is the
-  // worst version of this bug, because they had intervened and been ignored.
+  // A legendary resistance spent by hand is an UPDATE to a save we have already read: dnd5e's
+  // Resist button stamps `system.resisted` on the existing message rather than posting anything.
+  // Without this, a GM who pressed it during the pause before the damage roll would still watch
+  // the full amount land — which is the worst version of this bug, because they had intervened
+  // and been ignored.
   Hooks.on("updateChatMessage", (message: any, changed: any) => {
     if (!active()) return;
-    if (
-      changed?.flags?.dnd5e?.roll?.forceSuccess !== true &&
-      changed?.system?.resisted !== true &&
-      changed?.system?.forceSuccess !== true
-    ) {
-      return;
-    }
+    if (changed?.system?.resisted !== true && changed?.system?.forceSuccess !== true) return;
     void route(message);
   });
 
@@ -225,9 +220,8 @@ async function route(message: any): Promise<void> {
       return;
     }
 
-    // A usage card. 5.3.3: no `messageType` plus an activity flag. 6.0: `type: "usage"`.
-    // This is the earliest moment the NPCs' saves can be rolled — a Hold Person has no
-    // damage roll to wait for.
+    // A usage card (`type: "usage"`). This is the earliest moment the NPCs' saves can
+    // be rolled — a Hold Person has no damage roll to wait for.
     if (isUsageCard(message)) {
       await onUsage(message);
       return;

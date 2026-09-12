@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.64
+
+**dnd5e 6.0.1 is required.** Chat cards are read as `message.type` and `system.*` only.
+The 5.3.3 `flags.dnd5e` fallbacks are gone — new 6.0 messages never write those flags.
+The Foundry installer will refuse anything older than 6.0.1.
+
+**A thrown dagger now drops on a real Actor type.** `"loot"` is an Item type in dnd5e, not
+an Actor type. Creating a loot actor on a stock world logged a validation error and
+returned nothing, so the dagger never appeared. Drops now use `npc` unless another module
+(Item Piles) has registered a `loot` Actor.
+
+**DDB Effects is empty on purpose.** dnd5e 6.0 made Active Effects first-class pack
+documents (the system's own "Active Effects" pack). DDB Importer created a matching
+destination pack the way it creates DDB Spells / DDB Items. Nothing has been munched
+into it yet. We do not walk UUID-linked pack effects in this release.
+
 ## 0.7.63
 
 **dnd5e 6.0 chat cards still automate.** 6.0 stopped writing `flags.dnd5e` on new

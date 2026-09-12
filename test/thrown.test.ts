@@ -6,6 +6,7 @@ import {
   hasThrownProperty,
   isReturningWeapon,
   throwAskNeeded,
+  lootActorType,
   thrownLootPayload,
 } from "../src/system/dnd5e-thrown";
 
@@ -61,6 +62,15 @@ test("an already-thrown mode does not ask again", () => {
 
 test("a weapon without thr never asks", () => {
   assert.equal(throwAskNeeded({ system: { properties: [] } }, undefined, true, true), "none");
+});
+
+test("stock dnd5e has no Actor type loot — drop as npc", () => {
+  assert.equal(lootActorType(["character", "npc", "vehicle", "group"]), "npc");
+  assert.equal(lootActorType(["base", "character", "npc"]), "npc");
+});
+
+test("loot is used only when a module actually registered that Actor type", () => {
+  assert.equal(lootActorType(["npc", "loot"]), "loot");
 });
 
 test("loot payload is one unequipped copy with a fresh id", () => {

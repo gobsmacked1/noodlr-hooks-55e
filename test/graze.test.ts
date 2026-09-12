@@ -9,8 +9,8 @@ import { grazeDamage } from "../src/system/dnd5e-graze";
 // reports a Greatsword doing nothing on a miss is to unlock the Damage button — which would roll 2d6
 // plus the modifier, i.e. between two and five times what the rule allows.
 
-function attack(mastery: string) {
-  return { flags: { dnd5e: { roll: { mastery } } } };
+function attack(mastery: string | null) {
+  return { type: "attack", system: { mastery } };
 }
 
 function greatsword() {
@@ -37,15 +37,15 @@ test("graze deals the ability modifier, in the weapon's own damage type", () => 
 });
 
 test("no mastery, or a different one, deals nothing", () => {
-  assert.equal(grazeDamage(attack(""), greatsword(), activity(4)), null);
+  assert.equal(grazeDamage(attack(null), greatsword(), activity(4)), null);
   assert.equal(grazeDamage(attack("topple"), greatsword(), activity(4)), null);
 });
 
-test("an NPC card that never wrote a mastery flag still reads the weapon", () => {
+test("an NPC card that never wrote a mastery field still reads the weapon", () => {
   const npc = activity(4);
   npc.actor.type = "npc";
   (npc.actor.system.traits.weaponProf as { mastery?: unknown }).mastery = undefined;
-  const silent = { flags: { dnd5e: { roll: {} } } };
+  const silent = { type: "attack", system: {} };
   assert.deepEqual(grazeDamage(silent, greatsword(), npc), { amount: 4, type: "slashing" });
 });
 

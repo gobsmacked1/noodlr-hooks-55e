@@ -23,7 +23,7 @@ test("an auto-fail does not overwrite a save that already has a verdict", () => 
 
 test("originatingUsageIdFromRoll reads a stamp on the message config", () => {
   assert.equal(
-    originatingUsageIdFromRoll({}, { data: { flags: { dnd5e: { originatingMessage: "usage-1" } } } }),
+    originatingUsageIdFromRoll({}, { data: { system: { origin: "usage-1" } } }),
     "usage-1",
   );
 });
@@ -46,7 +46,7 @@ test("a stamped usage id beats a stale click event", () => {
   assert.equal(
     originatingUsageIdFromRoll(
       { event },
-      { data: { flags: { dnd5e: { originatingMessage: "usage-3" } } } },
+      { data: { system: { origin: "usage-3" } } },
     ),
     "usage-3",
   );

@@ -20,6 +20,7 @@ import {
   attackModeIsThrown,
   hasReturningProperty,
   isReturningWeapon,
+  lootActorType,
   thrownLootPayload,
 } from "../system/dnd5e-thrown";
 import { shouldAutomate } from "../tactics/registry";
@@ -300,6 +301,16 @@ function landingSpot(activity: any): { x: number; y: number } | null {
   return null;
 }
 
+function actorTypes(): string[] {
+  const ctor = (CONFIG as any).Actor?.documentClass ?? (globalThis as any).Actor;
+  const listed = ctor?.TYPES ?? (CONFIG as any).Actor?.types ?? [];
+  return [...listed].map((t: unknown) => String(t ?? ""));
+}
+
+function reason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err ?? "unknown");
+}
+
 async function dropLoot(request: DropRequest | undefined): Promise<{ ok: boolean }> {
   if (!request?.sceneId || !request.item) return { ok: false };
   const scene = (game as any)?.scenes?.get?.(request.sceneId);
@@ -307,10 +318,16 @@ async function dropLoot(request: DropRequest | undefined): Promise<{ ok: boolean
   const folder = await ensureFolder();
   const Actor = (CONFIG as any).Actor?.documentClass ?? (globalThis as any).Actor;
   if (!Actor?.create) return { ok: false };
+  const type = lootActorType(actorTypes());
+  if (!type) {
+    log("thrown: no Actor type is available to hold a dropped weapon");
+    return { ok: false };
+  }
   const img = request.img || String(request.item.img ?? "");
   const observer = (globalThis as any).CONST?.DOCUMENT_OWNERSHIP_LEVELS?.OBSERVER ?? 2;
   const base = {
     name: request.name,
+    type,
     img,
     folder: folder?.id ?? null,
     ownership: { default: observer },
@@ -328,15 +345,14 @@ async function dropLoot(request: DropRequest | undefined): Promise<{ ok: boolean
   };
   let actor: any;
   try {
-    actor = await Actor.create({ ...base, type: "loot" });
+    actor = await Actor.create(base);
   } catch (err) {
-    log("thrown: loot actor create failed, trying npc:", err);
-    try {
-      actor = await Actor.create({ ...base, type: "npc" });
-    } catch (again) {
-      log("thrown: loot actor create failed:", again);
-      return { ok: false };
-    }
+    log(`thrown: loot actor create failed (${type}): ${reason(err)}`);
+    return { ok: false };
+  }
+  if (!actor?.id) {
+    log(`thrown: loot actor create returned nothing (${type})`);
+    return { ok: false };
   }
   try {
     await scene.createEmbeddedDocuments("Token", [
@@ -355,7 +371,7 @@ async function dropLoot(request: DropRequest | undefined): Promise<{ ok: boolean
       },
     ]);
   } catch (err) {
-    log("thrown: loot token create failed:", err);
+    log(`thrown: loot token create failed: ${reason(err)}`);
     try {
       await actor.delete();
     } catch {

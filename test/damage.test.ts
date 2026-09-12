@@ -25,15 +25,13 @@ function targetActor(uuid: string, name: string) {
   return doc;
 }
 
-/** An attack message: one d20 roll, plus the target descriptors dnd5e writes beside it. */
+/** An attack message: one d20 roll, plus the 6.0.1 target rows dnd5e writes beside it. */
 function attack(total: number, targets: Array<{ name: string; ac: number | null }>, extra = {}) {
   return {
+    type: "attack",
     rolls: [{ total, isCritical: false, isFumble: false, ...extra }],
-    flags: {
-      dnd5e: {
-        roll: { type: "attack" },
-        targets: targets.map((t) => ({ name: t.name, ac: t.ac, uuid: `Actor.${t.name}` })),
-      },
+    system: {
+      targets: targets.map((t) => ({ name: t.name, ac: t.ac, actor: `Actor.${t.name}` })),
     },
   };
 }
@@ -101,14 +99,19 @@ test("a target whose token cannot be identified is unresolved, never guessed at"
 
 test("a save is judged against the DC on the roll, and no DC means no verdict", () => {
   const made = readSave({
+    type: "save",
     rolls: [{ total: 14, options: { target: 14 } }],
-    flags: { dnd5e: { roll: { type: "save", ability: "dex" } } },
+    system: { ability: "dex" },
   });
   assert.equal(made.success, true, "a save meets its DC on equal");
   assert.equal(made.ability, "dex");
   assert.equal(made.dc, 14);
 
-  const failed = readSave({ rolls: [{ total: 13, options: { target: 14 } }], flags: {} });
+  const failed = readSave({
+    type: "save",
+    rolls: [{ total: 13, options: { target: 14 } }],
+    system: { ability: "dex" },
+  });
   assert.equal(failed.success, false);
 
   // `BasicRoll#isSuccess` returns false here rather than undefined, which would read as a failed save and
@@ -119,8 +122,9 @@ test("a save is judged against the DC on the roll, and no DC means no verdict", 
 
 test("a check is judged against the DC on the roll, and no DC means no verdict", () => {
   const made = readCheck({
+    type: "check",
     rolls: [{ total: 14, options: { target: 14 } }],
-    flags: { dnd5e: { roll: { type: "skill", skillId: "ste", ability: "dex" } } },
+    system: { skill: "ste", ability: "dex" },
   });
   assert.equal(made.success, true, "a check meets its DC on equal");
   assert.equal(made.skill, "ste");
@@ -128,8 +132,9 @@ test("a check is judged against the DC on the roll, and no DC means no verdict",
   assert.equal(made.dc, 14);
 
   const failed = readCheck({
+    type: "check",
     rolls: [{ total: 13, options: { target: 14 } }],
-    flags: { dnd5e: { roll: { type: "ability", ability: "str" } } },
+    system: { ability: "str" },
   });
   assert.equal(failed.success, false);
   assert.equal(failed.ability, "str");
@@ -142,9 +147,9 @@ test("a check is judged against the DC on the roll, and no DC means no verdict",
 });
 
 test("what a made save is worth comes off the damage message, defaulting to half", () => {
-  assert.equal(damageOnSave({ flags: { dnd5e: { roll: { damageOnSave: "none" } } } }), "none");
-  assert.equal(damageOnSave({ flags: { dnd5e: { roll: { damageOnSave: "full" } } } }), "full");
-  assert.equal(damageOnSave({ flags: { dnd5e: {} } }), "half");
+  assert.equal(damageOnSave({ type: "damage", system: { onSave: "none" } }), "none");
+  assert.equal(damageOnSave({ type: "damage", system: { onSave: "full" } }), "full");
+  assert.equal(damageOnSave({ type: "damage", system: {} }), "half");
 
   assert.equal(saveMultiplier("half"), 0.5);
   assert.equal(saveMultiplier("none"), 0);

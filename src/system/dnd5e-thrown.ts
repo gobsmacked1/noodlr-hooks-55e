@@ -59,6 +59,23 @@ export function throwAskNeeded(
   return "too-far";
 }
 
+/**
+ * Actor type for the dropped-weapon placeable.
+ *
+ * `"loot"` is an **Item** type in dnd5e, not an Actor type. Stock Actor types
+ * are `character | npc | vehicle | group`. `loot` is only legal when another
+ * module (Item Piles) registers it — creating it on a stock 6.0 world throws
+ * validation, and `Actor.create` can return nothing without rejecting, so a
+ * catch-then-npc fallback never runs. Prefer `loot` when it is actually
+ * registered; otherwise `npc`.
+ */
+export function lootActorType(types: readonly string[]): string | null {
+  const list = types.map((t) => String(t ?? "").trim()).filter((t) => t && t !== "base");
+  if (list.includes("loot")) return "loot";
+  if (list.includes("npc")) return "npc";
+  return list[0] ?? null;
+}
+
 /** One copy of the weapon as it should land on the ground — new id, quantity 1, unequipped. */
 export function thrownLootPayload(item: any): Record<string, unknown> | null {
   if (!item) return null;

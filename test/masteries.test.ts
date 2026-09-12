@@ -147,8 +147,8 @@ test("Weapon Mastery is a feature, not a tag on the item", () => {
   assert.equal(canUseWeaponMastery(fighter, staff("vex", "shortbow"), "vex"), false);
 });
 
-test("a leftover roll.mastery flag still needs the wielder's feature", () => {
-  const card = { flags: { dnd5e: { roll: { mastery: "topple" } } } };
+test("system.mastery still needs the wielder's feature", () => {
+  const card = { type: "attack", system: { mastery: "topple" } };
   assert.equal(masteryOf(card, staff(), monk()), "");
   assert.equal(masteryOf(card, staff(), monk(["quarterstaff"])), "topple");
 });

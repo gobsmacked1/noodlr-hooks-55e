@@ -88,12 +88,13 @@ function creature(name: string, uuid: string) {
   return { actor, doc };
 }
 
-/** An attack message shaped the way dnd5e writes one, with the speaker naming the attacker. */
+/** An attack message shaped the way 6.0.1 writes one, with the speaker naming the attacker. */
 function attackMessage(id: string, attackerToken: any, item?: any) {
   return {
     id,
+    type: "attack",
     speaker: { scene: "scene-1", token: attackerToken.id },
-    flags: { dnd5e: item ? { item: { uuid: "Item.weapon" }, activity: { id: "a1" } } : {} },
+    system: item ? { item: { uuid: "Item.weapon" }, activity: { id: "a1" } } : {},
   };
 }
 

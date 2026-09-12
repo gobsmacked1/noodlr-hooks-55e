@@ -11,7 +11,7 @@ import {
 import { sheetSenses } from "../src/system/dnd5e-concealment";
 
 beforeEach(() => {
-  (globalThis as any).game = { system: { id: "dnd5e", version: "5.3.3" } };
+  (globalThis as any).game = { system: { id: "dnd5e", version: "6.0.1" } };
 });
 
 test("senseRangeOf reads a number or a {value}/{range} wrapper", () => {
@@ -22,20 +22,15 @@ test("senseRangeOf reads a number or a {value}/{range} wrapper", () => {
   assert.ok(Number.isNaN(Number({ value: 60 })));
 });
 
-test("movementSpeedKey stays on the 5.3.3 path when the version is unset", () => {
+test("movementSpeedKey always writes speeds.walk on the 6.0.1 floor", () => {
   (globalThis as any).game.system.version = undefined;
   assert.equal(dnd5eMajor(), 0);
-  assert.equal(usesNestedMovementSpeeds(), false);
-  assert.equal(movementSpeedKey("walk"), "system.attributes.movement.walk");
-});
-
-test("movementSpeedKey writes speeds.walk on 6.0, and never both keys", () => {
-  (globalThis as any).game.system.version = "6.0.0";
-  assert.equal(dnd5eMajor(), 6);
+  assert.equal(usesNestedMovementSpeeds(), true);
   assert.equal(movementSpeedKey("walk"), "system.attributes.movement.speeds.walk");
-  const nested = { system: { attributes: { movement: { speeds: { walk: 30 } } } } };
-  (globalThis as any).game.system.version = "5.3.3";
-  assert.equal(movementSpeedKey("walk", nested), "system.attributes.movement.speeds.walk");
+
+  (globalThis as any).game.system.version = "6.0.1";
+  assert.equal(dnd5eMajor(), 6);
+  assert.equal(movementSpeedKey("fly"), "system.attributes.movement.speeds.fly");
 });
 
 test("isFormModeTransform is the 6.0 AE Wild Shape, not an actor copy", () => {

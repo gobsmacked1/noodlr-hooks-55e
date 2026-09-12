@@ -16,15 +16,12 @@
 //     so it is recomputed with the system's own arithmetic (`utils.mjs getTargetDescriptors` records the
 //     AC; `chat-message.mjs` renders the verdict).
 //   * Which activity demanded a saving throw. A save message names its roller and nothing else. The one
-//     link back is `flags.dnd5e.originatingMessage` (5.3.3) or `system.origin` (6.0), the id of the
-//     usage card whose button was pressed — which is also what joins a damage roll to the attack roll
-//     that preceded it, since both carry the same one.
+//     link back is `system.origin`, the id of the usage card whose button was pressed — which is also
+//     what joins a damage roll to the attack roll that preceded it, since both carry the same one.
 //
-// dnd5e 6.0.0 typed the chat message. New cards write `message.type` + `system.*` and do not write
-// `flags.dnd5e`. World migrate copies the old flags then deletes them. Every reader in this file
-// prefers the flag when it is present (a 5.3.3 card, or a message we stamped ourselves) and falls
-// through to the system field. Callers that still read flags directly will go blind on 6.0 — route
-// them through here.
+// dnd5e 6.0.1 typed the chat message. Cards write `message.type` + `system.*` and do not write
+// `flags.dnd5e`. This file reads those fields only. Floor is 6.0.1 — do not add a 5.3.3 flag
+// fallback. Callers that still read flags directly go blind; route them through here.
 //
 // Midi, when a table runs it, changes not the data but which event carries it: it suppresses the
 // separate roll messages and fills one card in, writing `flags["midi-qol"].hitTargetUuids` and
@@ -35,12 +32,6 @@
 
 import { log } from "../constants";
 import { canUseWeaponMastery } from "../system/dnd5e-masteries";
-import { dnd5eMajor } from "../system/dnd5e-schema";
-
-/** `flags.dnd5e` when present, else empty. Never invent a roll type from this alone on 6.0. */
-function flagsDnd5e(message: any): any {
-  return message?.flags?.dnd5e ?? {};
-}
 
 /** Prepared `system` on a 6.0 typed ChatMessage, or the create-data copy. */
 export function messageSystem(message: any): any {
@@ -90,8 +81,6 @@ export interface DamagePart {
 }
 
 export function rollType(message: any): string {
-  const flagged = String(flagsDnd5e(message).roll?.type ?? "");
-  if (flagged) return flagged;
   const kind = String(message?.type ?? "");
   const sys = messageSystem(message);
   const sub = String(sys.type ?? "");
@@ -108,29 +97,20 @@ export function rollType(message: any): string {
   return "";
 }
 
-/**
- * 5.3.3 usage cards are "no messageType + an activity flag". 6.0 writes `type: "usage"`
- * and drops both flags. Anything that required the old pair goes blind on 6.0.
- */
+/** 6.0.1 usage cards write `type: "usage"`. */
 export function isUsageCard(message: any): boolean {
-  if (String(message?.type ?? "") === "usage") return true;
-  const dnd5e = flagsDnd5e(message);
-  return !dnd5e.messageType && Boolean(dnd5e.activity);
+  return String(message?.type ?? "") === "usage";
 }
 
-/** `flags.dnd5e.roll.attackMode` (5.3.3) or `system.mode` on a 6.0 attack. */
+/** `system.mode` on a 6.0.1 attack (`thrown` / `ranged` / …). */
 export function attackModeOf(message: any): string {
-  const flagged = String(flagsDnd5e(message).roll?.attackMode ?? "").trim();
-  if (flagged) return flagged;
   return String(messageSystem(message).mode ?? "").trim();
 }
 
 /**
- * Legendary resistance: `flags.dnd5e.roll.forceSuccess` on 5.3.3, `system.resisted`
- * on 6.0 (`forceSuccess` is a getter on the typed model).
+ * Legendary resistance: `system.resisted` (`forceSuccess` is a getter on the typed model).
  */
 export function isResisted(message: any): boolean {
-  if (flagsDnd5e(message).roll?.forceSuccess === true) return true;
   const sys = messageSystem(message);
   return sys.resisted === true || sys.forceSuccess === true;
 }
@@ -149,11 +129,9 @@ export function cardUpdateIsRelevant(changed: any): boolean {
   return false;
 }
 
-/** Stamp the usage-card id the way both schemas can read it. */
-export function originatingMessageData(usageId: string): { flags: { dnd5e: { originatingMessage: string } }; system?: { origin: string } } {
-  const flags = { dnd5e: { originatingMessage: usageId } };
-  if (dnd5eMajor() >= 6) return { flags, system: { origin: usageId } };
-  return { flags };
+/** Stamp the usage-card id the way 6.0.1 reads it. */
+export function originatingMessageData(usageId: string): { system: { origin: string } } {
+  return { system: { origin: usageId } };
 }
 
 /**
@@ -164,8 +142,6 @@ export function originatingMessageData(usageId: string): { flags: { dnd5e: { ori
  * so a save or a damage roll made any other way genuinely cannot be attributed to an activity.
  */
 export function originatingId(message: any): string {
-  const flagged = String(flagsDnd5e(message).originatingMessage ?? "");
-  if (flagged) return flagged;
   return originId(messageSystem(message).origin);
 }
 
@@ -217,7 +193,7 @@ export function attackHitForDamage(damage: any): boolean | null {
  *
  * `originatingId` reads a posted message. This reads the roll CONFIG, which is what a
  * `preRollSavingThrow` handler has — `buildPost` (`basic-roll.mjs:171-174`) has not run
- * yet, so a click-originated save has no `flags.dnd5e.originatingMessage` until then.
+ * yet, so a click-originated save has no `system.origin` until then.
  * Cancelling at pre-roll (Paralyzed auto-fail Str/Dex) would otherwise lose the only
  * thread back to the activation.
  *
@@ -226,11 +202,7 @@ export function attackHitForDamage(damage: any): boolean | null {
  */
 export function originatingUsageIdFromRoll(config: any, message: any): string {
   const stamped = String(
-    message?.data?.flags?.dnd5e?.originatingMessage ||
-      message?.flags?.dnd5e?.originatingMessage ||
-      originId(message?.data?.system?.origin) ||
-      originId(message?.system?.origin) ||
-      "",
+    originId(message?.data?.system?.origin) || originId(message?.system?.origin) || "",
   );
   if (stamped) return stamped;
   try {
@@ -292,9 +264,7 @@ export function tokenFromTokenUuid(uuid: string): any {
 }
 
 export function itemOf(message: any): any {
-  const uuid = String(
-    messageSystem(message).item?.uuid ?? flagsDnd5e(message).item?.uuid ?? "",
-  );
+  const uuid = String(messageSystem(message).item?.uuid ?? "");
   if (uuid) {
     try {
       const found = (globalThis as any).fromUuidSync?.(uuid) ?? null;
@@ -313,8 +283,6 @@ export function itemOf(message: any): any {
 }
 
 function activityIdOf(message: any): string {
-  const flagged = String(flagsDnd5e(message).activity?.id ?? "");
-  if (flagged) return flagged;
   const sys = messageSystem(message).activity;
   if (!sys) return "";
   if (typeof sys === "string") return sys.includes(".") ? String(sys.split(".").pop() ?? "") : sys;
@@ -344,18 +312,13 @@ export function activityOf(message: any, item: any): any {
 /**
  * The weapon mastery in use, if any.
  *
- * dnd5e copies the chosen mastery onto its own attack message at `flags.dnd5e.roll.mastery`.
- * The weapon's own `system.mastery` is the fallback when that flag is absent (auto-roll,
- * midi). Neither is enough: the tag sits on every copy of the item, and a leftover flag
+ * dnd5e copies the chosen mastery onto its own attack message at `system.mastery`.
+ * The weapon's own `system.mastery` is the fallback when that field is absent (auto-roll).
+ * Neither is enough: the tag sits on every copy of the item, and a leftover value
  * can name a property the wielder has no feature for. `canUseWeaponMastery` is the gate.
  * Pass the wielder when you already have them; otherwise the speaker token's actor is used.
  */
 export function masteryOf(message: any, item: any, actor?: any): string {
-  const roll = flagsDnd5e(message).roll;
-  const hasFlag = Boolean(roll) && Object.prototype.hasOwnProperty.call(roll, "mastery");
-  const flagged = String(roll?.mastery ?? "")
-    .trim()
-    .toLowerCase();
   const sys = messageSystem(message);
   const hasSystem =
     (String(message?.type ?? "") === "attack" || rollType(message) === "attack") &&
@@ -368,7 +331,7 @@ export function masteryOf(message: any, item: any, actor?: any): string {
   // The message is the dialog choice. Empty / null there is a decline — falling through to the
   // weapon tag would Graze a fighter who picked none. A card that never wrote the field still
   // needs the item (2024 MM NPCs store mastery only on the attack).
-  const claimed = hasFlag ? flagged : hasSystem ? fromSystem : declared;
+  const claimed = hasSystem ? fromSystem : declared;
   if (!claimed) return "";
   const wielder = actor ?? speakerToken(message?.speaker)?.actor;
   return canUseWeaponMastery(wielder, item, claimed) ? claimed : "";
@@ -406,13 +369,11 @@ export function targetsOf(message: any): CardTarget[] {
   const sysTargets = messageSystem(message).targets;
   if (Array.isArray(sysTargets) && sysTargets.length > 0) {
     for (const target of sysTargets) pushTarget(out, target);
-    return out;
   }
-  for (const target of flagsDnd5e(message).targets ?? []) pushTarget(out, target);
   return out;
 }
 
-/** Token from a 6.0 token uuid or a 5.3.3 actor uuid. */
+/** Token from a 6.0 token uuid, or an actor uuid if that is all the card carried. */
 export function tokenFromTargetUuid(uuid: string): any {
   if (!uuid) return null;
   if (uuid.includes(".Token.")) return tokenFromTokenUuid(uuid);
@@ -420,8 +381,7 @@ export function tokenFromTargetUuid(uuid: string): any {
 }
 
 /**
- * 6.0 `system.targets` rows from TokenDocuments. Dual-write beside `flags.dnd5e.targets`
- * so a card we stamp ourselves is readable after migrate deletes the flags.
+ * 6.0.1 `system.targets` rows from TokenDocuments.
  */
 export function systemTargetsFromDocs(docs: any[]): Array<{ ac: number | null; actor: string; img: string; name: string; token: string }> {
   const out: Array<{ ac: number | null; actor: string; img: string; name: string; token: string }> = [];
@@ -500,10 +460,10 @@ export interface SaveReading {
  * return `false` — not `undefined` — when there is no DC, so a save with no target reads as a failure,
  * and this layer must be able to tell "failed" from "cannot say". A null success means the latter.
  *
- * `forceSuccess` / `system.resisted` OUTRANKS THE ARITHMETIC, and reading it is not an optional nicety.
- * 5.3.3 writes the flag (`NPCData#resistSave`); 6.0 writes `system.resisted` (`forceSuccess` is a getter).
- * `isSuccess` knows nothing about either — so without this a GM who spent a legendary resistance by hand
- * would watch us apply the full damage anyway, on the one roll of the evening they had intervened in.
+ * `system.resisted` OUTRANKS THE ARITHMETIC, and reading it is not an optional nicety.
+ * 6.0 writes `system.resisted` (`forceSuccess` is a getter). `isSuccess` knows nothing about
+ * either — so without this a GM who spent a legendary resistance by hand would watch us apply
+ * the full damage anyway, on the one roll of the evening they had intervened in.
  */
 export function readSave(message: any): SaveReading {
   const roll: any = message?.rolls?.[0];
@@ -513,7 +473,7 @@ export function readSave(message: any): SaveReading {
   const forced = isResisted(message);
   const rolled = dc === null || !Number.isFinite(total) ? null : total >= dc;
   return {
-    ability: String(messageSystem(message).ability ?? flagsDnd5e(message).roll?.ability ?? ""),
+    ability: String(messageSystem(message).ability ?? ""),
     dc,
     total: Number.isFinite(total) ? total : NaN,
     // A bought success is a success even when the DC is unreadable: somebody paid for it explicitly.
@@ -541,14 +501,13 @@ export interface CheckReading {
  */
 export function readCheck(message: any): CheckReading {
   const roll: any = message?.rolls?.[0];
-  const flags = flagsDnd5e(message).roll ?? {};
   const sys = messageSystem(message);
   const total = Number(roll?.total);
   const target = Number(roll?.options?.target);
   const dc = Number.isFinite(target) ? target : null;
   return {
-    ability: String(sys.ability ?? flags.ability ?? ""),
-    skill: String(sys.skill ?? flags.skillId ?? ""),
+    ability: String(sys.ability ?? ""),
+    skill: String(sys.skill ?? ""),
     dc,
     total: Number.isFinite(total) ? total : NaN,
     success: dc === null || !Number.isFinite(total) ? null : total >= dc,
@@ -564,7 +523,7 @@ export function readCheck(message: any): CheckReading {
  * "half", the overwhelmingly common case and the one dnd5e's own schema defaults to.
  */
 export function damageOnSave(message: any): string {
-  const stated = String(messageSystem(message).onSave ?? flagsDnd5e(message).roll?.damageOnSave ?? "");
+  const stated = String(messageSystem(message).onSave ?? "");
   return stated || "half";
 }
 
@@ -572,14 +531,13 @@ export function damageOnSave(message: any): string {
  * Did this damage card come from a save activity?
  *
  * `damageOnSave()` defaults to "half", so it cannot be the gate — every ordinary
- * weapon damage would then settle as save-damage. 5.3.3 stamps `roll.damageOnSave`
- * only on save-activity damage; 6.0 stamps `system.onSave`.
+ * weapon damage would then settle as save-damage. 6.0.1 stamps `system.onSave`
+ * only on save-activity damage.
  */
 export function isSaveDamage(message: any): boolean {
   if (rollType(message) !== "damage") return false;
   const sys = messageSystem(message).onSave;
-  if (sys != null && sys !== "") return true;
-  return Boolean(flagsDnd5e(message).roll?.damageOnSave);
+  return sys != null && sys !== "";
 }
 
 /**
