@@ -91,7 +91,6 @@ const hit: Parameters<typeof shouldCollectOwedDamage>[0] = {
   activityType: "attack",
   hasDamageParts: true,
   alreadyRolled: false,
-  automating: false,
 };
 
 test("owed damage is collected only on a confirmed attack hit that still needs dice", () => {
@@ -101,7 +100,11 @@ test("owed damage is collected only on a confirmed attack hit that still needs d
   assert.equal(shouldCollectOwedDamage({ ...hit, activityType: "save" }), false);
   assert.equal(shouldCollectOwedDamage({ ...hit, hasDamageParts: false }), false);
   assert.equal(shouldCollectOwedDamage({ ...hit, alreadyRolled: true }), false);
-  assert.equal(shouldCollectOwedDamage({ ...hit, automating: true }), false);
+});
+
+test("an automated swing still owes damage after a confirmed hit", () => {
+  // Skipping this because `isAutomating()` was how NPC damage posted with the attack.
+  assert.equal(shouldCollectOwedDamage(hit), true);
 });
 
 test("manual damage never uses a 0 clock; auto-roll is instant", () => {

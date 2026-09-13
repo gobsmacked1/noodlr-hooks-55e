@@ -24,6 +24,7 @@
 // write those. Formulae are resolved against the source before the copy is written, so an ally
 // gets the Paladin's Charisma, never their own.
 
+import { changeTypeOf, typedChange } from "../capability/timed";
 import { GENERAL_SETTINGS, MODULE_ID, debug, log, warn } from "../constants";
 import { centerOf, measureBetween } from "../core/positioning";
 import { isAurasEnabled } from "../settings";
@@ -76,7 +77,7 @@ interface Desired {
   source: AuraSource;
   sourceTokenId: string;
   sourceName: string;
-  changes: Array<{ key: string; mode: number; value: string }>;
+  changes: Array<{ key: string; mode: number | string; value: string }>;
 }
 
 function ourAura(effect: any): AuraFlag | null {
@@ -239,7 +240,11 @@ function sameChanges(effect: any, changes: Desired["changes"]): boolean {
   if (have.length !== changes.length) return false;
   return changes.every((ch, i) => {
     const row = have[i];
-    return String(row?.key) === ch.key && String(row?.value) === ch.value && Number(row?.mode || 2) === ch.mode;
+    return (
+      String(row?.key) === ch.key &&
+      String(row?.value) === ch.value &&
+      changeTypeOf(row?.mode) === changeTypeOf(ch.mode)
+    );
   });
 }
 
@@ -282,7 +287,7 @@ function effectPayload(row: Desired): Record<string, unknown> {
     disabled: false,
     showIcon: AURA_SHOW_ICON_ALWAYS,
     statuses: [statusOf(row)],
-    changes: row.changes,
+    changes: row.changes.map(typedChange),
     flags: auraWriteFlags(row.sourceTokenId, row.source.id),
   };
 }
@@ -297,7 +302,7 @@ function effectRefresh(row: Desired): Record<string, unknown> {
     origin: row.source.origin,
     transfer: false,
     disabled: false,
-    changes: row.changes,
+    changes: row.changes.map(typedChange),
     ...auraPresentationPatch(statusOf(row), img),
     [`flags.${MODULE_ID}.${FLAG}`]: { sourceToken: row.sourceTokenId, sourceId: row.source.id },
   };

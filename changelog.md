@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.66
+
+**An automated NPC no longer rolls damage before the hit is known.** The Skeleton's
+Shortbow used to post damage in the same breath as the attack, so Shield never had a
+window and a miss still showed dice. Attack first; damage only after the hit is
+confirmed and reactions have answered. The Apply tray is unchanged.
+
+**Thrown weapons have no Recover chat card.** Walk within 5 feet of a pin you threw —
+or use the Token HUD — to pick up every one of yours in that reach at once. A won
+fight scoops the same circle around each character; mercy leaves the field. Out of
+combat the weapon stays in hand. NPC pins stay for HUD loot.
+
+**Active Effect change modes are written as 6.0 type strings.** Numeric `CONST.ACTIVE_EFFECT_MODES`
+on a create is a validation error in 6.0.1. Timed grants, Speed cuts, and aura copies
+now stamp `add` / `multiply` / `override` the way the system stores them.
+
 ## 0.7.65
 
 **A thrown weapon is a tile on the scene, not a creature.** v0.7.64 dropped the dagger as

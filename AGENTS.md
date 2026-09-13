@@ -3726,10 +3726,13 @@ button press.
   the same way a demanded save does, and the line stays up until auto-apply has
   had a chance so a bloody or a kill lands before legendary actions or the next
   turn. `combat.autoRollDamage` (NPC on / PC off) is who rolls without the
-  chat-card button; the clock still rolls, there is no Skip. Automated turns
-  already roll in `finishActivity` and are not asked again. Fireball
-  save-then-damage is not this pass. This clock is the demanded check (or
-  damage) that used to sit unpressed on a chat card while the fight moved on.
+  chat-card button; the clock still rolls, there is no Skip. Automated
+  attacks do **not** roll damage in `finishActivity` — that posted dice
+  on a miss and before Shield / Barbs (noticed on 6.0.1). They go through
+  `collectOwedDamage` after `settleAttack`, same as a hand-driven swing.
+  Fireball save-then-damage is not this pass. This clock is the demanded
+  check (or damage) that used to sit unpressed on a chat card while the
+  fight moved on.
 - **Advantage + Disadvantage highlights neither button (Monk vs stunned Beholder, 2026-09-02).**
   The condition layer did apply `vs:stunned`. dnd5e's `D20Roll.applyKeybindings` then cancelled it
   against `unseen target (no line of sight)` from a single centre-to-centre ray. A Large token
@@ -3751,13 +3754,15 @@ button press.
   `activity.use({configure:false})` is only the USAGE dialog: `AttackActivity#_triggerSubsequentActions`
   then calls `rollAttack` with an empty dialog config and does not await it.
   `tactics/auto-roll.ts` sets `dialog.configure = false` on `preRollAttack` / `preRollDamage` for
-  creatures we are playing, and `finishActivity` skips the subsequent call, awaits the attack, and
-  rolls damage so the turn cannot advance while the dice are still a window. A player's roll is
+  creatures we are playing, and `finishActivity` skips the subsequent call and awaits the attack.
+  Damage waits for a confirmed hit and the reaction window (`collectOwedDamage` after
+  `settleAttack`). Rolling both in `finishActivity` was the 6.0.1 NPC race. A player's roll is
   never silenced.
   **A Save activity with `damage.parts` is rolled here too** (Disintegration Ray, Fireball).
   The system leaves that button for after the save; nobody presses it on an automated turn,
   so the table saw the save and never the damage (Beholder Eye Rays, 2026-09-03). Charm Ray
-  has no parts and is skipped. Do not expand this to a player-cast Fireball sitting unpressed.
+  has no parts and is skipped. That branch is not an attack — there is no hit to confirm.
+  Do not expand this to a player-cast Fireball sitting unpressed.
 - **`if (!rollerForActor(actor))` on concentration's `preUpdateActor` is the OTHER use of a truthy
   election, and it is correct.** That line asks "is anyone elected to roll instead?" so the stock
   button can be suppressed. Flipping it to `isRollerFor` would leave the system's prompt up on every
@@ -5275,9 +5280,14 @@ or AC5e (2026-09-03): those are not a supported install.
   2026-09-11). Dropping as `npc` (v0.7.64) made a Huge token, a creature
   sheet, and a loot-randomizer prompt — and stamping the item on the
   *target* would destroy a prized weapon if that creature fled. Tile
-  create/delete is `askGm`. Recover is the chat card when adjacent, or
-  the Token HUD at the thrower's feet. GM Tile HUD ignores distance
-  (staging). Leftover `npc` loot tokens from v0.7.64 still pick up.
+  create/delete is `askGm`. There is no Recover chat card. A player
+  vacuums every pin they own within 5 ft — walk, Token HUD, or a won
+  fight (each character's own token). Euclidean from the closest
+  occupied square centre to the pin centre; a diagonal throw under
+  EXACT (~6.5–7.07 ft) is not instant. Mercy leaves them. Out of
+  combat the weapon stays in hand. NPC / unstamped pins stay for HUD
+  loot. GM Tile HUD ignores distance (staging). Leftover `npc` loot
+  tokens from v0.7.64 still pick up.
   Skip `thrownLoot` tokens in the capability collector.
   `src/system/dnd5e-thrown.ts` + `src/rules/thrown.ts`.
   `noodlrHooks.surveyThrown()`.

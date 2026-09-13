@@ -153,18 +153,19 @@ export function owedDamageSeconds(autoRoll: boolean, clockSeconds: number): numb
 }
 
 /**
- * A confirmed attack hit still needs its damage dice. Automated turns already roll
- * in `finishActivity` and must not be asked again. Graze / miss / open / a Charm Ray
- * with no parts are not this pass — nor is a Fireball's save-then-damage button.
+ * A confirmed attack hit still needs its damage dice. Automated turns used to
+ * roll those in `finishActivity` beside the attack — that skipped the hit and
+ * the reaction window. They go through this door now, same as a hand-driven
+ * swing. Graze / miss / open / a Charm Ray with no parts are not this pass —
+ * nor is a Fireball's save-then-damage button.
  */
 export function shouldCollectOwedDamage(input: {
   verdict: string;
   activityType: string;
   hasDamageParts: boolean;
   alreadyRolled: boolean;
-  automating: boolean;
 }): boolean {
-  if (input.automating || input.alreadyRolled) return false;
+  if (input.alreadyRolled) return false;
   if (input.verdict !== "hit") return false;
   if (input.activityType !== "attack") return false;
   return input.hasDamageParts;
@@ -369,14 +370,10 @@ export async function collectDemanded(
 
 /**
  * A confirmed hit still needs its damage dice. Uses the same outstanding list as a
- * demanded save, so End Turn, nextTurn, walks, and activity use all wait. Automated
- * turns already roll in `finishActivity` and are skipped.
+ * demanded save, so End Turn, nextTurn, walks, and activity use all wait. Called
+ * after the reaction window — a Shield that turns the swing aside never reaches here.
  */
-export async function collectOwedDamage(
-  message: any,
-  verdict: string,
-  opts?: { automating?: boolean },
-): Promise<void> {
+export async function collectOwedDamage(message: any, verdict: string): Promise<void> {
   const item = itemOf(message);
   const activity = activityOf(message, item);
   const parts = activity?.damage?.parts;
@@ -391,7 +388,6 @@ export async function collectOwedDamage(
       activityType: String(activity.type ?? ""),
       hasDamageParts: Array.isArray(parts) && parts.length > 0,
       alreadyRolled: usageAlreadyHasDamage(usageId, String(message?.id ?? "")),
-      automating: Boolean(opts?.automating),
     })
   ) {
     return;

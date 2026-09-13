@@ -5,12 +5,18 @@ import {
   THROWN_STOCK,
   hasReturningProperty,
   hasThrownProperty,
+  inHandQuantity,
   isReturningWeapon,
   pinSizePx,
   quantityAfterThrow,
   throwAskNeeded,
+  isPlayerThrower,
+  pinIsPlayerOwned,
   thrownLootPayload,
+  thrownStacksMatch,
+  vacuumItemsLabel,
   withinPickupReach,
+  withinVacuumReach,
 } from "../src/system/dnd5e-thrown";
 
 const DAGGER = {
@@ -84,6 +90,13 @@ test("every stock thrown weapon uses the same ask as a dagger", () => {
   }
 });
 
+test("an imported quantity of 0 is one in hand until that copy is emptied", () => {
+  assert.equal(inHandQuantity(0, false), 1);
+  assert.equal(inHandQuantity(0, true), 0);
+  assert.equal(inHandQuantity(3, false), 3);
+  assert.equal(inHandQuantity(2, true), 2);
+});
+
 test("spend only if dnd5e did not already decrement", () => {
   assert.deepEqual(quantityAfterThrow(2, 2), { next: 1, alreadySpent: false });
   assert.deepEqual(quantityAfterThrow(2, 1), { next: 1, alreadySpent: true });
@@ -97,12 +110,45 @@ test("the pin is a fraction of a square, never a creature footprint", () => {
   assert.ok(pinSizePx(100) < 100);
 });
 
-test("pickup reach is adjacent including a diagonal", () => {
+test("vacuum reach is 5 ft — a diagonal throw is not back in the thrower's hand", () => {
   const token = { x: 0, y: 0, width: 1, height: 1 };
   const beside = { x: 125, y: 25, width: 35, height: 35 };
-  const far = { x: 400, y: 400, width: 35, height: 35 };
-  assert.equal(withinPickupReach(token, beside, 100), true);
-  assert.equal(withinPickupReach(token, far, 100), false);
+  const diagonalThrow = { x: 125, y: 125, width: 35, height: 35 };
+  const twoAway = { x: 225, y: 25, width: 35, height: 35 };
+  assert.equal(withinVacuumReach(token, beside, 100, 5), true);
+  assert.equal(withinVacuumReach(token, diagonalThrow, 100, 5), false);
+  assert.equal(withinVacuumReach(token, twoAway, 100, 5), false);
+  assert.equal(withinPickupReach(token, beside, 100, 5), true);
+  assert.equal(withinPickupReach(token, diagonalThrow, 100, 5), false);
+});
+
+test("player-owned is the sheet type, never hasPlayerOwner", () => {
+  assert.equal(isPlayerThrower({ type: "character" }), true);
+  assert.equal(isPlayerThrower({ type: "npc" }), false);
+  assert.equal(pinIsPlayerOwned({ playerOwned: true }), true);
+  assert.equal(pinIsPlayerOwned({ ownerType: "character" }), true);
+  assert.equal(pinIsPlayerOwned({}), false);
+  assert.equal(pinIsPlayerOwned({ ownerType: "npc" }), false);
+});
+
+test("a returned throw stacks on the remaining copies", () => {
+  assert.equal(
+    thrownStacksMatch({ name: "Dagger", system: { identifier: "dagger" } }, { name: "Dagger", system: { identifier: "dagger" } }),
+    true,
+  );
+  assert.equal(
+    thrownStacksMatch({ name: "Dagger", type: "weapon" }, { name: "Dagger", type: "weapon" }),
+    true,
+  );
+  assert.equal(
+    thrownStacksMatch({ name: "Dagger", system: { identifier: "dagger" } }, { name: "Handaxe", system: { identifier: "handaxe" } }),
+    false,
+  );
+});
+
+test("one vacuum card lists counts without inventing plurals", () => {
+  assert.equal(vacuumItemsLabel([{ name: "Dagger", count: 2 }, { name: "Handaxe", count: 1 }]), "2 × Dagger, 1 × Handaxe");
+  assert.equal(vacuumItemsLabel([{ name: "Dagger", count: 1 }]), "1 × Dagger");
 });
 
 test("loot payload is one unequipped copy with a fresh id", () => {

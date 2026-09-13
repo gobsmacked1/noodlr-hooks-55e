@@ -148,7 +148,7 @@ function queueFlush(actor: any): void {
   flushChain.set(id, next);
 }
 
-function looksLikeVictory(combat: any): boolean {
+export function looksLikeVictory(combat: any): boolean {
   const P = systemPaths();
   let hostiles = 0;
   let standing = 0;

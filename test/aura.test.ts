@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
+import { changeTypeOf } from "../src/capability/timed";
 import {
   AURA_AA_FLAGS,
   AURA_HOST_FLAG,
@@ -20,6 +21,7 @@ import {
   hostNeedsPresentation,
   hostTransferredEffect,
   interpolateAtRefs,
+  changesAreOccupyingResidue,
   isOccupyingField,
   knownAuraOf,
   isOurAuraHost,
@@ -558,4 +560,14 @@ test("a DDB Half Speed stamp without the identifier is still not a grant", () =>
   };
   assert.equal(isOccupyingField(item), false);
   assert.equal(auraSourcesOn({ items: [item] }).length, 0);
+  assert.equal(
+    changesAreOccupyingResidue([{ key: "system.attributes.movement.walk", mode: 1, value: "0.5" }]),
+    true,
+  );
+});
+
+test("v14 change types are strings; imported numeric modes still read", () => {
+  assert.equal(changeTypeOf(2), "add");
+  assert.equal(changeTypeOf("add"), "add");
+  assert.equal(changeTypeOf(1), "multiply");
 });

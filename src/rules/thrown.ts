@@ -13,22 +13,32 @@
 // The pin is a scene Tile, not an Actor/Token. Dropping as `npc` made a Huge
 // dagger, a creature sheet, and a loot-randomizer prompt — and a Token riding
 // the target would vanish if that creature fled. Tiles stay on the scene.
-// Tile create/delete is world rights: `askGm`. Pickup writes the item on the
-// picker's own sheet, then asks the GM to delete the pin. Recover on the chat
-// card is the player path (Tiles layer is GM-oriented). Nearby Token HUD is
-// the walk-over path. Leftover `npc` loot tokens from v0.7.64 still pick up.
+// Tile create/delete is world rights: `askGm`.
+//
+// There is no Recover chat card. Hunting one button per dagger is the pace
+// failure. A player vacuums every pin they own within 5 ft — one scoop, not
+// one button. Walking onto that reach, the Token HUD, and a won fight each
+// run the same test. Mercy leaves them (the captors hold the field). Out of
+// combat there is nothing to pin for: the weapon stays in hand. NPC pins
+// stay on the scene for HUD loot. Leftover `npc` tokens from v0.7.64 still
+// pick up.
 
 import { MODULE_ID, log } from "../constants";
 import { isAttackRangeEnabled } from "../settings";
+import { looksLikeVictory } from "./ammo";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   attackModeIsThrown,
   hasReturningProperty,
   hasThrownProperty,
   isReturningWeapon,
+  isPlayerThrower,
+  pinIsPlayerOwned,
   pinSizePx,
   quantityAfterThrow,
   thrownLootPayload,
+  thrownStacksMatch,
+  vacuumItemsLabel,
   withinPickupReach,
 } from "../system/dnd5e-thrown";
 import { shouldAutomate } from "../tactics/registry";
@@ -42,6 +52,11 @@ const CLEAR_QUERY = "thrown-clear";
 const asking = new Set<string>();
 const pendingThrow = new Set<string>();
 const qtyBefore = new Map<string, { qty: number; at: number }>();
+const vacuumed = new Set<string>();
+
+function combatIdOf(combat: any): string {
+  return String(combat?.id ?? "");
+}
 
 interface DropRequest {
   item: Record<string, unknown>;
@@ -50,10 +65,15 @@ interface DropRequest {
   y: number;
   name: string;
   img: string;
+  ownerId?: string;
+  ownerUuid?: string;
+  ownerType?: string;
+  playerOwned?: boolean;
 }
 
 interface ClearRequest {
   tileId?: string;
+  tileIds?: string[];
   tokenId?: string;
   actorId?: string;
   sceneId: string;
@@ -191,8 +211,20 @@ export function registerThrown(): void {
     }
   });
 
-  const generation = Number((game as any).release?.generation) || 0;
-  Hooks.on(generation >= 13 ? "renderChatMessageHTML" : "renderChatMessage", wireRecover);
+  Hooks.on("combatStart", (combat: any) => {
+    vacuumed.delete(combatIdOf(combat));
+  });
+  Hooks.on("deleteCombat", (combat: any) => {
+    try {
+      void vacuumPlayerThrown(combat);
+    } catch (err) {
+      log("thrown: deleteCombat vacuum failed:", err);
+    }
+  });
+  Hooks.on("updateToken", (doc: any, changed: any) => {
+    if (changed?.x == null && changed?.y == null && changed?.elevation == null) return;
+    scheduleWalkVacuum(doc);
+  });
 
   Hooks.on("renderTokenHUD", (app: any, html: any) => {
     if (!isAttackRangeEnabled()) return;
@@ -202,6 +234,10 @@ export function registerThrown(): void {
     if (!root) return;
     if (isLootToken(doc)) {
       addHudPickup(root, () => void pickupLeftoverToken(doc));
+      return;
+    }
+    if (hasVacuumableNear(doc)) {
+      addHudPickup(root, () => void vacuumAround(doc, { ownerOnly: true, actor: doc.actor }));
       return;
     }
     const pin = nearestReachableTile(doc);
@@ -283,6 +319,15 @@ async function afterThrownRoll(rolls: any[], data: any): Promise<void> {
   if (!payload) return;
   const actor = item.actor;
   const emptied = await spendThrown(item, actor);
+  const playerOwned = isPlayerThrower(actor);
+
+  // Out of combat there is no fight to walk back to. The spend already
+  // happened; put the copy back so the sheet never lost it.
+  if (playerOwned && !(game as any).combat?.started) {
+    await restoreThrown(actor, item, payload, emptied);
+    log(`thrown: ${String(item.name)} stays with ${actor?.name} (no fight to pin for)`);
+    return;
+  }
 
   const target = landingSpot(activity);
   const scene = (canvas as any)?.scene;
@@ -299,6 +344,10 @@ async function afterThrownRoll(rolls: any[], data: any): Promise<void> {
     y: target.y,
     name: String(item.name ?? payload.name ?? "weapon"),
     img: String(item.img ?? payload.img ?? ""),
+    ownerId: String(actor?.id ?? ""),
+    ownerUuid: String(actor?.uuid ?? ""),
+    ownerType: String(actor?.type ?? ""),
+    playerOwned,
   };
   const result = await askGm<{ ok: boolean; tileId?: string }>(
     DROP_QUERY,
@@ -310,7 +359,7 @@ async function afterThrownRoll(rolls: any[], data: any): Promise<void> {
     await restoreThrown(actor, item, payload, emptied);
     return;
   }
-  await announceLanded(actor, request.name, target.name, result.tileId, request.sceneId, payload);
+  await announceLanded(actor, request.name, target.name);
 }
 
 async function spendThrown(item: any, actor: any): Promise<boolean> {
@@ -336,64 +385,22 @@ async function spendThrown(item: any, actor: any): Promise<boolean> {
   return false;
 }
 
-async function announceLanded(
-  actor: any,
-  name: string,
-  targetName: string | undefined,
-  tileId: string | undefined,
-  sceneId: string,
-  payload: Record<string, unknown>,
-): Promise<void> {
+async function announceLanded(actor: any, name: string, targetName: string | undefined): Promise<void> {
   const line = targetName
     ? game.i18n.format("NOODLRHOOKS.Combat.AttackRange.LandsNear", {
         name: escape(name),
         target: escape(targetName),
       })
     : game.i18n.format("NOODLRHOOKS.Combat.AttackRange.Dropped", { name: escape(name) });
-  const recover = game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.Recover");
   try {
     const ChatMessage = (globalThis as any).ChatMessage;
     await ChatMessage.create({
-      content:
-        `<p>${line}</p>` +
-        `<button type="button" data-action="noodlr-recover-thrown">${recover}</button>`,
+      content: `<p>${line}</p>`,
       speaker: speakerFor(actor, String(actor?.name ?? "")),
-      flags: {
-        [MODULE_ID]: {
-          thrownRecover: true,
-          sceneId,
-          tileId: tileId ?? "",
-          item: payload,
-        },
-      },
     });
   } catch (err) {
     log("thrown: could not announce the landing:", err);
   }
-}
-
-function wireRecover(message: any, html: unknown): void {
-  const flags = message?.flags?.[MODULE_ID];
-  if (!flags?.thrownRecover) return;
-  const root: HTMLElement | undefined =
-    html instanceof HTMLElement ? html : ((html as any)?.[0] as HTMLElement | undefined);
-  const button = root?.querySelector<HTMLButtonElement>('[data-action="noodlr-recover-thrown"]');
-  if (!button) return;
-  button.addEventListener("click", async () => {
-    button.disabled = true;
-    const ok = await recoverFromCard(flags);
-    if (!ok) button.disabled = false;
-  });
-}
-
-async function recoverFromCard(flags: any): Promise<boolean> {
-  const scene = (game as any)?.scenes?.get?.(flags?.sceneId) ?? (canvas as any)?.scene;
-  const tile = scene?.tiles?.get?.(flags?.tileId);
-  if (!tile) {
-    ui.notifications?.info(game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.AlreadyGone"));
-    return true;
-  }
-  return pickupTile(tile, { ignoreDistance: Boolean(game.user?.isGM) });
 }
 
 async function restoreThrown(
@@ -472,7 +479,16 @@ async function dropPin(request: DropRequest | undefined): Promise<{ ok: boolean;
         hidden: false,
         locked: false,
         overhead: false,
-        flags: { [MODULE_ID]: { thrownLoot: true, item: request.item } },
+        flags: {
+          [MODULE_ID]: {
+            thrownLoot: true,
+            item: request.item,
+            ownerId: request.ownerId ?? "",
+            ownerUuid: request.ownerUuid ?? "",
+            ownerType: request.ownerType ?? "",
+            playerOwned: request.playerOwned === true,
+          },
+        },
       },
     ]);
     const tile = created?.[0];
@@ -508,27 +524,66 @@ function thrownTiles(scene?: any): any[] {
   return [...tiles].filter((t: any) => t?.flags?.[MODULE_ID]?.thrownLoot);
 }
 
+function tokenBox(doc: any): { x: number; y: number; width: number; height: number } {
+  return {
+    x: Number(doc?.x),
+    y: Number(doc?.y),
+    width: Number(doc?.width),
+    height: Number(doc?.height),
+  };
+}
+
+function tileBox(tile: any): { x: number; y: number; width: number; height: number } {
+  return {
+    x: Number(tile?.x),
+    y: Number(tile?.y),
+    width: Number(tile?.width),
+    height: Number(tile?.height),
+  };
+}
+
+function gridOf(scene: any): { size: number; distance: number } {
+  return {
+    size: Number(scene?.grid?.size ?? (canvas as any)?.grid?.size) || 100,
+    distance: Number(scene?.grid?.distance ?? (canvas as any)?.grid?.distance) || 5,
+  };
+}
+
+function reachTo(token: any, tile: any, scene?: any): boolean {
+  const grid = gridOf(scene ?? token?.parent ?? (canvas as any)?.scene);
+  return withinPickupReach(tokenBox(token), tileBox(tile), grid.size, grid.distance);
+}
+
+function pinOwnedBy(flags: any, actor: any): boolean {
+  if (!pinIsPlayerOwned(flags) || !actor) return false;
+  const id = String(actor.id ?? "");
+  const uuid = String(actor.uuid ?? "");
+  return (Boolean(id) && flags.ownerId === id) || (Boolean(uuid) && flags.ownerUuid === uuid);
+}
+
+function nearbyOwnedPins(token: any, actor: any): any[] {
+  const doc = token?.document ?? token;
+  const scene = doc?.parent ?? (canvas as any)?.scene;
+  return thrownTiles(scene).filter((tile: any) => {
+    if (!reachTo(doc, tile, scene)) return false;
+    return pinOwnedBy(tile.flags?.[MODULE_ID], actor);
+  });
+}
+
+function hasVacuumableNear(token: any): boolean {
+  const doc = token?.document ?? token;
+  const actor = doc?.actor;
+  if (!isPlayerThrower(actor)) return false;
+  return nearbyOwnedPins(doc, actor).length > 0;
+}
+
 function nearestReachableTile(token: any): any | null {
   const doc = token?.document ?? token;
   const scene = doc?.parent ?? (canvas as any)?.scene;
-  const size = Number(scene?.grid?.size ?? (canvas as any)?.grid?.size) || 100;
   let best: any = null;
   let bestDist = Infinity;
   for (const tile of thrownTiles(scene)) {
-    if (
-      !withinPickupReach(
-        { x: Number(doc?.x), y: Number(doc?.y), width: Number(doc?.width), height: Number(doc?.height) },
-        {
-          x: Number(tile.x),
-          y: Number(tile.y),
-          width: Number(tile.width),
-          height: Number(tile.height),
-        },
-        size,
-      )
-    ) {
-      continue;
-    }
+    if (!reachTo(doc, tile, scene)) continue;
     const dx = Number(doc?.x) - Number(tile.x);
     const dy = Number(doc?.y) - Number(tile.y);
     const dist = dx * dx + dy * dy;
@@ -538,6 +593,128 @@ function nearestReachableTile(token: any): any | null {
     }
   }
   return best;
+}
+
+const WALK_VACUUM_MS = 400;
+const walkTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleWalkVacuum(doc: any): void {
+  if (!isPrimaryGM() || !isAttackRangeEnabled()) return;
+  const actor = doc?.actor;
+  if (!isPlayerThrower(actor)) return;
+  const id = String(doc?.id ?? "");
+  if (!id) return;
+  const prev = walkTimers.get(id);
+  if (prev) clearTimeout(prev);
+  walkTimers.set(
+    id,
+    setTimeout(() => {
+      walkTimers.delete(id);
+      void vacuumAround(doc, { ownerOnly: true, actor });
+    }, WALK_VACUUM_MS),
+  );
+}
+
+async function giveThrownTo(actor: any, payload: Record<string, unknown>): Promise<boolean> {
+  if (!actor || !payload) return false;
+  const items = [...(actor.items?.contents ?? actor.items ?? [])];
+  const match = items.find((item: any) => thrownStacksMatch(item, payload));
+  try {
+    if (match) {
+      const qty = Number(match.system?.quantity ?? 0) || 0;
+      await match.update({ "system.quantity": qty + 1 });
+      return true;
+    }
+    await actor.createEmbeddedDocuments("Item", [payload]);
+    return true;
+  } catch (err) {
+    log("thrown: could not return the weapon to the sheet:", err);
+    return false;
+  }
+}
+
+async function vacuumAround(
+  token: any,
+  opts: { ownerOnly: boolean; actor?: any },
+): Promise<number> {
+  const doc = token?.document ?? token;
+  const actor = opts.actor ?? doc?.actor ?? pickerActor();
+  if (!actor) {
+    ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.NoHands"));
+    return 0;
+  }
+  const scene = doc?.parent ?? (canvas as any)?.scene;
+  const pins = thrownTiles(scene).filter((tile: any) => {
+    if (!reachTo(doc, tile, scene)) return false;
+    if (!opts.ownerOnly) return true;
+    return pinOwnedBy(tile.flags?.[MODULE_ID], actor);
+  });
+  if (!pins.length) return 0;
+
+  const counts = new Map<string, number>();
+  const cleared: string[] = [];
+  for (const tile of pins) {
+    const payload = tile.flags?.[MODULE_ID]?.item;
+    if (!payload) continue;
+    const ok = await giveThrownTo(actor, payload);
+    if (!ok) continue;
+    const name = String(payload.name ?? "weapon");
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    cleared.push(String(tile.id));
+  }
+  if (!cleared.length) return 0;
+
+  const result = await askGm<{ ok: boolean }>(
+    CLEAR_QUERY,
+    {
+      request: {
+        tileIds: cleared,
+        sceneId: String(scene?.id ?? ""),
+      },
+    },
+    { timeout: 20_000 },
+  );
+  if (!result?.ok) log("thrown: pins were not cleared after vacuum");
+
+  const items = vacuumItemsLabel([...counts.entries()].map(([name, count]) => ({ name, count })));
+  try {
+    const ChatMessage = (globalThis as any).ChatMessage;
+    await ChatMessage.create({
+      content: `<p>${game.i18n.format("NOODLRHOOKS.Combat.AttackRange.Vacuumed", {
+        name: escape(String(actor.name ?? "someone")),
+        items: escape(items),
+      })}</p>`,
+      speaker: speakerFor(actor, String(actor.name ?? "")),
+    });
+  } catch (err) {
+    log("thrown: could not announce the vacuum:", err);
+  }
+  return cleared.length;
+}
+
+/** Player-owned pins within 5 ft of each character, after a fight the party won. */
+export async function vacuumPlayerThrown(
+  combat: any,
+  opts?: { victory?: boolean },
+): Promise<void> {
+  if (!isPrimaryGM()) return;
+  const id = combatIdOf(combat);
+  if (!id || vacuumed.has(id)) return;
+  vacuumed.add(id);
+  const victory = opts?.victory ?? looksLikeVictory(combat);
+  if (!victory || !isAttackRangeEnabled()) return;
+
+  for (const c of combat?.combatants ?? []) {
+    const actor = (c as any)?.actor;
+    if (!isPlayerThrower(actor)) continue;
+    const token = (c as any)?.token ?? actor?.getActiveTokens?.()?.[0];
+    if (!token) continue;
+    try {
+      await vacuumAround(token, { ownerOnly: true, actor });
+    } catch (err) {
+      log(`thrown: vacuum for ${String(actor?.name)} failed:`, err);
+    }
+  }
 }
 
 function pickerActor(): any | null {
@@ -576,32 +753,14 @@ async function pickupTile(
   if (!opts.ignoreDistance) {
     const from = pickerTokenDoc();
     const scene = doc.parent ?? (canvas as any)?.scene;
-    const size = Number(scene?.grid?.size ?? (canvas as any)?.grid?.size) || 100;
-    if (
-      !from ||
-      !withinPickupReach(
-        { x: Number(from.x), y: Number(from.y), width: Number(from.width), height: Number(from.height) },
-        {
-          x: Number(doc.x),
-          y: Number(doc.y),
-          width: Number(doc.width),
-          height: Number(doc.height),
-        },
-        size,
-      )
-    ) {
+    if (!from || !reachTo(from, doc, scene)) {
       ui.notifications?.warn(game.i18n.localize("NOODLRHOOKS.Combat.AttackRange.RecoverTooFar"));
       return false;
     }
   }
   const payload = doc.flags?.[MODULE_ID]?.item;
   if (!payload) return false;
-  try {
-    await picker.createEmbeddedDocuments("Item", [payload]);
-  } catch (err) {
-    log("thrown: could not add the picked-up item:", err);
-    return false;
-  }
+  if (!(await giveThrownTo(picker, payload))) return false;
   const result = await askGm<{ ok: boolean }>(
     CLEAR_QUERY,
     {
@@ -637,12 +796,7 @@ async function pickupLeftoverToken(token: any): Promise<boolean> {
   const fromActor = doc.actor?.items?.contents?.[0] ?? doc.actor?.items?.[0];
   const payload = stored ?? (fromActor ? thrownLootPayload(fromActor) : null);
   if (!payload) return false;
-  try {
-    await picker.createEmbeddedDocuments("Item", [payload]);
-  } catch (err) {
-    log("thrown: could not add the leftover item:", err);
-    return false;
-  }
+  if (!(await giveThrownTo(picker, payload))) return false;
   const result = await askGm<{ ok: boolean }>(
     CLEAR_QUERY,
     {
@@ -674,6 +828,9 @@ export async function pickupThrown(target?: any): Promise<boolean> {
   const doc = target?.document ?? target;
   if (isLootTile(doc)) return pickupTile(doc, { ignoreDistance: Boolean(game.user?.isGM) });
   if (isLootToken(doc)) return pickupLeftoverToken(doc);
+  if (isPlayerThrower(doc?.actor)) {
+    return (await vacuumAround(doc, { ownerOnly: true, actor: doc.actor })) > 0;
+  }
   const pin = nearestReachableTile(doc);
   if (pin) return pickupTile(pin, { ignoreDistance: false });
   return false;
@@ -682,9 +839,13 @@ export async function pickupThrown(target?: any): Promise<boolean> {
 async function clearPin(request: ClearRequest | undefined): Promise<{ ok: boolean }> {
   if (!request) return { ok: false };
   const scene = (game as any)?.scenes?.get?.(request.sceneId) ?? (canvas as any)?.scene;
-  if (request.tileId) {
+  const tileIds = [
+    ...(Array.isArray(request.tileIds) ? request.tileIds : []),
+    ...(request.tileId ? [request.tileId] : []),
+  ].filter((id) => id);
+  if (tileIds.length) {
     try {
-      await scene?.deleteEmbeddedDocuments?.("Tile", [request.tileId]);
+      await scene?.deleteEmbeddedDocuments?.("Tile", tileIds);
     } catch (err) {
       log("thrown: could not delete the pin:", err);
     }
@@ -716,7 +877,17 @@ export function surveyThrown(): unknown {
   const lines = [
     `module: ${MODULE_ID}`,
     `pending throws: ${pendingThrow.size}`,
-    `pins on this scene: ${pins.map((t: any) => String(t.flags?.[MODULE_ID]?.item?.name ?? "pin")).join(" | ") || "none"}`,
+    `vacuum reach: 5 ft (closest occupied square to pin centre)`,
+    `pins on this scene: ${
+      pins
+        .map((t: any) => {
+          const f = t.flags?.[MODULE_ID];
+          const name = String(f?.item?.name ?? "pin");
+          const owner = f?.playerOwned ? String(f.ownerId || "player") : "npc";
+          return `${name} (${owner})`;
+        })
+        .join(" | ") || "none"
+    }`,
     `leftover npc drops: ${leftovers.map((t: any) => String(t.name)).join(" | ") || "none"}`,
     `selected: ${String(token?.name ?? "—")}`,
   ];

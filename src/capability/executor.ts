@@ -610,13 +610,13 @@ function grantDuration(
 function speedChanges(
   effect: CapabilityRule["effect"],
   actor?: any,
-): { changes: Array<{ key: string; mode: number; value: string }> } | { error: string } {
+): { changes: Array<{ key: string; mode: number | string; value: string }> } | { error: string } {
   if (effect.costMultiplier != null) {
     return { error: "costMultiplier has no Active Effect key — refusing" };
   }
   const modes = effectModes();
   const types = movementTypes(effect.movementType);
-  const changes: Array<{ key: string; mode: number; value: string }> = [];
+  const changes: Array<{ key: string; mode: number | string; value: string }> = [];
   const setTo = asQuantity(effect.setTo);
   const amount = asQuantity(effect.amount);
   if (setTo && typeof setTo.value === "number" && Number.isFinite(setTo.value)) {

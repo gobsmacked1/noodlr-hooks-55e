@@ -61,7 +61,7 @@ import { registerReadyWatch } from "./rules/ready-events";
 import { registerWatchRelay } from "./integration/watch";
 import { registerForcedMovement, surveyForced } from "./rules/forced";
 import { surveyAttackRange } from "./rules/attack-range";
-import { pickupThrown, registerThrown, surveyThrown } from "./rules/thrown";
+import { pickupThrown, registerThrown, surveyThrown, vacuumPlayerThrown } from "./rules/thrown";
 import { registerAmmo, surveyAmmo } from "./rules/ammo";
 import { surveyFlanking } from "./rules/flanking";
 import { registerMasteries, surveyMasteries } from "./rules/masteries";
@@ -174,6 +174,7 @@ export interface NoodlrHooksApi {
   surveyThrown(): unknown;
   surveyAmmo(): unknown;
   pickupThrown(token?: unknown): Promise<boolean>;
+  vacuumThrown(combat?: unknown): Promise<void>;
   surveyFlanking(): unknown;
   surveyForced(): unknown;
   surveyMasteries(): unknown;
@@ -321,6 +322,7 @@ const api: NoodlrHooksApi = {
   /** Spent ammunition waiting to come back as half after a won fight. */
   surveyAmmo: () => surveyAmmo(),
   pickupThrown: (token) => pickupThrown(token ?? (canvas as any)?.tokens?.controlled?.[0]),
+  vacuumThrown: (combat) => vacuumPlayerThrown(combat ?? (game as any).combat),
   /** Whether the selected token and an ally flank the current target (2014 Advantage rule). */
   surveyFlanking: () => surveyFlanking(),
   /** Which push/pull rules are recognised on the selected creature, and whether the layer is live. */

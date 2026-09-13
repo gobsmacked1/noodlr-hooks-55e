@@ -18,6 +18,7 @@ import { log } from "../constants";
 import { moveAwayFrom, moveOffField, moveTo, moveToward, moveTowardPoint } from "../core/movement";
 import { centerOf, tokenDistance } from "../core/positioning";
 import { gap3d } from "./altitude";
+import { waitForOwedRolls } from "../rules/owed-roll";
 import { awaitPendingReactions } from "../rules/reaction-wait";
 import { hasHalted } from "../rules/halt-state";
 import { clearNextUse, duringAutomation } from "../rules/economy/enforce";
@@ -117,8 +118,8 @@ async function useAction(
   // Dialogs must be suppressed: nobody is watching to click them, and dnd5e will happily wait forever.
   // `configure: false` on `use()` is only the USAGE dialog. AttackActivity then fires `rollAttack`
   // with an empty dialog config (and does not await it), which is the Attack Roll window that sat
-  // in front of the Assassin's Light Crossbow. We skip that subsequent call and finish the rolls
-  // ourselves, awaited, so the turn cannot advance while the dice are still a dialog.
+  // in front of the Assassin's Light Crossbow. We skip that subsequent call and await the attack
+  // ourselves. Damage is a later step — only after the hit is confirmed and reactions resolve.
   //
   // `#placeTemplate` is a third wait: it calls `drawPreview()` and sits on a mouse click.
   // `configure: false` does not skip it. Automated area spells pass `create.measuredTemplate: false`
@@ -219,10 +220,13 @@ async function finishActivity(
   const kind = String(activity.type ?? "");
 
   if (typeof activity.rollAttack === "function") {
+    // RAW: roll the attack, confirm the hit, let Shield / Barbs / Cutting Words
+    // answer, THEN roll damage. Rolling both here posted damage on a miss and
+    // before the player could react (noticed on 6.0.1 automated NPC turns).
+    // `collectOwedDamage` is the one door after `settleAttack`.
     await activity.rollAttack(rollCfg, silent, follow);
-    if (typeof activity.rollDamage === "function" && hasParts) {
-      await activity.rollDamage({}, silent, follow);
-    }
+    await awaitPendingReactions();
+    await waitForOwedRolls();
   } else if (
     (kind === "heal" || kind === "damage" || kind === "save") &&
     typeof activity.rollDamage === "function" &&
@@ -233,7 +237,7 @@ async function finishActivity(
     // button for after the save — nobody presses it on an automated turn, so
     // the table saw the save and never the damage. Charm Ray has no parts and
     // is skipped. Auto-saves then settle the card the same way a Bite's damage
-    // card already does.
+    // card already does. This is not an attack — there is no hit to confirm.
     await activity.rollDamage({}, silent, follow);
   }
   return results;

@@ -553,8 +553,8 @@ export function isAutoDamageEnabled(subject: unknown): boolean {
  * Split by who SWINGS, not who takes the hit — the opposite of `autoDamage`. Monsters default
  * on so a GM driving them by hand is not hunting a Damage button the log already scrolled past.
  * Player characters default off: those dice are the fun part, and a timed prompt is what stops
- * the card vanishing. Timeout still rolls. Automated turns already call `rollDamage` in
- * `finishActivity` and this layer skips them.
+ * the card vanishing. Timeout still rolls. Automated attacks reach this layer after
+ * the hit is confirmed — they must not roll damage beside the attack.
  */
 export function isAutoRollDamageEnabled(attacker: unknown): boolean {
   return splitFlag(COMBAT_SETTINGS.autoRollDamage, attacker);

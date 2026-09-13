@@ -74,7 +74,7 @@ export const COMBAT_SETTINGS = {
    *
    * Split by the ATTACKER, the opposite of `autoDamage`. Monsters default on; player characters
    * default off and get a timed prompt instead — the dice are the fun part, and the card scrolls
-   * away. Timeout still rolls. Automated turns already roll in `finishActivity` and skip this.
+   * away. Timeout still rolls. Automated attack damage waits for a confirmed hit.
    */
   autoRollDamage: "combat.autoRollDamage",
   /** Whether a saving throw is joined back to the spell that demanded it and settles the damage. */

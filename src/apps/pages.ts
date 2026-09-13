@@ -442,7 +442,7 @@ const MECHANICS: Page = {
           hint:
             "dnd5e spends one piece on the attack roll and never gives any back. After a fight the " +
             "party won, a living shooter spends a minute and recovers half of what they spent " +
-            "(round down). Thrown weapons are pinned tiles, not this. Rides combat.attackRange.",
+            "(round down). Thrown weapons are pinned tiles vacuumed from 5 ft, not this. Rides combat.attackRange.",
           state: "live",
           today:
             "Half returns after a won fight if that shooter can still search. Mercy and the dead do not recover.",

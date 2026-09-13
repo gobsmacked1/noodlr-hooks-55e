@@ -76,6 +76,18 @@ export function throwAskNeeded(
 }
 
 /**
+ * DDB / imported sheets often store an equipped thrown weapon as quantity 0.
+ * dnd5e still rolls, but `rollAttack` warns the moment quantity is 0 — that
+ * check is the first line, before any hook. Treat an untouched 0 as one in
+ * hand. After that uuid has been thrown empty this combat, 0 means gone.
+ */
+export function inHandQuantity(qty: number, alreadyEmptied: boolean): number {
+  if (alreadyEmptied) return Number.isFinite(qty) && qty > 0 ? qty : 0;
+  if (!Number.isFinite(qty) || qty <= 0) return 1;
+  return qty;
+}
+
+/**
  * Quantity after one throw. dnd5e may already have decremented; we must not
  * spend a second time. If the live count is still the snapshot, we spend.
  */
@@ -99,24 +111,60 @@ export function pinSizePx(gridSize: number): number {
   return Math.min(64, Math.max(32, Math.round(size * 0.35)));
 }
 
+/** How close the vacuuming player must be, in scene units. Stock grid: one square. */
+export const VACUUM_REACH_FT = 5;
+
+function occupiedCenters(
+  token: { x: number; y: number; width: number; height: number },
+  gridSize: number,
+): Array<{ x: number; y: number }> {
+  const size = Number.isFinite(gridSize) && gridSize > 0 ? gridSize : 100;
+  const w = Math.max(1, Math.round(Number(token.width) || 1));
+  const h = Math.max(1, Math.round(Number(token.height) || 1));
+  const x0 = Number(token.x);
+  const y0 = Number(token.y);
+  if (!Number.isFinite(x0) || !Number.isFinite(y0)) return [];
+  const out: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < w; i++) {
+    for (let j = 0; j < h; j++) {
+      out.push({ x: x0 + size * i + size / 2, y: y0 + size * j + size / 2 });
+    }
+  }
+  return out;
+}
+
 /**
- * Whether a token can reach a pin. Token `width`/`height` are grid squares;
- * tile `width`/`height` are pixels. Adjacent includes a diagonal.
+ * Token to pin in scene units. Token `width`/`height` are squares; tile
+ * `width`/`height` are pixels. Closest occupied square to the pin centre,
+ * Euclidean — a diagonal adjacent under EXACT (7.07 ft) is not 5 ft.
  */
+export function withinVacuumReach(
+  token: { x: number; y: number; width: number; height: number },
+  tile: { x: number; y: number; width: number; height: number },
+  gridSize: number,
+  gridDistance = 5,
+): boolean {
+  const size = Number.isFinite(gridSize) && gridSize > 0 ? gridSize : 100;
+  const per = Number.isFinite(gridDistance) && gridDistance > 0 ? gridDistance : 5;
+  const gx = Number(tile.x) + Number(tile.width) / 2;
+  const gy = Number(tile.y) + Number(tile.height) / 2;
+  if (!Number.isFinite(gx) || !Number.isFinite(gy)) return false;
+  let best = Number.POSITIVE_INFINITY;
+  for (const c of occupiedCenters(token, size)) {
+    const feet = (Math.hypot(gx - c.x, gy - c.y) / size) * per;
+    if (feet < best) best = feet;
+  }
+  return best <= VACUUM_REACH_FT + 1e-6;
+}
+
+/** HUD and leftover pickup use the same 5 ft as the vacuum. */
 export function withinPickupReach(
   token: { x: number; y: number; width: number; height: number },
   tile: { x: number; y: number; width: number; height: number },
   gridSize: number,
+  gridDistance = 5,
 ): boolean {
-  const size = Number.isFinite(gridSize) && gridSize > 0 ? gridSize : 100;
-  const tw = Number(token.width) > 0 ? Number(token.width) : 1;
-  const th = Number(token.height) > 0 ? Number(token.height) : 1;
-  const tx = Number(token.x) + (tw * size) / 2;
-  const ty = Number(token.y) + (th * size) / 2;
-  const gx = Number(tile.x) + Number(tile.width) / 2;
-  const gy = Number(tile.y) + Number(tile.height) / 2;
-  if (![tx, ty, gx, gy].every(Number.isFinite)) return false;
-  return Math.hypot(tx - gx, ty - gy) <= size * 1.5;
+  return withinVacuumReach(token, tile, gridSize, gridDistance);
 }
 
 /** One copy of the weapon as it should land on the ground — new id, quantity 1, unequipped. */
@@ -137,4 +185,39 @@ export function thrownLootPayload(item: any): Record<string, unknown> | null {
     raw.system = { ...raw.system, quantity: 1, equipped: false };
   }
   return raw;
+}
+
+/** Player-owned thrown gear, not a goblin's spear. Sheet type, never `hasPlayerOwner`. */
+export function isPlayerThrower(actor: { type?: unknown } | null | undefined): boolean {
+  return String(actor?.type ?? "") === "character";
+}
+
+/** A pin the owner may vacuum from 5 ft. Unstamped leftovers stay — we will not guess an owner. */
+export function pinIsPlayerOwned(
+  flags: { playerOwned?: unknown; ownerType?: unknown } | null | undefined,
+): boolean {
+  if (!flags) return false;
+  if (flags.playerOwned === true) return true;
+  return String(flags.ownerType ?? "") === "character";
+}
+
+/** Same remaining stack, or a fresh copy of the one we deleted at quantity 0. */
+export function thrownStacksMatch(live: any, payload: any): boolean {
+  const liveId = String(live?.system?.identifier ?? "");
+  const payId = String(payload?.system?.identifier ?? "");
+  if (liveId && payId) return liveId === payId;
+  const liveName = String(live?.name ?? "");
+  const payName = String(payload?.name ?? "");
+  if (!liveName || liveName !== payName) return false;
+  const liveType = String(live?.type ?? "");
+  const payType = String(payload?.type ?? "");
+  return !liveType || !payType || liveType === payType;
+}
+
+/** One vacuum card, not one line per pin. `2 × Dagger` — never invent a plural. */
+export function vacuumItemsLabel(entries: Array<{ name: string; count: number }>): string {
+  return entries
+    .filter((e) => e.count > 0 && e.name)
+    .map((e) => `${e.count} × ${e.name}`)
+    .join(", ");
 }

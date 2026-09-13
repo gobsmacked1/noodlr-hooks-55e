@@ -18,7 +18,7 @@ export interface TimedEffectSpec {
   name: string;
   img?: string;
   statuses?: string[];
-  changes?: Array<{ key: string; mode: number; value: string }>;
+  changes?: Array<{ key: string; mode: number | string; value: string }>;
   /** Stable identity for refresh. Same kind + capability + rule index replaces rather than stacks. */
   key: { kind: string; capability: string; ruleIndex: number };
   /** Effect parameters the pre-roll reader needs (rollType, ability, skill). */
@@ -86,7 +86,7 @@ export async function writeTimedEffect(spec: TimedEffectSpec): Promise<any | nul
   if (existing) {
     try {
       const update: Record<string, unknown> = { disabled: false };
-      if (spec.changes) update.changes = spec.changes;
+      if (spec.changes) update.changes = spec.changes.map(typedChange);
       if (spec.duration) {
         for (const [k, v] of Object.entries(spec.duration.duration)) update[`duration.${k}`] = v;
         if (spec.duration.start) {
@@ -112,7 +112,7 @@ export async function writeTimedEffect(spec: TimedEffectSpec): Promise<any | nul
     img: spec.img ?? "icons/svg/aura.svg",
     origin: spec.origin,
     statuses: spec.statuses ?? [],
-    changes: spec.changes ?? [],
+    changes: (spec.changes ?? []).map(typedChange),
     flags: {
       [MODULE_ID]: {
         timed: { ...spec.key, params: spec.params ?? {}, event: spec.event },
@@ -161,11 +161,49 @@ export async function deleteOurTimedEffects(
   return doomed.length;
 }
 
-export function effectModes(): { add: number; multiply: number; override: number } {
-  const modes = (globalThis as any).CONST?.ACTIVE_EFFECT_MODES;
-  return {
-    add: Number(modes?.ADD) || 2,
-    multiply: Number(modes?.MULTIPLY) || 1,
-    override: Number(modes?.OVERRIDE) || 5,
-  };
+/**
+ * v14 change types are strings. Never read `CONST.ACTIVE_EFFECT_MODES` — that
+ * access logs an Error on every apply (deprecated v14, gone in v16).
+ */
+export function effectModes(): { add: "add"; multiply: "multiply"; override: "override" } {
+  return { add: "add", multiply: "multiply", override: "override" };
+}
+
+/** Legacy numeric modes (0–5) compared as literals — do not read CONST. */
+export function changeTypeOf(mode: unknown): string {
+  if (typeof mode === "string" && mode) return mode;
+  switch (Number(mode)) {
+    case 0:
+      return "custom";
+    case 1:
+      return "multiply";
+    case 2:
+      return "add";
+    case 3:
+      return "downgrade";
+    case 4:
+      return "upgrade";
+    case 5:
+      return "override";
+    default:
+      return "add";
+  }
+}
+
+export function isMultiplyChange(mode: unknown): boolean {
+  return changeTypeOf(mode) === "multiply";
+}
+
+export function isAddChange(mode: unknown): boolean {
+  return changeTypeOf(mode) === "add";
+}
+
+export function typedChange(ch: { key: string; mode?: unknown; value: string }): {
+  key: string;
+  mode: string;
+  type: string;
+  value: string;
+} {
+  const type = changeTypeOf(ch.mode);
+  return { key: ch.key, mode: type, type, value: String(ch.value ?? "") };
 }

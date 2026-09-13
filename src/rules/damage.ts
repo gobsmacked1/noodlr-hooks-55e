@@ -41,7 +41,6 @@ import { considerBarbs } from "./barbs";
 import { considerAgainstDiceMods, considerDiceMods } from "./dice-mod";
 import { considerDamageDice } from "./damage-dice";
 import { noteSpent, noteVerdict, type GateVerdict } from "./gate";
-import { isAutomating } from "./economy/enforce";
 import { collectOwedDamage } from "./owed-roll";
 import { offerSneakAttack } from "./sneak";
 import { applyCleaveCut, noteMasteryDamageDealt, peekCleaveCut } from "./masteries";
@@ -157,8 +156,10 @@ async function consider(message: any): Promise<void> {
     for (const key of keysOf(message)) windows.set(key, window);
     await window;
     // Only now, because a Shield answered inside that window moves a creature out of `hits` and the
-    // button must never open on a hit that has since been turned aside.
-    await settleAttack(message, reading);
+    // button must never open on a hit that has since been turned aside. Tracked so an automated
+    // turn's `awaitPendingReactions` also waits for owed damage to be collected — `windows` stays
+    // the reaction half only, or a damage card waiting on this would deadlock `waitForDamageLanded`.
+    await trackReaction(settleAttack(message, reading));
     return;
   }
   if (kind !== "damage" && kind !== "healing") return;
@@ -391,7 +392,7 @@ async function settleAttack(message: any, reading: HitReading): Promise<void> {
   if (reading.hits.length > 0) verdict = "hit";
   else if (reading.missed.length > 0) verdict = grazed ? "graze" : "miss";
   await noteVerdict(message, verdict);
-  await collectOwedDamage(message, verdict, { automating: isAutomating() });
+  await collectOwedDamage(message, verdict);
 
   const sneak = await offerSneakAttack(message, reading);
   if (sneak) {

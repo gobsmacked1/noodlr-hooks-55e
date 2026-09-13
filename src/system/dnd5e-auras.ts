@@ -23,7 +23,7 @@
 //            copy. Discovery refuses those items so a Half Speed AE with a radius template
 //            cannot be mistaken for Aura of Protection.
 
-import { effectModes } from "../capability/timed";
+import { changeTypeOf, effectModes, isMultiplyChange } from "../capability/timed";
 import { MODULE_ID } from "../constants";
 
 export type AuraAudience = "allies" | "enemies" | "all";
@@ -31,7 +31,7 @@ export type AuraAudience = "allies" | "enemies" | "all";
 export interface AuraChange {
   key: string;
   value: string;
-  mode: number;
+  mode: number | string;
 }
 
 export interface AuraSource {
@@ -559,7 +559,7 @@ export function auraDominates(a: number, b: number): boolean {
   return a > b;
 }
 
-export function netAuraChanges<T extends { key: string; mode: number; value: string }>(
+export function netAuraChanges<T extends { key: string; mode: number | string; value: string }>(
   changes: T[],
   ownStrength: number,
   bestStrength: number,
@@ -578,7 +578,7 @@ export function netAuraChanges<T extends { key: string; mode: number; value: str
  * `ownByIdent` is the recipient's transferred grant of that identifier (the Paladin's own +3).
  */
 export function collapseOverlappingAuras<
-  T extends { identifier: string; changes: Array<{ key: string; mode: number; value: string }> },
+  T extends { identifier: string; changes: Array<{ key: string; mode: number | string; value: string }> },
 >(rows: T[], ownByIdent: Record<string, number> = {}): T[] {
   const groups = new Map<string, T[]>();
   const unkeyed: T[] = [];
@@ -647,15 +647,13 @@ export function isOccupyingField(item: any): boolean {
  * is not this — mode and a value in (0, 1) are what make it a field residue.
  */
 export function changesAreOccupyingResidue(
-  changes: Array<{ key: string; value: string; mode?: number }>,
+  changes: Array<{ key: string; value: string; mode?: number | string }>,
 ): boolean {
   if (!changes.length) return false;
-  const mul = effectModes().multiply;
   return changes.every((ch) => {
     if (!/^system\.attributes\.movement\./.test(String(ch.key ?? ""))) return false;
-    const mode = Number(ch.mode);
+    if (isMultiplyChange(ch.mode)) return true;
     const n = Number(ch.value);
-    if (Number.isFinite(mode) && mode === mul) return true;
     return Number.isFinite(n) && n > 0 && n < 1;
   });
 }
@@ -687,13 +685,15 @@ function radiusFromActivities(item: any): string | null {
 }
 
 function changesOf(effect: any): AuraChange[] {
-  const add = effectModes().add;
   const out: AuraChange[] = [];
   for (const ch of effect?.changes ?? []) {
     const key = String(ch?.key ?? "");
     if (!key) continue;
-    const mode = Number(ch?.mode) || (String(ch?.type ?? "") === "add" ? add : add);
-    out.push({ key, value: String(ch?.value ?? ""), mode });
+    out.push({
+      key,
+      value: String(ch?.value ?? ""),
+      mode: changeTypeOf(ch?.mode ?? ch?.type),
+    });
   }
   return out;
 }
