@@ -2,12 +2,14 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  AUTO_DAMAGE_BEAT_MS,
   looksLikeDemandedRoll,
   OWED_SECONDS,
   OWED_SECONDS_MAX,
   OWED_SECONDS_MIN,
   OWED_TIMEOUT_CHOICE,
   OWED_TRANSPORT_MS,
+  autoDamageBeatMs,
   clampOwedSeconds,
   owedAdvanceBudgetMs,
   owedClockForUser,
@@ -113,6 +115,12 @@ test("manual damage never uses a 0 clock; auto-roll is instant", () => {
   assert.equal(owedDamageSeconds(false, 0), OWED_SECONDS);
   assert.equal(owedDamageSeconds(false, 30), 30);
   assert.equal(owedDamageSeconds(false, 120), 120);
+});
+
+test("auto-rolled damage waits 1.5s after a hit so the attack card can be read", () => {
+  assert.equal(AUTO_DAMAGE_BEAT_MS, 1500);
+  assert.equal(autoDamageBeatMs(true), 1500);
+  assert.equal(autoDamageBeatMs(false), 0);
 });
 
 test("owed damage holds initiative the same way a demanded save does", () => {

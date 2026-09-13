@@ -3730,6 +3730,10 @@ button press.
   attacks do **not** roll damage in `finishActivity` — that posted dice
   on a miss and before Shield / Barbs (noticed on 6.0.1). They go through
   `collectOwedDamage` after `settleAttack`, same as a hand-driven swing.
+  Auto-rolled weapon damage then waits `AUTO_DAMAGE_BEAT_MS` (1.5 s) so
+  the attack card can be read before the damage card scrolls it away —
+  after Shield / Barbs / Cutting Words, never instead of them, and never
+  on a miss. Not a prompt and not the owed clock (that stays 0).
   Fireball save-then-damage is not this pass. This clock is the demanded
   check (or damage) that used to sit unpressed on a chat card while the
   fight moved on.
@@ -3756,7 +3760,8 @@ button press.
   `tactics/auto-roll.ts` sets `dialog.configure = false` on `preRollAttack` / `preRollDamage` for
   creatures we are playing, and `finishActivity` skips the subsequent call and awaits the attack.
   Damage waits for a confirmed hit and the reaction window (`collectOwedDamage` after
-  `settleAttack`). Rolling both in `finishActivity` was the 6.0.1 NPC race. A player's roll is
+  `settleAttack`), then a 1.5 s beat before auto-rolled dice so the attack card stays
+  readable. Rolling both in `finishActivity` was the 6.0.1 NPC race. A player's roll is
   never silenced.
   **A Save activity with `damage.parts` is rolled here too** (Disintegration Ray, Fireball).
   The system leaves that button for after the save; nobody presses it on an automated turn,

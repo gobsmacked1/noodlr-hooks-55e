@@ -142,14 +142,28 @@ export function shouldPromptOwed(seconds: number): boolean {
 }
 
 /**
- * Clock for an owed damage roll. Auto-roll is instant (0). Manual never uses a 0 clock —
- * the GM's save timer is 0 so Fireball-on-goblins does not prompt, and that must not
- * silently auto-roll a player's (or a hand-driven monster's) weapon damage.
+ * Clock for an owed damage roll. Auto-roll is still a 0 *prompt* — no dialog.
+ * Manual never uses a 0 clock: the GM's save timer is 0 so Fireball-on-goblins
+ * does not prompt, and that must not silently auto-roll a player's (or a
+ * hand-driven monster's) weapon damage. The 1.5 s beat after a confirmed hit
+ * is `autoDamageBeatMs`, not this clock.
  */
 export function owedDamageSeconds(autoRoll: boolean, clockSeconds: number): number {
   if (autoRoll) return 0;
   const clock = clampOwedSeconds(clockSeconds);
   return shouldPromptOwed(clock) ? clock : OWED_SECONDS;
+}
+
+/**
+ * Pause after a confirmed hit before auto-rolled damage posts. Chat cards
+ * otherwise land in the same breath and the table loses the attack. Not a
+ * prompt — Shield / Barbs / Cutting Words have already answered. Misses,
+ * graze, and a player "Roll" dialog skip this.
+ */
+export const AUTO_DAMAGE_BEAT_MS = 1500;
+
+export function autoDamageBeatMs(autoRoll: boolean): number {
+  return autoRoll ? AUTO_DAMAGE_BEAT_MS : 0;
 }
 
 /**
@@ -346,6 +360,11 @@ export async function collectDemanded(
   try {
     const actor: any = await resolve(request.actorUuid);
     stampClock(request, actor);
+    // Line is already outstanding, so End Turn stays blocked during the beat.
+    if (request.kind === "damage" && !shouldPromptOwed(request.seconds ?? 0)) {
+      const beat = autoDamageBeatMs(true);
+      if (beat) await sleep(beat);
+    }
     if (actor && isRollerFor(actor) && !shouldPromptOwed(request.seconds ?? 0)) {
       const local = await performOwedRoll(request, { configure: false });
       if (local.ok) {

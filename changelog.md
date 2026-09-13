@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.67
+
+**Auto-rolled damage waits a beat after a confirmed hit.** The attack card used
+to be scrolled away in the same breath as the damage. Shield, Barbs, and
+Cutting Words still answer first; a miss still rolls nothing. The pause is
+1.5 seconds so the table can read the hit.
+
 ## 0.7.66
 
 **An automated NPC no longer rolls damage before the hit is known.** The Skeleton's
