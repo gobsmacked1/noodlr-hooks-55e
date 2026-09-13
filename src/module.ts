@@ -70,6 +70,7 @@ import { registerStreamlineCards } from "./rules/streamline-cards";
 import { registerDamageGate, surveyGate } from "./rules/gate";
 import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
 import { registerOwedRolls, surveyOwedRolls } from "./rules/owed-roll";
+import { registerInitiativeHold, surveyInitiativeHold } from "./rules/initiative-hold";
 import { registerTemplateTargets } from "./rules/template-targets";
 import { registerTemplateLifetime, surveyTemplates } from "./rules/template-lifetime";
 import { surveyLegendary } from "./rules/legendary";
@@ -182,6 +183,7 @@ export interface NoodlrHooksApi {
   surveyGate(): unknown;
   surveyDamageSaves(): unknown;
   surveyOwedRolls(): unknown;
+  surveyInitiativeHold(): unknown;
   surveyOffers(): unknown;
   surveyCounterspell(): unknown;
   surveyBarbs(): unknown;
@@ -337,6 +339,8 @@ const api: NoodlrHooksApi = {
   surveyDamageSaves: () => surveyDamageSaves(),
   /** Demanded saves and checks that have not been rolled yet, and whether initiative is gated. */
   surveyOwedRolls: () => surveyOwedRolls(),
+  /** Who still owes initiative, and whether their walk and activity are frozen. */
+  surveyInitiativeHold: () => surveyInitiativeHold(),
   /** Which reactions the selected creature would be offered, who gets asked, and what costs something. */
   surveyOffers: () => surveyOffers(),
   surveyCounterspell: () => surveyCounterspell(),
@@ -604,6 +608,9 @@ Hooks.once("ready", () => {
   // timeout rolls rather than skips — a skipped petrify save is a turn taken with no consequence.
   // Every client: the addressee is the owner, and a player End Turn has to be able to read the gate.
   registerOwedRolls();
+  // A player who has not rolled initiative yet must not walk or act. Every client: the veto
+  // is the player's own WASD / drag / activity, and a GM-only handler would not see it.
+  registerInitiativeHold();
   // Sneak Attack, same shape and for the same reason: the GM's client reads the hit, and the rogue's own
   // client draws the dialog and rolls `@scale.rogue.sneak-attack` against its own roll data.
   registerSneakOffers();

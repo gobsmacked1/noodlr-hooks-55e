@@ -32,6 +32,7 @@ import {
 import { SURPRISED_STATUS } from "../system/dnd5e-stealth";
 import { forgetSightings } from "../tactics/awareness";
 import { initiativeSettled } from "../tactics/hooks";
+import { beginInitiativeHold, endInitiativeHold, holdingInitiative, INITIATIVE_HOLD_MS } from "./initiative-hold";
 import {
   enabledModes,
   forgetEvasionNotices,
@@ -64,8 +65,8 @@ const POLL_MS = 6000;
  */
 const PEACE_MS = 60_000;
 
-/** How long the players are given to roll their own initiative before the fight starts without them. */
-const INITIATIVE_WAIT_MS = 60_000;
+/** How long the players are given to roll before we roll for them. Owned by `initiative-hold.ts`. */
+const INITIATIVE_WAIT_MS = INITIATIVE_HOLD_MS + 5_000;
 
 let timer: number | null = null;
 let sweeping = false;
@@ -292,34 +293,48 @@ export async function surveyPerception(): Promise<Record<string, unknown>> {
 /**
  * Hold until everyone has an initiative, or until the table has clearly stopped rolling.
  *
- * The wait is bounded because an absent player must not be able to freeze an encounter indefinitely; a
- * minute is long enough for someone to notice the tracker and short enough that nobody is left staring.
- * When it expires, the stragglers are rolled for and the fight begins — announced, because a roll made
- * on a player's behalf is something they are entitled to know about.
+ * The wait is bounded because an absent player must not be able to freeze an encounter indefinitely.
+ * Thirty seconds is long enough to notice the tracker; after that the hold rolls the remaining dice
+ * (announced — a roll made on a player's behalf is something they are entitled to know about). This
+ * loop is five seconds longer than that clock so an in-flight `rollAll` can finish, and it only
+ * rolls itself if the hold flag never landed.
  *
  * Returns false when the encounter went away while we waited, in which case there is nothing to start.
  */
 async function waitForInitiative(combat: any): Promise<boolean> {
+  await beginInitiativeHold(combat);
   const deadline = Date.now() + INITIATIVE_WAIT_MS;
   while (Date.now() < deadline) {
     if (!combat?.id || !(game.combats as any)?.get?.(combat.id)) return false;
-    if (initiativeSettled(combat)) return true;
+    if (initiativeSettled(combat)) {
+      await endInitiativeHold(combat);
+      return true;
+    }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   if (!combat?.id || !(game.combats as any)?.get?.(combat.id)) return false;
-  if (initiativeSettled(combat)) return true;
+  if (initiativeSettled(combat)) {
+    await endInitiativeHold(combat);
+    return true;
+  }
 
-  log("perception: nobody rolled in time; rolling the stragglers so the fight can start");
-  const ChatMessage = (globalThis as any).ChatMessage;
-  await ChatMessage.create({
-    content: `<p><em>${game.i18n.localize("NOODLRHOOKS.Combat.AutoEngage.RolledFor")}</em></p>`,
-    speaker: narrator(),
-  });
+  // The hold rolls at 30 s. Do not rollAll again while its flag is still up — that is
+  // an in-flight roll, and a second one races the first. Only a hold that never stamped
+  // is ours to finish.
+  if (holdingInitiative(combat)) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (initiativeSettled(combat)) {
+      await endInitiativeHold(combat);
+      return true;
+    }
+  }
+  log("perception: initiative hold expired without a full roll; trying once more");
   try {
     await combat.rollAll();
   } catch (err) {
     log("could not roll the remaining initiatives:", err);
   }
+  await endInitiativeHold(combat);
   return true;
 }
 
@@ -445,9 +460,9 @@ function watchForCasualties(): void {
       // Perception was never involved — an arrow out of the dark does not need to be seen to start a
       // fight, which is exactly why this path exists separately from the sweep.
       if (!combat?.started) {
-        // The same guard the poll uses, and for a sharper reason here: `engage` holds for up to a minute
-        // waiting on initiative, so without it a second creature taking damage during that wait would
-        // start a second Combat on the same scene.
+        // The same guard the poll uses, and for a sharper reason here: `engage` holds for up to
+        // thirty seconds waiting on initiative, so without it a second creature taking damage
+        // during that wait would start a second Combat on the same scene.
         if (sweeping) return;
         sweeping = true;
         void engage(token, nearestPlayer(token), `${token.name} was attacked`).finally(() => {
@@ -606,9 +621,9 @@ async function engage(spotter: any, target: any, why?: string): Promise<void> {
     // creature after it has rolled would be decoration.
     await applySurprise(joining);
 
-    // NPCs only. Rolling a player's initiative for them takes away the one die roll they expect to make
-    // at the start of a fight, and it is not the work the GM asked to be relieved of — they asked not to
-    // have to roll for a dozen monsters and press "begin". The players' own buttons are waiting for them.
+    // NPCs only at this moment. Rolling a player's initiative for them takes away the one die
+    // they expect to make — until they ignore it. After 30 s `initiative-hold` rollAlls the
+    // stragglers, because an unrolled player who can still walk is circumventing turn order.
     await combat.rollNPC();
 
     const ChatMessage = (globalThis as any).ChatMessage;

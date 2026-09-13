@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.68
+
+**A player who has not rolled initiative cannot walk or act.** Spotting used to
+leave WASD, dragging, and activity use live until they pressed the die — a way
+around turn order. Those stay frozen until they have a number. After 30 seconds
+the remaining initiatives are rolled for them so the table is never stuck. The
+GM can still stage tokens during the wait.
+
 ## 0.7.67
 
 **Auto-rolled damage waits a beat after a confirmed hit.** The attack card used

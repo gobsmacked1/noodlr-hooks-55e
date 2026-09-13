@@ -1934,7 +1934,11 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     `combat.rollNPC()`, `combat.startCombat()`. dnd5e overrides `rollAll`/`rollNPC`/`rollInitiative`, so
     core's methods already apply the system's initiative configuration — never pass a formula.
     `rollNPC` not `rollAll` on purpose: rolling a player's initiative for them takes away the one roll
-    they expect to make, and it is not the work the GM asked to be relieved of.
+    they expect to make, and it is not the work the GM asked to be relieved of. **The authorized
+    exception is the 30 s initiative hold** (`src/rules/initiative-hold.ts`): a player who has not
+    rolled cannot WASD, drag, or use an activity, and if they still have not rolled when the clock
+    expires we `rollAll()` for them. Ignoring the die used to be a way to act before anyone had an
+    order. Do not restore an unbounded wait.
     `CONFIG.specialStatusEffects.DEFEATED` (default `"dead"`) via `document.hasStatusEffect()` is the
     defeated test; disposition must be `=== HOSTILE`, never `< 0`, because SECRET is −2 and is GM
     bookkeeping. Fires vetoable `noodlrPreCombatInitiated` and `noodlrCombatInitiated` hooks.
@@ -2054,13 +2058,18 @@ edits closed without saving are lost. Same trade `noodlr` makes.
     monsters and calling `startCombat()` in the same breath put a monster at turn zero of a provisional
     order and automation played the whole round: the player was unconscious before ever rolling. Two
     independent guards now, and both are wanted. `perception.ts` posts the "roll for initiative" call,
-    then holds up to `INITIATIVE_WAIT_MS` (60 s, polled once a second) for `initiativeSettled()` before
-    `startCombat()`; on expiry it `rollAll()`s the stragglers and says so in chat, because an absent
-    player must not be able to freeze an encounter. `hooks.ts` `takeTurn()` independently refuses to play
-    any turn while a non-defeated combatant has no initiative, which also covers a combat the GM began by
-    hand, and picks the fight back up from an `updateCombatant` hook the moment the last straggler rolls
-    (guarded by a `combat:round:combatant` token so the two entry points cannot both play the same turn).
-    Defeated combatants are excluded from the check so a corpse cannot deadlock the fight.
+    then `src/rules/initiative-hold.ts` stamps a combat flag and holds 30 s for
+    `initiativeSettled()` before `startCombat()`. A player who has not rolled cannot
+    WASD, drag, or use an activity — Foundry still accepted all three during the old
+    wait, which is how turn order was circumvented by ignoring the die. On expiry the
+    hold `rollAll()`s the stragglers and says so in chat (`INITIATIVE_HOLD_TIMEOUT_CHOICE`
+    is `"roll"`, never skip). `hooks.ts` `takeTurn()` independently refuses to play any
+    turn while a non-defeated combatant has no initiative, which also covers a combat
+    the GM began by hand, and picks the fight back up from an `updateCombatant` hook
+    the moment the last straggler rolls (guarded by a `combat:round:combatant` token so
+    the two entry points cannot both play the same turn). Defeated combatants are
+    excluded from the check so a corpse cannot deadlock the fight. The GM is exempt
+    from the freeze (staging is not the hole). `noodlrHooks.surveyInitiativeHold()`.
   - **Movement is not just walking (2026-08-04).** `combat/auto/locomotion.ts` reads every mode on the
     sheet and is the only place allowed to decide which one a creature uses. Two rules encoded there,
     both deliberate: flight wins over walking when it is at least as fast (equal used to walk — an
@@ -2179,7 +2188,7 @@ edits closed without saving are lost. Same trade `noodlr` makes.
  decides who is surprised. We do, using the literal test (a joining hostile that cannot perceive one
  party member), applied before `rollNPC()` since it modifies the roll. Players are never marked —
  perception is one-way by design, so we have no honest basis for it.
- - The damage-starts-a-fight path shares the sweep's `sweeping` guard: `engage()` holds for up to 60 s
+ - The damage-starts-a-fight path shares the sweep's `sweeping` guard: `engage()` holds for up to 30 s
  waiting on initiative, so without it a second casualty during that wait creates a second Combat.
 
 - **Nobody counts actions, so we do (v0.4.38, 2026-08-05).** Verified in dnd5e 5.3.3 source, not assumed:
@@ -3737,6 +3746,15 @@ button press.
   Fireball save-then-damage is not this pass. This clock is the demanded
   check (or damage) that used to sit unpressed on a chat card while the
   fight moved on.
+- **Unrolled initiative is a sibling hold, not an owed line (2026-09-12).** A player
+  spotted into combat could WASD, drag, and use an activity until they pressed their
+  own initiative die — the same circumvention owed-roll exists to stop, on a different
+  resource. `src/rules/initiative-hold.ts` stamps `flags.<ns>.initiativeHold` on the
+  Combat, freezes that token's player-driven walk and activity, and `rollAll()`s at
+  30 s (`INITIATIVE_HOLD_TIMEOUT_CHOICE` is `"roll"`). Do not fold it into
+  `owed-roll.ts`: there is no owner query and no dialog, only a missing number on
+  the tracker. The GM is exempt (staging is not the hole). The clock arms only on
+  the primary GM; every client reads the flag. `noodlrHooks.surveyInitiativeHold()`.
 - **Advantage + Disadvantage highlights neither button (Monk vs stunned Beholder, 2026-09-02).**
   The condition layer did apply `vs:stunned`. dnd5e's `D20Roll.applyKeybindings` then cancelled it
   against `unseen target (no line of sight)` from a single centre-to-centre ray. A Large token
