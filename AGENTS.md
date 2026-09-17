@@ -114,11 +114,11 @@ first load, reading through `game.settings.storage` because the old keys are no 
 
 ## dnd5e 6.0.1 is the floor (2026-09-11; one-version, 2026-09-16)
 
-`module.json` dnd5e minimum is **6.0.1**. The research corpus is **6.0.2**
-(`_research/dnd5e` on `release-6.0.2`). dnd5e is treated as a core, mature
+`module.json` dnd5e minimum is **6.0.1**. The research corpus is **6.0.3**
+(`_research/dnd5e` on `release-6.0.3`). dnd5e is treated as a core, mature
 dependency: **one live system version, one Noodlr that supports it.** Do not
 branch readers, keep versioned worktrees, or cut a parallel release so an
-operator can linger on 5.3.3 / 6.0.0 / 6.0.1. A host that stays behind stays
+operator can linger on 5.3.3 / 6.0.0 / 6.0.1 / 6.0.2. A host that stays behind stays
 on whichever Noodlr already supported that system. Do not add a 5.3.3
 chat-card fallback. Supporting two system versions in one module is the
 complexity this repo already refused for a second game system. 6.0 typed ChatMessage models: **new messages do not write `flags.dnd5e`.** World migrate
@@ -233,6 +233,39 @@ tooltip are sheet / stock-card only.
 | [#7466](https://github.com/foundryvtt/dnd5e/issues/7466) | NPC embed i18n `Immmunity` → `Immunity` | Display only |
 | (no issue) | Adventure import wraps TokenDelta condition `system` in `_replace` (core #14373) | Their migrate. We already optional-chain `effect.statuses` |
 | (no issue) | `data.statuses?.[0]` on AE condition migrate | Same as #7439, one file over |
+
+### 6.0.3 (2026-09-17) — seven commits, no schema change
+
+[release-6.0.3](https://github.com/foundryvtt/dnd5e/releases/tag/release-6.0.3) (`63e3769`) is a
+patch on 6.0.2 (`c9f6f2d`). Corpus: `_research/dnd5e` is detached on `release-6.0.3`.
+Compare is 9 files, +35/−7. The 6.0.1 chat-card table above is still the live schema.
+Foundry floor stays `14.367`. Do not `recompileWorld` for this. Do not bump our
+`module.json` dnd5e minimum until a live 6.0.3 table has been seen.
+
+**Nothing in this patch requires a hooks change.** The one load-bearing line is a
+system bugfix we already wanted: 6.0.2's `ActiveEffect5e._preCreate` stamped
+`duration.expiry: "turnStart"` on any in-combat create that had no expiry and
+`units !== "turns"`. Dead, Hide, Dodge, aura copies, riding badges, and a
+compiled `apply_status` with no duration are all duration-less
+(`{ value: null, units: "seconds", expiry: null }`). On 6.0.2 they expired the
+next turn. 6.0.3 adds `Number.isFinite(value)` so only a finite-duration effect
+gets that default. Do **not** add an expiry to those payloads to "fix" 6.0.2 —
+that is the 6.0.2 bug, and inventing an expiry would expire them on 6.0.3 too.
+Timed grants already write expiry. Knockout creates Unconscious duration-less
+and then `stampKnockoutHour` writes `{ value: 1, units: "hours" }` with no
+expiry (`duration.ts` clock units leave `expiry` unset). `_preUpdate` does not
+add `turnStart`, so the hour stamp stays wall-clock on 6.0.3. A leftover
+`expiry: "turnStart"` from a 6.0.2 create is already spent or about to be;
+new creates after the upgrade are clean.
+
+| Issue | What they changed | Us |
+| --- | --- | --- |
+| [#7482](https://github.com/foundryvtt/dnd5e/issues/7482) / [#7484](https://github.com/foundryvtt/dnd5e/issues/7484) | Duration-less AEs no longer get a default `expiry: "turnStart"` on in-combat create | We benefit. Aura copies, riding badges, Hide/Dodge/Dead via `toggleStatusEffect`, `apply_status` without duration — all stay. Timed grants already set expiry. Do not add one |
+| [#7475](https://github.com/foundryvtt/dnd5e/issues/7475) | `D20RollModificationField.initialize(value ?? {})` so `system.rolls.attack.*` AEs apply when parent roll data is `{}` | We never write `system.rolls.attack.*` (`grants.ts` is timed AEs + `preRollAttack`). Their AE-advantage path is now less silent. No change |
+| [#7480](https://github.com/foundryvtt/dnd5e/issues/7480) | Enchanted container sheet `_filterChildren` calls `super` for non-`items` collections so the Effects tab filters | Sheet UI only |
+| [#7474](https://github.com/foundryvtt/dnd5e/issues/7474) | `simplifyBonus` catch now logs `err` instead of an undefined `error` | Their console. We do not call it |
+| (no issue) | ActorDelta migrate drops child updates the delta does not already `manages`, so unlinked tokens inherit the base actor's migrated items/effects | Their `migrateWorld`. Watch only if a table reports an unlinked token "reverting" after the 6.0.3 migrate — that is the intended inherit |
+| (no issue) | Welcome Dialog tiles for Arcana Unleashed and Deadfall | Marketing. No code |
 
 ## THE SECOND PIVOT (2026-08-09) — the runtime capability compiler
 
@@ -3879,6 +3912,32 @@ button press.
   automated turn skips the wipe (`isAutomating`) and writes the catch list *after* it
   places the area — `adoptTemplateCatch` is that second pass. Pinned by
   `test/template-targets.test.ts`.
+- **An instant self emanation is not a remote template (Hadar, 2026-09-17).** 6.0 maps
+  `target.template.type: "radius"` onto an emanation Region the player can attach
+  anywhere (`TemplatePlacement.fromActivity` → `canvas.regions.placeRegions` with
+  `attachToToken`). Arms of Hadar / Thunderclap / Word of Radiance are a 10-ft
+  (or 5-ft) Emanation from the caster that is gone the same instant. The leftover
+  wipe emptied `system.targets`, `fileUsage` then waited for a template, and the
+  player dropped Hadar on a remote square. `isInstantSelfEmanation` is instant +
+  self-range + radius/emanation/sphere; `suppressSelfEmanationPlacement` turns
+  off `usage.create.measuredTemplate`; `applySelfEmanationCatch` stamps whoever
+  `tokenDistance` puts inside, excluding the caster. Spirit Guardians is a
+  lasting field and still waits. Cubes and cones need a facing even from Self.
+  Witch Bolt is a pointed creature and is not this. `noodlrHooks.surveyTemplates()`
+  is lifetime; the catch is on the usage card.
+- **T is the Target *tool*, not "target this token" (Witch Bolt, 2026-09-17).**
+  Foundry binds T to `core.target` (toggle the Target tool). Argon's picker
+  clicks that tool on and shows `0/1 Targets`. Pressing T then turns the tool
+  *off*, so further clicks select. A player can only select a token they own,
+  which is how Witch Bolt looked like it could only target the caster. Live
+  `setTarget` on the Dire Wolf still worked; the leftover wipe is not the cause
+  (`placesTemplate` is false). `rules/target-pick.ts`: when the Target tool is
+  already on, T on a hovered token `setTarget`s and does not toggle the tool
+  off; opening the tool drops a leftover self-only target (controlled tokens
+  only — Healing Word on another owned PC stays); `preUseActivity` refuses a
+  pointed creature activity whose only live target is still the caster. Witch
+  Bolt's later Ongoing Damage activity overrides the target block and names
+  nobody, so it is not refused. `noodlrHooks.surveyTargetPick()`.
 - **A Cast wrapper has no template of its own (Archmage, 2026-08-20).** Spellcasting →
   Lightning Bolt is `type: "cast"`; `CastActivity.use` forwards to the cached spell and
   *that* activity is what `#placeTemplate` reads. `placesTemplate` follows the link.
@@ -5072,6 +5131,12 @@ Recorded because they will be reported again.
     `preMoveToken` handlers are not implicated**: every path in `economy/speed.ts` gates on
     `movement.method` being `dragging` or `keyboard`, so an API move never reaches any of them.
   - The remedy for a GM is a clear destination square, or Movement Automation set to Difficulty Only.
+  - **The spend is ours to undo when it never lands (2026-09-17).** TeleportActivity consumes in
+    `use()`, then `_triggerSubsequentActions` is an explicit TODO, and `planTeleport` only runs if a
+    token is already controlled — otherwise a warning and a spent slot. `rules/teleport.ts` injects
+    the caster on `dnd5e.preTeleport` (replacing a leftover multi-select), auto-`planTeleport`s after
+    a self-range use, and refunds the consumed deltas plus the economy slot when `_source` did not
+    move. `move() === true` is not a landing. Automated turns skip this. `noodlrHooks.surveyTeleport()`.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —

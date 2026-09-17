@@ -1,7 +1,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { placesTemplate, stripUsageTargets, forgetLeftoverTargets } from "../src/rules/template-targets";
+import {
+  forgetLeftoverTargets,
+  isInstantSelfEmanation,
+  placesTemplate,
+  stripUsageTargets,
+  waitsForTemplate,
+} from "../src/rules/template-targets";
 
 const fireball = {
   name: "Fireball",
@@ -109,4 +115,79 @@ test("forgetLeftoverTargets rewrites a Fireball card and leaves Hold Person alon
   assert.deepEqual(fireballCard.data.flags.dnd5e.targets, []);
   assert.equal(forgetLeftoverTargets(holdPerson, holdCard), false);
   assert.equal(holdCard.data.flags.dnd5e.targets[0].name, "Assassin");
+});
+
+const hadar = {
+  name: "Arms of Hadar",
+  type: "save",
+  range: { units: "self", override: false },
+  duration: { units: "inst", override: false },
+  target: { template: { type: "radius", size: 10 }, override: false },
+  item: {
+    name: "Arms of Hadar",
+    system: {
+      range: { units: "self" },
+      duration: { units: "inst" },
+      target: { template: { type: "radius", size: 10 } },
+    },
+  },
+};
+
+const spiritGuardians = {
+  name: "Spirit Guardians",
+  type: "save",
+  range: { units: "self", override: false },
+  duration: { units: "minute", value: 10, concentration: true, override: false },
+  target: { template: { type: "radius", size: 15 }, override: false },
+  item: {
+    system: {
+      range: { units: "self" },
+      duration: { units: "minute", value: 10, concentration: true },
+      target: { template: { type: "radius", size: 15 } },
+    },
+  },
+};
+
+const thunderclap = {
+  name: "Thunderclap",
+  type: "save",
+  range: { units: "self", override: false },
+  duration: { units: "inst", override: false },
+  target: { template: { type: "radius", size: 5 }, override: false },
+  item: {
+    system: {
+      range: { units: "self" },
+      duration: { units: "inst" },
+      target: { template: { type: "radius", size: 5 } },
+    },
+  },
+};
+
+test("Arms of Hadar and Thunderclap are instant self emanations", () => {
+  assert.equal(isInstantSelfEmanation(hadar), true);
+  assert.equal(isInstantSelfEmanation(thunderclap), true);
+  assert.equal(waitsForTemplate(hadar), false);
+  assert.equal(placesTemplate(hadar), true);
+});
+
+test("Spirit Guardians is a lasting field and still waits for placement", () => {
+  assert.equal(isInstantSelfEmanation(spiritGuardians), false);
+  assert.equal(waitsForTemplate(spiritGuardians), true);
+});
+
+test("Witch Bolt is a pointed creature, not an emanation", () => {
+  assert.equal(
+    isInstantSelfEmanation({
+      type: "attack",
+      range: { units: "ft", value: 60, override: false },
+      target: { affects: { type: "creature", count: 1 }, template: { type: "" }, override: false },
+      item: {
+        system: {
+          range: { units: "ft", value: 60 },
+          target: { affects: { type: "creature", count: 1 }, template: { type: "" } },
+        },
+      },
+    }),
+    false,
+  );
 });

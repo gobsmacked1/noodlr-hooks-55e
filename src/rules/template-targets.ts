@@ -15,6 +15,7 @@
 
 import { log } from "../constants";
 import { isDnd5e } from "../system/dnd5e-rewards";
+import { durationOf } from "../system/dnd5e-templates";
 import { isAutomating } from "./economy/enforce";
 
 /** The dnd5e area type on this activity, or inherited from its item. */
@@ -70,6 +71,66 @@ export function placesTemplate(activity: any): boolean {
   return placer !== activity && Boolean(templateSpecOf(placer).type);
 }
 
+/** radius / emanation / sphere — originates from a point, not a facing. */
+export function isEmanationTemplate(type: string): boolean {
+  const t = String(type ?? "")
+    .trim()
+    .toLowerCase();
+  return t === "radius" || t === "emanation" || t === "sphere" || t === "circle" || t === "cylinder";
+}
+
+/** Activity range when it overrides; otherwise the item. */
+export function rangeUnitsOf(activity: any): string {
+  const own = activity?.range;
+  const item = activity?.item?.system?.range ?? activity?.item?.range;
+  if (own?.override === true) return String(own.units ?? "").toLowerCase();
+  return String(own?.units || item?.units || "").toLowerCase();
+}
+
+export function rangeIsSelf(activity: any): boolean {
+  return rangeUnitsOf(activity) === "self";
+}
+
+/**
+ * Instant self-origin area (Arms of Hadar, Thunderclap, Word of Radiance).
+ *
+ * 2024: a 10-foot Emanation originating from you. 6.0 maps `radius` onto an
+ * emanation Region the player can attach anywhere, which is how Hadar was aimed
+ * at a remote square. Lasting self-radius (Spirit Guardians) is a field and
+ * still waits for placement. Cubes and cones need a facing even from Self.
+ */
+export function isInstantSelfEmanation(activity: any): boolean {
+  const placer = templateActivityOf(activity);
+  const spec = templateSpecOf(placer);
+  if (!isEmanationTemplate(spec.type) || !(spec.size > 0)) return false;
+  if (durationOf(placer).kind !== "instant") return false;
+  return rangeIsSelf(placer);
+}
+
+export function emanationSize(activity: any): number {
+  return templateSpecOf(templateActivityOf(activity)).size;
+}
+
+/** Placeable templates wait; a self emanation is already aimed at the caster. */
+export function waitsForTemplate(activity: any): boolean {
+  return placesTemplate(activity) && !isInstantSelfEmanation(activity);
+}
+
+/** Stop dnd5e opening a remote placement UI for a point-blank emanation. */
+export function suppressSelfEmanationPlacement(activity: any, usageConfig: any): boolean {
+  if (!isInstantSelfEmanation(activity)) return false;
+  if (!usageConfig || usageConfig.create === false) return false;
+  if (typeof usageConfig.create !== "object" || usageConfig.create === null) {
+    usageConfig.create = {};
+  }
+  usageConfig.create.measuredTemplate = false;
+  log(
+    `template: ${String(activity?.name ?? activity?.item?.name ?? "activity")} ` +
+      "is a self emanation — no remote placement",
+  );
+  return true;
+}
+
 /**
  * Empty the snapshot dnd5e already wrote onto the usage message.
  *
@@ -107,8 +168,9 @@ export function registerTemplateTargets(): void {
   if (!isDnd5e()) return;
   Hooks.on(
     "dnd5e.preUseActivity",
-    (activity: any, _usage: any, _dialog: any, messageConfig: any) => {
+    (activity: any, usage: any, _dialog: any, messageConfig: any) => {
       try {
+        suppressSelfEmanationPlacement(activity, usage);
         forgetLeftoverTargets(activity, messageConfig);
       } catch (err) {
         log("template: could not drop leftover targets:", err);

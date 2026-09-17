@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.70
+
+**Arms of Hadar is a 10-foot emanation from you, not a remote template.** 6.0
+lets a radius spell be attached anywhere. Instant self-range areas (Hadar,
+Thunderclap, Word of Radiance) no longer open that picker. Spirit Guardians
+still does — it is a lasting field.
+
+**A Misty Step that never lands no longer spends the slot.** If nobody is
+controlled, or Movement Automation snaps the blink back to the origin, the
+spell slot and the bonus action come back.
+
+**T targets the token under the cursor.** Foundry's T only toggles the Target
+tool, so Argon's `0/1 Targets` picker could never lock onto anyone but you.
+Hover the creature and press T. A leftover click on yourself is not a Witch
+Bolt.
+
 ## 0.7.69
 
 **One live dnd5e version.** Research is against 6.0.2. We will not keep a second

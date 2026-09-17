@@ -27,6 +27,7 @@ export function foundryShape(areaType: string): FoundryShape | null {
     case "cylinder":
     case "sphere":
     case "radius":
+    case "emanation":
       return "circle";
     case "cube":
     case "square":

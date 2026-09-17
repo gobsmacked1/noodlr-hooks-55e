@@ -72,6 +72,8 @@ import { registerSaveResolution, surveyDamageSaves } from "./rules/saves";
 import { registerOwedRolls, surveyOwedRolls } from "./rules/owed-roll";
 import { registerInitiativeHold, surveyInitiativeHold } from "./rules/initiative-hold";
 import { registerTemplateTargets } from "./rules/template-targets";
+import { registerTeleport, surveyTeleport } from "./rules/teleport";
+import { registerTargetPick, surveyTargetPick } from "./rules/target-pick";
 import { registerTemplateLifetime, surveyTemplates } from "./rules/template-lifetime";
 import { surveyLegendary } from "./rules/legendary";
 import { surveyLegendaryActions } from "./tactics/legendary-act";
@@ -219,6 +221,8 @@ export interface NoodlrHooksApi {
   surveyRepeatSaves(): unknown;
   surveyRecharge(): unknown;
   surveyTemplates(): unknown;
+  surveyTeleport(): unknown;
+  surveyTargetPick(): unknown;
   repeatSave(clause: RepeatSave): Promise<void>;
   surveyInfluence(): unknown;
   influence(opts?: { approach?: string; stance?: Stance; force?: boolean }): Promise<unknown>;
@@ -420,6 +424,10 @@ const api: NoodlrHooksApi = {
   surveyRecharge: () => surveyRecharge(),
   /** Instantaneous leftovers and broken-concentration cones still on the scene, and which are due. */
   surveyTemplates: () => surveyTemplates(),
+  /** Whether a self-range teleport (Misty Step) landed, or the slot was handed back. */
+  surveyTeleport: () => surveyTeleport(),
+  /** Last T-hover target and any leftover-self refusal on a pointed creature spell. */
+  surveyTargetPick: () => surveyTargetPick(),
   /**
    * Register a save-ends clause on every selected token, for an effect applied off a stat block.
    * `{status: "paralyzed", ability: "con", dc: 13, source: "Ghoul's Claw"}`.
@@ -542,6 +550,12 @@ Hooks.once("ready", () => {
   // Drop leftover single-targets on template spells. Same hook, never a veto, and it must
   // run on the using client — that is whose `game.user.targets` dnd5e snapshots onto the card.
   registerTemplateTargets();
+  // Self-range teleports (Misty Step) must land or the slot comes back. The system's
+  // own subsequent-action hook is a TODO; this runs on the using client.
+  registerTeleport();
+  // T targets the hovered token, and a leftover "me" is not a Witch Bolt. Player-side:
+  // the Target tool and preUseActivity both fire on whoever pressed the spell.
+  registerTargetPick();
   // Stamp on the creating client so the flag travels with the document. Delete is primary-GM
   // gated inside — a leftover Fireball arrives on every client.
   registerTemplateLifetime();

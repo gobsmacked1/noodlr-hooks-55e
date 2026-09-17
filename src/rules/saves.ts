@@ -67,7 +67,8 @@ import { fireSaveTriggers, type SaveVerdict } from "../capability/saves";
 import { bindingsFor } from "../capability/bindings";
 import { isFailContingentFlag } from "../capability/contest";
 import { deleteOurTimedEffects } from "../capability/timed";
-import { placesTemplate } from "./template-targets";
+import { applySelfEmanationCatch } from "./self-emanation";
+import { isInstantSelfEmanation, waitsForTemplate } from "./template-targets";
 import {
   bindSaveOwed,
   looksLikeDemandedRoll,
@@ -269,7 +270,13 @@ function fileUsage(message: any): Activation | null {
   // usage card is stamped before `#placeTemplate`, so auto-rolling here would Dex-save
   // a creature the caster has not even aimed at. An automated turn stamps the catch
   // list AFTER it places the area (`adoptTemplateCatch`); until then, wait.
-  if (placesTemplate(activity)) {
+  //
+  // An instant self emanation (Arms of Hadar) is already aimed at the caster. Waiting
+  // for a template that we just suppressed leaves the save with nobody forever.
+  if (isInstantSelfEmanation(activity)) {
+    applySelfEmanationCatch(message, activity);
+    noteTargets(act, message);
+  } else if (waitsForTemplate(activity)) {
     log("save resolution: waiting on the template, not leftover targets");
   } else {
     noteTargets(act, message);

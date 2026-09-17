@@ -25,7 +25,8 @@ import { clearNextUse, duringAutomation } from "../rules/economy/enforce";
 import { check, slotFor } from "../rules/economy/ledger";
 import { standUp } from "../rules/prone";
 import { declareReadied } from "../rules/ready";
-import { placesTemplate } from "../rules/template-targets";
+import { tokensInSelfEmanation } from "../rules/self-emanation";
+import { emanationSize, isInstantSelfEmanation, placesTemplate } from "../rules/template-targets";
 import { crawlAction, isProne, standCost } from "../system/dnd5e-prone";
 import { placeAimedTemplate, stampCatch } from "./place-template";
 import type { PlanOption, TurnPlan } from "./planner";
@@ -128,7 +129,9 @@ async function useAction(
   const message = {};
   const usage: Record<string, unknown> = { subsequentActions: false };
   if (opts.reactionTrigger) usage.noodlrReaction = opts.reactionTrigger;
-  if (placesTemplate(action.activity)) usage.create = { measuredTemplate: false };
+  if (placesTemplate(action.activity) || isInstantSelfEmanation(action.activity)) {
+    usage.create = { measuredTemplate: false };
+  }
 
   const attempts: Array<() => Promise<unknown>> = [];
   const activity = action.activity;
@@ -190,7 +193,11 @@ async function finishActivity(
   const results = await activity.use(usage, dialog, message);
   if (!results) return results;
 
-  if (placesTemplate(activity)) {
+  if (isInstantSelfEmanation(activity)) {
+    const caster = casterTokenOf(activity);
+    if (!caster) throw new Error("the emanation could not be aimed — the caster has no token");
+    await stampCatch(results.message, tokensInSelfEmanation(caster, emanationSize(activity)));
+  } else if (placesTemplate(activity)) {
     const aimedAt = tokenOf(target);
     const caster = casterTokenOf(activity);
     if (!aimedAt) throw new Error("the area could not be aimed — no target was nominated");
