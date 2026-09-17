@@ -1,4 +1,4 @@
-// Self-range teleports (Misty Step) must land or the spend is undone.
+// Caster-hop teleports must land or the spend is undone.
 //
 // dnd5e consumes the slot in `Activity#use` and then does not auto-plan — TeleportActivity's
 // `_triggerSubsequentActions` is an explicit TODO. `planTeleport` only runs if a token is

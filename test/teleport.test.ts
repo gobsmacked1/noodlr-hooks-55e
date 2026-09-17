@@ -7,7 +7,9 @@ import {
   originMoved,
   shouldReplaceTeleportTokens,
   teleportActivationType,
+  teleportAffects,
   teleportLanded,
+  teleportRangeUnits,
   tokenOrigin,
 } from "../src/system/dnd5e-teleport";
 
@@ -23,18 +25,88 @@ const misty = {
 
 const door = {
   type: "teleport",
-  range: { units: "ft", value: 500, override: false },
-  item: { system: { range: { units: "ft", value: 500 } } },
+  range: { units: "ft", value: 5, override: true },
+  target: { override: false, affects: {} },
+  item: {
+    system: {
+      range: { units: "ft", value: 500 },
+      target: { affects: { type: "willing", count: "2" } },
+    },
+  },
 };
 
-test("Misty Step is a self teleport; Dimension Door is not", () => {
+/** DDB: blink distance on the activity, Self on the item. */
+const ddbMisty = {
+  type: "teleport",
+  range: { units: "ft", value: 30, override: true },
+  target: { override: true, affects: { type: "self" } },
+  activation: { type: "bonus", override: true },
+  item: {
+    name: "Misty Step",
+    system: { range: { units: "self" }, activation: { type: "bonus" } },
+  },
+};
+
+/** 7th-level Teleport — leftover activity `units: self` is schema, not a hop. */
+const ritual = {
+  type: "teleport",
+  range: { units: "self", override: false },
+  target: { override: false, affects: {} },
+  item: {
+    name: "Teleport",
+    system: {
+      range: { units: "ft", value: 10 },
+      target: { affects: { type: "willing", count: "9" } },
+    },
+  },
+};
+
+const planeShift = {
+  type: "teleport",
+  range: { units: "self", override: false },
+  target: { override: false, affects: {} },
+  item: {
+    system: { range: { units: "touch" }, target: { affects: { type: "willing", count: "9" } } },
+  },
+};
+
+const treeStride = {
+  type: "teleport",
+  range: { units: "self", override: false },
+  target: { override: false, affects: {} },
+  item: {
+    system: { range: { units: "self" }, target: { affects: { type: "self" } } },
+  },
+};
+
+/** Legendary hop — 120 ft on the activity, target Self, no item range. */
+const sphinx = {
+  type: "teleport",
+  range: { units: "ft", value: 120, override: false },
+  target: { override: false, affects: { type: "self" } },
+  item: { name: "Teleport", system: { identifier: "teleport" } },
+};
+
+test("a caster hop is a hop whatever encoding it uses; a ritual is not", () => {
   assert.equal(isTeleportActivity(misty), true);
   assert.equal(isSelfTeleport(misty), true);
+  assert.equal(isSelfTeleport(ddbMisty), true);
+  assert.equal(isSelfTeleport(treeStride), true);
+  assert.equal(isSelfTeleport(sphinx), true);
   assert.equal(isSelfTeleport(door), false);
+  assert.equal(isSelfTeleport(ritual), false);
+  assert.equal(isSelfTeleport(planeShift), false);
+  assert.equal(teleportRangeUnits(ritual), "ft");
+  assert.equal(teleportRangeUnits(ddbMisty), "ft");
+  assert.equal(teleportAffects(sphinx), "self");
+  assert.equal(teleportAffects(ritual), "willing");
 });
 
 test("Misty Step's slot is the item's bonus, not the activity's action", () => {
   assert.equal(teleportActivationType(misty), "bonus");
+  assert.equal(teleportActivationType(ddbMisty), "bonus");
+  assert.equal(teleportAffects(ddbMisty), "self");
+  assert.equal(teleportAffects(door), "willing");
 });
 
 test("a blink that constrained back to the origin did not land", () => {

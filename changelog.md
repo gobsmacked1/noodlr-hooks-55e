@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.71
+
+**A caster-hop teleport that never lands no longer spends the slot — any hop,
+not only Misty Step.** Stock, 2014, and DDB encode the same blink three
+different ways. The hop is item range Self, an overridden activity range Self,
+or target Self. Leftover activity `units: self` on Teleport, Plane Shift, and
+the other destination rituals is ignored — those still use the chat Teleport
+button.
+
 ## 0.7.70
 
 **Arms of Hadar is a 10-foot emanation from you, not a remote template.** 6.0

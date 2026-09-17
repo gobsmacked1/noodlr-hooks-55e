@@ -5137,6 +5137,23 @@ Recorded because they will be reported again.
     the caster on `dnd5e.preTeleport` (replacing a leftover multi-select), auto-`planTeleport`s after
     a self-range use, and refunds the consumed deltas plus the economy slot when `_source` did not
     move. `move() === true` is not a landing. Automated turns skip this. `noodlrHooks.surveyTeleport()`.
+  - **DDB files the 30 ft on the activity, not on `teleport.value` (2026-09-17).** Stock
+    Misty Step is activity range `self` + `teleport.override: true` value 30. The live
+    imported copy is item range Self, `target.affects: self`, activity range `30 ft`
+    override, `teleport.override: false` (prepare copies the 30). `isSelfTeleport` that
+    only read activity range units never auto-planned — AA still played the mist on
+    `use()`, the token never moved, and `surveyTeleport` said nothing had settled.
+    Item range Self or `target.affects: self` is enough. Dimension Door stays out
+    (item 500 ft, willing ×2). Do not treat activity `30 ft` as "not a self hop."
+    **Leftover activity `units: self` with `override: false` is the schema default,
+    not a hop.** Stock Teleport, Plane Shift, Word of Recall, Transport via Plants
+    and Teleportation Circle all ship that leftover; the item is 10 ft / touch /
+    5 ft and the target is willing / object / space. Prefer the item unless the
+    activity overrides — same INITIAL-value trap as a bite's reach. Tree Stride
+    (item Self) and sphinx Reposition (target Self, 120 ft) are hops. Thunder
+    Step / Far Step / Vortex Warp / Arcane Gate are not `type: teleport` in 6.0.3
+    (utility or save). The auto-plan is every caster-hop TeleportActivity, not
+    Misty Step by name.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —

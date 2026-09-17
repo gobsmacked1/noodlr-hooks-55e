@@ -1,24 +1,56 @@
-// Self-range teleport activities (Misty Step), and whether a plan actually moved anyone.
+// Caster-hop TeleportActivities, and whether a plan actually moved anyone.
 //
 // dnd5e's TeleportActivity consumes the slot in `use()`, then `#planTeleport` only runs if
 // a token is already controlled. The system's own `_triggerSubsequentActions` is a TODO:
 // "Automatically plan teleport movement, but only when the spell specifically targets Self."
-// Dimension Door (a ranged point) is not this.
+// Destination / group rituals (Dimension Door, Teleport, Plane Shift, …) are not this.
+//
+// Activity `range.units` INITIAL is `"self"`. `override === false` means use the item —
+// the same trap as a bite's reach. Leftover activity `units: self` on Teleport / Plane
+// Shift / Word of Recall / Transport via Plants / Teleportation Circle is schema, not a
+// caster hop. Prefer the item unless the activity overrides. A hop is then: item range
+// Self, or an overridden activity range Self, or resolved `target.affects` Self
+// (2014 / DDB Misty Step; sphinx Reposition).
 
 export function isTeleportActivity(activity: any): boolean {
   return String(activity?.type ?? "").toLowerCase() === "teleport";
 }
 
-/** Activity range when it overrides; otherwise the item. */
+/** Activity range when it overrides; otherwise the item. Leftover `units: self` loses. */
 export function teleportRangeUnits(activity: any): string {
   const own = activity?.range;
   const item = activity?.item?.system?.range ?? activity?.item?.range;
   if (own?.override === true) return String(own.units ?? "").toLowerCase();
-  return String(own?.units || item?.units || "").toLowerCase();
+  return String(item?.units || own?.units || "").toLowerCase();
 }
 
+function itemRangeUnits(activity: any): string {
+  const item = activity?.item?.system?.range ?? activity?.item?.range;
+  return String(item?.units ?? "").toLowerCase();
+}
+
+/** Who the hop is about — activity when it overrides; otherwise the item. */
+export function teleportAffects(activity: any): string {
+  const own = activity?.target;
+  const item = activity?.item?.system?.target ?? activity?.item?.target;
+  if (own?.override === true) return String(own?.affects?.type ?? "").toLowerCase();
+  return String(item?.affects?.type || own?.affects?.type || "").toLowerCase();
+}
+
+/**
+ * The caster hops. Encoding varies; the name does not.
+ *
+ * Stock 2024 Misty Step / Tree Stride: item range Self, leftover activity `units: self`.
+ * 2014 stock and DDB Misty Step: item Self, activity range `30 ft` override, target Self.
+ * Sphinx Reposition: activity 120 ft, target Self.
+ * Teleport / Plane Shift / Word of Recall / Door / Circle keep leftover activity
+ * `units: self` with override false — that is not a hop.
+ */
 export function isSelfTeleport(activity: any): boolean {
-  return isTeleportActivity(activity) && teleportRangeUnits(activity) === "self";
+  if (!isTeleportActivity(activity)) return false;
+  if (itemRangeUnits(activity) === "self") return true;
+  if (activity?.range?.override === true && teleportRangeUnits(activity) === "self") return true;
+  return teleportAffects(activity) === "self";
 }
 
 /** Misty Step blinks the caster. A leftover multi-select must not steal the hop. */
