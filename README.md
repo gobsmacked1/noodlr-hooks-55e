@@ -58,7 +58,10 @@ Paste this manifest URL into Foundry's **Add-on Modules → Install Module**:
 https://github.com/gobsmacked1/noodlr-hooks-55e/releases/latest/download/module.json
 ```
 
-Requires Foundry v13 or later and the D&D 5e system 5.0.0 or later.
+Requires Foundry v13 or later and **D&D 5e 6.0.1** or later. One live system
+version: we research against 6.0.2 and do not keep a second reader for older
+dnd5e. A host that stays behind stays on whichever Noodlr already supported
+that system.
 
 ## Configuration
 

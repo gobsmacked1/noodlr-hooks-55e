@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.69
+
+**One live dnd5e version.** Research is against 6.0.2. We will not keep a second
+reader or cut a parallel release so an operator can linger on 5.3.3, 6.0.0, or
+6.0.1. A host that stays behind stays on whichever Noodlr already supported that
+system. The installer still requires 6.0.1 until a live 6.0.2 table has been
+seen. No world recompile for this patch.
+
 ## 0.7.68
 
 **A player who has not rolled initiative cannot walk or act.** Spotting used to

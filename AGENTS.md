@@ -112,11 +112,16 @@ Settings migrate once: `migrateLegacySettings()` copies `noodlr.combat.*` into t
 first load, reading through `game.settings.storage` because the old keys are no longer registered and
 `get` throws on an unregistered key.
 
-## dnd5e 6.0.1 is the floor (2026-09-11)
+## dnd5e 6.0.1 is the floor (2026-09-11; one-version, 2026-09-16)
 
-`module.json` dnd5e minimum is **6.0.1**. Do not add a 5.3.3 chat-card fallback. Supporting two
-system versions in one module is the complexity this repo already refused for a second game
-system. 6.0 typed ChatMessage models: **new messages do not write `flags.dnd5e`.** World migrate
+`module.json` dnd5e minimum is **6.0.1**. The research corpus is **6.0.2**
+(`_research/dnd5e` on `release-6.0.2`). dnd5e is treated as a core, mature
+dependency: **one live system version, one Noodlr that supports it.** Do not
+branch readers, keep versioned worktrees, or cut a parallel release so an
+operator can linger on 5.3.3 / 6.0.0 / 6.0.1. A host that stays behind stays
+on whichever Noodlr already supported that system. Do not add a 5.3.3
+chat-card fallback. Supporting two system versions in one module is the
+complexity this repo already refused for a second game system. 6.0 typed ChatMessage models: **new messages do not write `flags.dnd5e`.** World migrate
 copies the old flags onto `system.*` and then **deletes** them. The system does not write a shim.
 A flags-only reader goes blind on the only version we support.
 
@@ -182,9 +187,9 @@ live card fails. Do not `recompileWorld` for this.
 ### 6.0.1 (2026-09-11) — five commits, no schema change
 
 [release-6.0.1](https://github.com/foundryvtt/dnd5e/releases/tag/release-6.0.1) (`1403702`) is a
-patch on 6.0.0 (`2e913fb`). Corpus: `_research/dnd5e600` stays 6.0.0; `_research/dnd5e601` is a
-worktree on `release-6.0.1`. Compare is five files. The table above is still the live schema.
-Do not `recompileWorld` for this either.
+patch on 6.0.0 (`2e913fb`). Historical note — the 6.0.0 / 6.0.1 worktrees are gone; current
+corpus is `_research/dnd5e` at 6.0.2. Compare was five files. The table above is still the
+live schema. Do not `recompileWorld` for this either.
 
 | Issue | What they changed | Us |
 | --- | --- | --- |
@@ -193,6 +198,41 @@ Do not `recompileWorld` for this either.
 | [#7429](https://github.com/foundryvtt/dnd5e/issues/7429) | `TokenPlacement` now stamps `actorId: t.parent.id` so a non-GM owner can place a summon | Our `summonCreature` uses `getTokenDocument` + `createEmbeddedDocuments`, GM-gated. A player Summon activity now working is `createToken` as usual |
 | [#7430](https://github.com/foundryvtt/dnd5e/issues/7430) | Filter JSON editor no longer throws on a non-object | Sheet UI only |
 | [#7439](https://github.com/foundryvtt/dnd5e/issues/7439) | Token-delta migrate reads `effect.statuses?.[0]` so a missing array no longer fails world load | We already optional-chain `effect.statuses`. Their migrate, not ours |
+
+### 6.0.2 (2026-09-16) — fifteen commits, no schema change
+
+[release-6.0.2](https://github.com/foundryvtt/dnd5e/releases/tag/release-6.0.2) (`c9f6f2d`) is a
+patch on 6.0.1 (`1403702`). Corpus: `_research/dnd5e` is detached on `release-6.0.2`.
+Compare is 19 files, +162/−61. The 6.0.1 chat-card table above is still the live schema.
+Foundry floor stays `14.367`. Do not `recompileWorld` for this. Do not bump our
+`module.json` dnd5e minimum until a live 6.0.2 table has been seen.
+
+**Nothing in this patch replaces a workaround of ours.** The tempting ones go the
+wrong way: `flags.dnd5e.dependentOn` now *keeps* expired dependents until the
+parent AE is deleted (rest / combat exit / out-of-combat update) — that is
+enchantment-rider bookkeeping, not template lifetime, and MeasuredTemplate is
+not on `SystemDocumentMixin` so stamping the flag would not register. Lazy
+`actor.concentration` is already what our readers call. Falling +
+`getDependentTokens` is their loop fix; we still stand aside. `getRuleConditionData`
+is Rule-type AE evaluation we do not do. Scroll minting and the signed-constant
+tooltip are sheet / stock-card only.
+
+| Issue | What they changed | Us |
+| --- | --- | --- |
+| [#7470](https://github.com/foundryvtt/dnd5e/issues/7470) | Falling status is computed across every linked concrete token, not the one that just moved; `_onRelatedUpdate` no longer requires the viewed scene | We do not apply falling (`disableFalling` advisory). Their infinite-loop fix is theirs. Watch only if a table reports falling AE flicker on unlinked copies |
+| (no issue) | `actor.concentration` is lazy on `_lazy`, cleared in `_clearCachedValues` | Our readers (`dnd5e-concentration.ts`, `live-item.ts`, `invisibility.ts`, `template-lifetime.ts`) already go through the getter. Same cache as `classes` / `spellcastingClasses` |
+| (no issue) | Expired out-of-combat AEs with `flags.dnd5e.dependentOn` are no longer deleted immediately | Our timed grants stamp our namespace, not that flag. Aura copies and leftover Wild Shape AEs are ours to expire. No change |
+| [#7455](https://github.com/foundryvtt/dnd5e/issues/7455) | Compendium spells dropped on Inventory become scrolls via `createScrollFromCompendiumSpell`; non-compendium scrolls keep `duration.concentration` | Sheet drop path. Not a card / compiler change |
+| [#7459](https://github.com/foundryvtt/dnd5e/issues/7459) | Concentration getter lazy (same commit family as the recursion) | Covered by the lazy row |
+| [#7462](https://github.com/foundryvtt/dnd5e/issues/7462) | Tooltip breakdown lists signed constant terms instead of one summed `constant` | `streamline-cards` hides `.dice-tooltip` / `.dice-tooltip-collapser` and paints from the roll. Stock tooltip only |
+| [#7450](https://github.com/foundryvtt/dnd5e/issues/7450) | Rule-type AE conditions get `getRuleConditionData` / `sourceItem` instead of stuffing `item` onto replacement data | We do not evaluate Rule-type AE conditions |
+| [#7452](https://github.com/foundryvtt/dnd5e/issues/7452) | Primal Order Magician cantrips-known AE | One content YAML. Glossary / compiler unchanged |
+| [#7443](https://github.com/foundryvtt/dnd5e/issues/7443) | Group `rollSavingThrow` / `rollSkill` honour `message.data.flavor` | We do not request group rolls |
+| [#7442](https://github.com/foundryvtt/dnd5e/issues/7442) | Advancement update uses `_replace` instead of `==` | Sheet only |
+| [#7463](https://github.com/foundryvtt/dnd5e/issues/7463) | Enricher roll-request handler keys off `target`, not `instanceof Event` | Detached-window clicks. We do not post those enrichers |
+| [#7466](https://github.com/foundryvtt/dnd5e/issues/7466) | NPC embed i18n `Immmunity` → `Immunity` | Display only |
+| (no issue) | Adventure import wraps TokenDelta condition `system` in `_replace` (core #14373) | Their migrate. We already optional-chain `effect.statuses` |
+| (no issue) | `data.statuses?.[0]` on AE condition migrate | Same as #7439, one file over |
 
 ## THE SECOND PIVOT (2026-08-09) — the runtime capability compiler
 
@@ -1314,9 +1354,11 @@ what it remembered. That is only affordable because the sources are already on d
 
 - **The corpus lives at `C:\Project\_research\`** (outside all three workspace roots, so tools must be
   pointed at it explicitly and a plain workspace search will not find it):
-  - `dnd5e\` — dnd5e **5.3.3** system source. `module\*.mjs`, `module\config.mjs`, `lang\en.json`, and
-    crucially `packs\_source\` — the unpacked authored CONTENT, which is where the "it's only prose"
-    verdicts are actually decided. `dnd5e533\` is a duplicate of the same version; ignore it.
+  - `dnd5e\` — current dnd5e (**6.0.2**, `release-6.0.2`). `module\*.mjs`, `module\config.mjs`,
+    `lang\en.json`, and crucially `packs\_source\` — the unpacked authored CONTENT, which is
+    where the "it's only prose" verdicts are actually decided. One checkout. Do not add
+    versioned worktrees (`dnd5e533` / `dnd5e600` / `dnd5e601` / `dnd5e602` were removed
+    2026-09-16). An older system is answered by an older Noodlr, not a second tree here.
   - `fvtt13\foundryvtt\` — a full Foundry v13 install with **readable client source** under
     `resources\app\`. This is what makes claims like "`#initializeMovementActions` overwrites the cost
     function" checkable rather than plausible.
