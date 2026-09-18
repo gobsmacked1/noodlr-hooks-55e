@@ -54,8 +54,8 @@ export function isSelfTeleport(activity: any): boolean {
 }
 
 /**
- * The blink planner wants a canvas square. Say how far, in the activity's own units.
- * Empty when the distance is unreadable — the click is still a square, not a token.
+ * How far the hop may go, in the activity's own units.
+ * Empty when the distance is unreadable — the click is still a map square.
  */
 export function teleportDistanceLabel(activity: any): string {
   const n = Number(activity?.teleport?.value);
@@ -64,12 +64,68 @@ export function teleportDistanceLabel(activity: any): string {
   return `${n} ${units}`;
 }
 
-/** Player-facing click. The leftover Target tool / Witch Bolt target is not this. */
+/**
+ * Book distance for a range check. Infinity when the activity states no cap.
+ * Conversion to the scene's units happens at the click, not here.
+ */
+export function teleportMaxDistance(activity: any): number {
+  const n = Number(activity?.teleport?.value);
+  if (!Number.isFinite(n)) return Number.POSITIVE_INFINITY;
+  return n > 0 ? n : 0;
+}
+
+/** Player-facing click. Never "drag the token" — walls make that a lie. */
 export function teleportClickHint(distance: string): string {
   const reach = String(distance ?? "").trim();
   return reach
-    ? `Click an empty square within ${reach} — not a creature.`
-    : "Click an empty square on the map — not a creature.";
+    ? `Click the map where you want to appear (within ${reach}). Teleports go through walls — do not drag the token.`
+    : "Click the map where you want to appear. Teleports go through walls — do not drag the token.";
+}
+
+/** The clicked pixel becomes the top-left of that grid square. */
+export function hopSquareFromClick(click: { x: number; y: number }, gridSize: number): { x: number; y: number } {
+  const size = Number(gridSize);
+  if (!Number.isFinite(size) || size <= 0) {
+    return { x: Math.round(click.x), y: Math.round(click.y) };
+  }
+  return {
+    x: Math.floor(click.x / size) * size,
+    y: Math.floor(click.y / size) * size,
+  };
+}
+
+export function hopCenterFromCorner(
+  corner: { x: number; y: number },
+  token: { width?: number; height?: number },
+  gridSize: number,
+): { x: number; y: number } {
+  const size = Number(gridSize) || 100;
+  return {
+    x: corner.x + (size * (Number(token?.width) || 1)) / 2,
+    y: corner.y + (size * (Number(token?.height) || 1)) / 2,
+  };
+}
+
+export function hopWithinRange(distance: number, maxDistance: number): boolean {
+  if (!Number.isFinite(maxDistance)) return true;
+  if (maxDistance <= 0) return false;
+  return distance <= maxDistance + 0.01;
+}
+
+export function hopIsSameSquare(
+  origin: { x: number; y: number } | null,
+  dest: { x: number; y: number } | null,
+): boolean {
+  if (!origin || !dest) return false;
+  return origin.x === dest.x && origin.y === dest.y;
+}
+
+/** A hop click is on the board canvas, never a chat card or window. */
+export function teleportClickIsOnBoard(target: EventTarget | null, board: EventTarget | null): boolean {
+  if (!target || !board) return false;
+  if (target === board) return true;
+  const contains = (board as { contains?: (node: Node) => boolean }).contains;
+  return typeof contains === "function" && target instanceof Node && contains.call(board, target);
 }
 
 /**

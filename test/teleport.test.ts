@@ -2,6 +2,10 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  hopCenterFromCorner,
+  hopIsSameSquare,
+  hopSquareFromClick,
+  hopWithinRange,
   isSelfTeleport,
   isTeleportActivity,
   originMoved,
@@ -9,7 +13,9 @@ import {
   teleportActivationType,
   teleportAffects,
   teleportClickHint,
+  teleportClickIsOnBoard,
   teleportDistanceLabel,
+  teleportMaxDistance,
   formatTeleportTrace,
   plannedHopSummary,
   teleportLanded,
@@ -140,11 +146,26 @@ test("an empty or unreadable plan is not a landing", () => {
   assert.equal(teleportLanded(new Map([["t1", { x: 1, y: 1 }]]), { moved: true }), false);
 });
 
-test("the click hint names a square, never a creature", () => {
+test("the click hint is point-and-click, never a drag", () => {
   assert.equal(teleportDistanceLabel({ teleport: { value: 30, units: "ft" } }), "30 ft");
   assert.equal(teleportDistanceLabel({ teleport: { value: 0, units: "ft" } }), "");
-  assert.equal(teleportClickHint("30 ft"), "Click an empty square within 30 ft — not a creature.");
-  assert.equal(teleportClickHint(""), "Click an empty square on the map — not a creature.");
+  assert.equal(teleportMaxDistance({ teleport: { value: 30 } }), 30);
+  assert.equal(teleportMaxDistance({ teleport: { value: "unread" } }), Number.POSITIVE_INFINITY);
+  assert.match(teleportClickHint("30 ft"), /Click the map where you want to appear \(within 30 ft\)/);
+  assert.match(teleportClickHint("30 ft"), /do not drag the token/);
+  assert.match(teleportClickHint(""), /Click the map where you want to appear/);
+});
+
+test("a hop click snaps to the square and stays in range", () => {
+  assert.deepEqual(hopSquareFromClick({ x: 175, y: 240 }, 100), { x: 100, y: 200 });
+  assert.deepEqual(hopCenterFromCorner({ x: 100, y: 200 }, { width: 1, height: 1 }, 100), { x: 150, y: 250 });
+  assert.equal(hopWithinRange(30, 30), true);
+  assert.equal(hopWithinRange(30.005, 30), true);
+  assert.equal(hopWithinRange(31, 30), false);
+  assert.equal(hopWithinRange(90, Number.POSITIVE_INFINITY), true);
+  assert.equal(hopIsSameSquare({ x: 100, y: 200 }, { x: 100, y: 200 }), true);
+  assert.equal(hopIsSameSquare({ x: 100, y: 200 }, { x: 200, y: 200 }), false);
+  assert.equal(teleportClickIsOnBoard(null, null), false);
 });
 
 test("a hop trace is one flat line, never a nested object", () => {

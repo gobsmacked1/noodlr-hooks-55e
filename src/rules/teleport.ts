@@ -1,15 +1,21 @@
 // Caster-hop teleports must land or the spend is undone.
 //
 // dnd5e consumes the slot in `Activity#use` and then does not auto-plan — TeleportActivity's
-// `_triggerSubsequentActions` is an explicit TODO. `planTeleport` only runs if a token is
-// already controlled; otherwise it warns and returns null with the slot already gone. An
-// occupied destination under Movement Automation Full can also constrain a blink back to
-// the origin while `moved === true`. Compare `_source`, then refund.
+// `_triggerSubsequentActions` is an explicit TODO. Foundry's own `#planTeleport` then waits
+// for `token.planMovement` — a drag-the-token ruler. A hop can go through walls, so a drag
+// is the wrong capture. We take one canvas click, blink there with walls ignored, and never
+// call `planTeleport` for a self hop. Occupied dest under Movement Automation Full can still
+// constrain a blink back to the origin while `moved === true`. Compare `_source`, then refund.
 
 import { log } from "../constants";
 import { isDnd5e } from "../system/dnd5e-rewards";
+import { measureBetween } from "../core/positioning";
 import {
   formatTeleportTrace,
+  hopCenterFromCorner,
+  hopIsSameSquare,
+  hopSquareFromClick,
+  hopWithinRange,
   isSelfTeleport,
   originMoved,
   plannedDestinations,
@@ -17,8 +23,10 @@ import {
   shouldReplaceTeleportTokens,
   teleportActivationType,
   teleportClickHint,
+  teleportClickIsOnBoard,
   teleportDistanceLabel,
   teleportLanded,
+  teleportMaxDistance,
   tokenOrigin,
 } from "../system/dnd5e-teleport";
 import { speakerFor } from "../util/speaker";
@@ -29,6 +37,8 @@ let lastNote = "teleport: no self-teleport has been settled this session";
 const TRAIL_CAP = 24;
 const trail: string[] = [];
 const settling = new Set<string>();
+const lastUseResults = new WeakMap<object, any>();
+let pickActive = false;
 
 function note(line: string): void {
   lastNote = line;
@@ -92,7 +102,15 @@ function controlCaster(placeable: any): void {
   try {
     placeable.control({ releaseOthers: true });
   } catch {
-    /* selection is a courtesy so planTeleport sees a token */
+    /* selection is a courtesy so the player sees who is hopping */
+  }
+}
+
+function cancelFoundryPlanner(placeable: any): void {
+  try {
+    if (placeable?._movementPlanningContext) placeable._cancelMovementPlanning?.();
+  } catch {
+    /* a leftover drag planner from a previous hop must not steal this click */
   }
 }
 
@@ -107,20 +125,139 @@ function clearLeftoverTargets(): void {
   }
 }
 
-function promptEmptySquare(activity: any): void {
+function notify(text: string, kind: "info" | "warn" = "info"): void {
+  try {
+    (globalThis as any).ui?.notifications?.[kind]?.(text);
+  } catch {
+    /* the console line still names the click */
+  }
+}
+
+function promptClickDestination(activity: any): void {
   const distance = teleportDistanceLabel(activity);
   const i18n = (globalThis as any).game?.i18n;
   const text =
     (distance
       ? i18n?.format?.("NOODLRHOOKS.Combat.Teleport.ClickSquare", { distance })
       : i18n?.localize?.("NOODLRHOOKS.Combat.Teleport.ClickSquareAny")) || teleportClickHint(distance);
-  try {
-    (globalThis as any).ui?.notifications?.info?.(text);
-  } catch {
-    /* the console line still names the click */
-  }
+  notify(text);
   const name = String(activity?.item?.name ?? activity?.name ?? "Teleport");
   trace("awaiting-click", { name, max: distance || "unread" });
+}
+
+function boardElement(): EventTarget | null {
+  const canvas = (globalThis as any).canvas;
+  return canvas?.app?.canvas ?? canvas?.app?.view ?? (globalThis as any).document?.getElementById?.("board") ?? null;
+}
+
+function gridSize(): number {
+  return Number((globalThis as any).canvas?.grid?.size) || 100;
+}
+
+function snapHopCorner(placeable: any, click: { x: number; y: number }): { x: number; y: number } {
+  const canvas = (globalThis as any).canvas;
+  const grid = canvas?.grid;
+  let corner = hopSquareFromClick(click, gridSize());
+  try {
+    const top = typeof grid?.getTopLeftPoint === "function" ? grid.getTopLeftPoint(click) : null;
+    if (Number.isFinite(top?.x) && Number.isFinite(top?.y)) corner = { x: top.x, y: top.y };
+  } catch {
+    /* hopSquareFromClick is the fallback */
+  }
+  const doc = placeable?.document ?? placeable;
+  try {
+    const snapped = doc?.getSnappedPosition?.(corner);
+    if (Number.isFinite(snapped?.x) && Number.isFinite(snapped?.y)) return { x: snapped.x, y: snapped.y };
+  } catch {
+    /* unsnapped square is still a destination */
+  }
+  return { x: Math.round(corner.x), y: Math.round(corner.y) };
+}
+
+function clickCanvasPoint(event: PointerEvent): { x: number; y: number } | null {
+  const canvas = (globalThis as any).canvas;
+  try {
+    const pos = canvas?.canvasCoordinatesFromClient?.({ x: event.clientX, y: event.clientY });
+    if (Number.isFinite(pos?.x) && Number.isFinite(pos?.y)) return { x: pos.x, y: pos.y };
+  } catch {
+    /* no board */
+  }
+  return null;
+}
+
+function hopRangeOk(activity: any, placeable: any, dest: { x: number; y: number }): boolean {
+  const max = teleportMaxDistance(activity);
+  const origin = tokenOrigin(placeable);
+  if (!origin) return true;
+  const doc = placeable?.document ?? placeable;
+  const from = hopCenterFromCorner(origin, doc, gridSize());
+  const to = hopCenterFromCorner(dest, doc, gridSize());
+  return hopWithinRange(measureBetween(from, to), max);
+}
+
+function pickHopClick(activity: any, placeable: any): Promise<{ x: number; y: number; elevation?: number } | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value: { x: number; y: number; elevation?: number } | null) => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("pointerdown", onPointer, true);
+      window.removeEventListener("keydown", onKey, true);
+      resolve(value);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      trace("pick-cancel", { why: "escape" });
+      finish(null);
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (done) return;
+      if (!teleportClickIsOnBoard(event.target, boardElement())) return;
+      if (event.button === 2) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        trace("pick-cancel", { why: "right-click" });
+        finish(null);
+        return;
+      }
+      if (event.button !== 0) return;
+      const click = clickCanvasPoint(event);
+      if (!click) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const dest = snapHopCorner(placeable, click);
+      const origin = tokenOrigin(placeable);
+      const distance = teleportDistanceLabel(activity);
+      const i18n = (globalThis as any).game?.i18n;
+      if (hopIsSameSquare(origin, dest)) {
+        notify(
+          i18n?.localize?.("NOODLRHOOKS.Combat.Teleport.SameSquare") ||
+            "That is where you already stand. Click a different square, or press Esc to cancel.",
+          "warn",
+        );
+        trace("click-same", { dest: `${Math.round(dest.x)},${Math.round(dest.y)}` });
+        return;
+      }
+      if (!hopRangeOk(activity, placeable, dest)) {
+        notify(
+          (distance
+            ? i18n?.format?.("NOODLRHOOKS.Combat.Teleport.TooFar", { distance })
+            : i18n?.localize?.("NOODLRHOOKS.Combat.Teleport.TooFar")) ||
+            `That square is too far${distance ? ` (max ${distance})` : ""}. Click a closer spot, or press Esc to cancel.`,
+          "warn",
+        );
+        trace("click-far", { dest: `${Math.round(dest.x)},${Math.round(dest.y)}`, max: distance || "unread" });
+        return;
+      }
+      const elevation = Number(placeable?.document?.elevation ?? placeable?.elevation);
+      trace("click", { dest: `${Math.round(dest.x)},${Math.round(dest.y)}` });
+      finish(Number.isFinite(elevation) ? { ...dest, elevation } : dest);
+    };
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("keydown", onKey, true);
+  });
 }
 
 function injectCasterToken(activity: any, config: any): boolean {
@@ -254,52 +391,63 @@ async function settlePlannedHop(activity: any, results: any): Promise<void> {
 }
 
 async function finishSelfTeleport(activity: any, results: any): Promise<void> {
-  const key = String(results?.message?.id ?? "");
-  if (key) {
-    if (settling.has(key)) {
-      trace("settle-skip", { name: String(activity?.item?.name ?? "Teleport"), why: "already-settling" });
-      return;
-    }
-    settling.add(key);
+  const key = String(results?.message?.id ?? activity?.uuid ?? activity?.id ?? "hop");
+  if (settling.has(key) || pickActive) {
+    trace("settle-skip", { name: String(activity?.item?.name ?? "Teleport"), why: pickActive ? "picking" : "already-settling" });
+    return;
   }
+  settling.add(key);
+  pickActive = true;
   const placeable = placeableOf(activity);
+  cancelFoundryPlanner(placeable);
+  clearLeftoverTargets();
   controlCaster(placeable);
   const before = snapshot(placeable);
-  trace("plan-open", hopWorldFacts(activity, placeable));
+  trace("pick-open", hopWorldFacts(activity, placeable));
+  promptClickDestination(activity);
   const started = Date.now();
-  let planned: unknown = null;
+  let dest: { x: number; y: number; elevation?: number } | null = null;
   try {
-    if (typeof activity?.planTeleport === "function") {
-      planned = await activity.planTeleport();
-    } else {
-      trace("plan-abort", { why: "no-planTeleport" });
-    }
+    dest = placeable ? await pickHopClick(activity, placeable) : null;
+    if (!placeable) trace("pick-abort", { why: "no-token" });
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    trace("plan-throw", { why: reason || err?.constructor?.name || "Error" });
-    planned = null;
+    trace("pick-throw", { why: reason || err?.constructor?.name || "Error" });
+    dest = null;
+  } finally {
+    pickActive = false;
   }
-  const hop = plannedHopSummary(planned);
   const now = tokenOrigin(placeable);
-  trace("plan-done", {
-    dest: hop.dest,
-    movedFlag: hop.movedFlag,
-    rows: hop.rows,
+  trace("pick-done", {
+    dest: dest ? `${Math.round(dest.x)},${Math.round(dest.y)}` : "none",
     source: now ? `${Math.round(now.x)},${Math.round(now.y)}` : "none",
     ms: Date.now() - started,
   });
-  if (landedAfter(before, placeable, planned)) {
-    trace("landed", { name: String(activity?.item?.name ?? "Teleport"), how: "plan" });
+  if (!dest) {
+    settling.delete(key);
+    await refundTeleport(activity, results);
     return;
   }
+  const planned = [{ token: placeable, plan: { destination: dest } }];
   if (await forceLand(planned, before)) {
     const after = tokenOrigin(placeable);
-    trace("force-land", {
-      name: String(activity?.item?.name ?? "Teleport"),
-      source: after ? `${Math.round(after.x)},${Math.round(after.y)}` : "none",
-    });
+    if (landedAfter(before, placeable, planned)) {
+      trace("landed", {
+        name: String(activity?.item?.name ?? "Teleport"),
+        how: "click",
+        dest: `${Math.round(dest.x)},${Math.round(dest.y)}`,
+        source: after ? `${Math.round(after.x)},${Math.round(after.y)}` : "none",
+      });
+    } else {
+      trace("force-land", {
+        name: String(activity?.item?.name ?? "Teleport"),
+        dest: `${Math.round(dest.x)},${Math.round(dest.y)}`,
+        source: after ? `${Math.round(after.x)},${Math.round(after.y)}` : "none",
+      });
+    }
     return;
   }
+  settling.delete(key);
   await refundTeleport(activity, results);
 }
 
@@ -309,9 +457,20 @@ export function registerTeleport(): void {
     try {
       const leftover = [...((globalThis as any).game?.user?.targets ?? [])].length;
       const injected = injectCasterToken(activity, config);
-      if (isSelfTeleport(activity)) {
+      if (isSelfTeleport(activity) && !isAutomating()) {
         clearLeftoverTargets();
-        promptEmptySquare(activity);
+        cancelFoundryPlanner(placeableOf(activity));
+        trace("pre", {
+          name: String(activity?.item?.name ?? "Teleport"),
+          self: true,
+          veto: "click-not-drag",
+          injected,
+          leftover,
+          max: Number.isFinite(config?.maxDistance) ? config.maxDistance : "unread",
+        });
+        const prior = lastUseResults.get(activity);
+        if (!pickActive) void finishSelfTeleport(activity, prior ?? { message: null });
+        return false;
       }
       trace("pre", {
         name: String(activity?.item?.name ?? "Teleport"),
@@ -345,6 +504,7 @@ export function registerTeleport(): void {
         trace("post-skip", { why: "automating" });
         return;
       }
+      if (activity) lastUseResults.set(activity, results);
       void finishSelfTeleport(activity, results);
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);

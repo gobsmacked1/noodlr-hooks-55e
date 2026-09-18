@@ -5176,11 +5176,15 @@ Recorded because they will be reported again.
     `movement.method` being `dragging` or `keyboard`, so an API move never reaches any of them.
   - The remedy for a GM is a clear destination square, or Movement Automation set to Difficulty Only.
   - **The spend is ours to undo when it never lands (2026-09-17).** TeleportActivity consumes in
-    `use()`, then `_triggerSubsequentActions` is an explicit TODO, and `planTeleport` only runs if a
-    token is already controlled — otherwise a warning and a spent slot. `rules/teleport.ts` injects
-    the caster on `dnd5e.preTeleport` (replacing a leftover multi-select), auto-`planTeleport`s after
-    a self-range use, and refunds the consumed deltas plus the economy slot when `_source` did not
-    move. `move() === true` is not a landing. Automated turns skip this. `noodlrHooks.surveyTeleport()`.
+    `use()`, then `_triggerSubsequentActions` is an explicit TODO. Foundry's own `#planTeleport`
+    waits for `token.planMovement` — a **drag the token** ruler. A hop can go through walls, so
+    that capture is the wrong product. `rules/teleport.ts` injects the caster on
+    `dnd5e.preTeleport` (replacing a leftover multi-select), **vetoes the Foundry planner** for
+    a self hop, and takes **one canvas click** (snapped square, range-checked, walls ignored).
+    `forceLand` blinks/displaces with `ignoreWalls` / `ignoreCost` / `ignoreTokens`. Refund the
+    consumed deltas plus the economy slot when `_source` did not move, or when the player
+    cancels (Esc / right-click). `move() === true` is not a landing. Automated turns skip this.
+    `noodlrHooks.surveyTeleport()`.
   - **DDB files the 30 ft on the activity, not on `teleport.value` (2026-09-17).** Stock
     Misty Step is activity range `self` + `teleport.override: true` value 30. The live
     imported copy is item range Self, `target.affects: self`, activity range `30 ft`
@@ -5196,7 +5200,7 @@ Recorded because they will be reported again.
     activity overrides — same INITIAL-value trap as a bite's reach. Tree Stride
     (item Self) and sphinx Reposition (target Self, 120 ft) are hops. Thunder
     Step / Far Step / Vortex Warp / Arcane Gate are not `type: teleport` in 6.0.3
-    (utility or save). The auto-plan is every caster-hop TeleportActivity, not
+    (utility or save).     The click hop is every caster-hop TeleportActivity, not
     Misty Step by name.
   - **`planTeleport` can return a dest that never lands (2026-09-17).**
     Movement Automation Full constrains a blink to the origin while
@@ -5206,24 +5210,25 @@ Recorded because they will be reported again.
     Refund only `results.message.system.deltas` — `activity.refund`
     wants `ActorDeltasData`, and `results.updates` TypeErrors. A toast
     is not a hop. `plannedDestination` is the chosen square.
-  - **The click is an empty map square, never a token (Empowered Sorc,
-    2026-09-18).** `token.planMovement({ allowedActions: ["blink"],
-    direct: true, maxDistance })` waits for a canvas waypoint. T / the
-    Target tool is for a creature (Witch Bolt). A leftover `user.targets`
-    from the last pointed spell makes the next click look like that
-    creature — we clear it on `preTeleport` and toast
-    `Click an empty square within 30 ft — not a creature.` AA plays on
-    `use()`, so the mist without a hop is the planner still waiting, not
-    a finished cast. Esc then the walking-person Teleport button on the
-    usage card re-opens the ruler.     Occupied dest under Full automation
-    snaps home — same as the force-land note.
+  - **A self hop is point-and-click, never a drag (2026-09-18).**
+    Foundry's planner is `token.planMovement({ allowedActions: ["blink"],
+    direct: true, maxDistance, preventDrop: true })`. Completing it
+    requires dragging the token; a canvas click is a no-op; releasing
+    the token **cancels**. That is unusable for a spell that blinks
+    through walls. We never call `planTeleport` for a self hop:
+    `preTeleport` returns false, leftover `user.targets` are cleared
+    (Witch Bolt / T), and `pickHopClick` listens for one left-click on
+    the board. Same-square and out-of-range clicks stay in the picker.
+    Esc / right-click refunds. Occupied dest under Full automation
+    still snaps home — `forceLand` is the hop, not a follow-up.
     Every gate writes one flat `teleport: <step> | k=v` line (use,
-    plan-open, pre, awaiting-click, plan-done, landed / force-land /
-    refund, post-skip). `noodlrHooks.surveyTeleport()` prints the last
-    24. A hop that only shows `use` never reached `postUseActivity`.
-    `plan-open` with no `plan-done` means the blink ruler is still
-    waiting for a square. `movedFlag=true` with the same `source` as
-    `origin` is Full automation snapping home.
+    pick-open, pre veto=click-not-drag, awaiting-click, click /
+    click-far / click-same, pick-done, landed / force-land / refund,
+    post-skip). `noodlrHooks.surveyTeleport()` prints the last 24.
+    A hop that only shows `use` never reached `postUseActivity`.
+    `pick-open` with no `pick-done` means we are still waiting for a
+    click. `movedFlag=true` with the same `source` as `origin` is Full
+    automation snapping home.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —

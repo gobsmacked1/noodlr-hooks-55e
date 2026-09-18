@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.75
+
+**A caster hop is a click on the map, never a drag.** Foundry's blink
+ruler waits for you to drag the token. Misty Step (and every other
+self teleport) can go through walls, so that capture is the wrong
+product. Cast, click the square you want to appear on, done. Esc or
+right-click cancels and returns the slot. Out of range or the square
+you already stand on keeps the picker open.
+
 ## 0.7.74
 
 **Misty Step asks for an empty map square, not a creature.** The blink
