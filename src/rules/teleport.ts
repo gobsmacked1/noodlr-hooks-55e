@@ -164,6 +164,24 @@ async function refundTeleport(activity: any, results: any): Promise<void> {
   note(`teleport: ${name} did not land — refunded ${slotLabel}`);
 }
 
+/** Chat-card Teleport never hits `postUseActivity` — force-land the plan if the blink snapped home. */
+async function settlePlannedHop(activity: any, results: any): Promise<void> {
+  const dests = plannedDestinations(results);
+  if (
+    dests.some(({ token, dest }) => {
+      const now = tokenOrigin(token);
+      return Boolean(now && now.x === dest.x && now.y === dest.y);
+    })
+  ) {
+    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} landed`);
+    return;
+  }
+  const before = snapshot(placeableOf(activity));
+  if (await forceLand(results, before)) {
+    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} force-landed`);
+  }
+}
+
 async function finishSelfTeleport(activity: any, results: any): Promise<void> {
   const key = String(results?.message?.id ?? "");
   if (key) {
@@ -204,11 +222,29 @@ export function registerTeleport(): void {
       log("teleport: could not inject the caster:", err);
     }
   });
+  Hooks.on("dnd5e.preUseActivity", (activity: any) => {
+    try {
+      if (isSelfTeleport(activity)) {
+        log(`teleport: ${String(activity?.item?.name ?? "Teleport")} use starting`);
+      }
+    } catch {
+      /* diagnostic only */
+    }
+  });
   Hooks.on("dnd5e.postUseActivity", (activity: any, _usage: any, results: any) => {
     try {
       if (!isSelfTeleport(activity)) return;
       if (isAutomating()) return;
       void finishSelfTeleport(activity, results);
+    } catch (err) {
+      log("teleport:", err);
+    }
+  });
+  Hooks.on("dnd5e.postTeleport", (activity: any, results: any) => {
+    try {
+      if (!isSelfTeleport(activity)) return;
+      if (isAutomating()) return;
+      void settlePlannedHop(activity, results);
     } catch (err) {
       log("teleport:", err);
     }

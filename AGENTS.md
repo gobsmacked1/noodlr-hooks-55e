@@ -3947,10 +3947,16 @@ button press.
   `attack-roll.ts`, `streamline-cards.ts`).
 - **Witch Bolt's later 1d12 is follow-on, not a new target (2026-09-17).**
   The Damage activity's empty override is why auto-apply saw nobody. Inherit
-  the last attack's hits from that item (`inheritFollowOnTargets`). On a later
-  turn of the concentrating caster, `registerOngoing` uses that activity on
-  the owner's client. The first turn is skipped (`concentrationDurationOf`).
-  AA's leftover beam is not HP. `noodlrHooks.surveyOngoing()`.
+  the last attack's hits from that item (`inheritFollowOnTargets`). The 1d12
+  is a Bonus Action they *may* take: fire it when that turn ENDS, and only
+  if the bonus is still free. Auto-use at turn start spent the bonus before
+  Misty Step (Empowered Sorc, 2026-09-17). First turn is skipped
+  (`startedOnSlot`). Printed text ends the spell if they use their Action on
+  anything else (the Dagger) or when the inherited target is slain / combat
+  ends on a corpse. AA's leftover beam is not HP — `killFollowOnAnims` calls
+  Sequencer `endEffects` on `dnd5e.endConcentration` because a
+  `decodeWorker` reset can leave a persistent that never heard the AE
+  delete. `noodlrHooks.surveyOngoing()`.
 - **A Cast wrapper has no template of its own (Archmage, 2026-08-20).** Spellcasting →
   Lightning Bolt is `type: "cast"`; `CastActivity.use` forwards to the cached spell and
   *that* activity is what `#placeTemplate` reads. `placesTemplate` follows the link.

@@ -83,6 +83,33 @@ async function announce(actor: any, text: string): Promise<void> {
   await announceRuling({ kind: "concentration", summary: text, actor });
 }
 
+/** End one held item (Witch Bolt's target died) or everything. Same announce as `endAll`. */
+export async function endConcentrationOn(actor: any, item: any, reason: string): Promise<void> {
+  const key = actorKey(actor);
+  if (!key || ending.has(key)) return;
+  const labels = item?.name ? [String(item.name)] : concentrationLabels(actor);
+  if (!labels.length) return;
+
+  ending.add(key);
+  try {
+    if (item && typeof actor.endConcentration === "function") await actor.endConcentration(item);
+    else await actor.endConcentration();
+    await announce(
+      actor,
+      game.i18n.format("NOODLRHOOKS.Combat.Concentration.Lost", {
+        name: String(actor?.name ?? "Someone"),
+        spell: labels.join(", "),
+        reason,
+      }),
+    );
+    log(`concentration: ${String(actor?.name)} lost ${labels.join(", ")} — ${reason}`);
+  } catch (err) {
+    log(`concentration: could not end ${labels.join(", ")} on ${String(actor?.name)}:`, err);
+  } finally {
+    ending.delete(key);
+  }
+}
+
 /**
  * Drop everything this creature is concentrating on.
  *

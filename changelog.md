@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.73
+
+**Witch Bolt no longer spends the Bonus Action at the start of your turn.**
+The later 1d12 is optional. Auto-firing it when the tracker reached the
+caster stole Misty Step (same bonus). It now waits until that turn ends,
+and only if the bonus is still free.
+
+**The beam ends when the target dies, combat ends on a corpse, or you use
+your Action on something else.** dnd5e only dropped concentration on the
+caster. Printed Witch Bolt also ends on a slain target and on a different
+Action (the Dagger). Sequencer persistents are ended with the AE — a
+failed decode can leave a beam that never heard the delete.
+
+**A chat-card Teleport that snaps home is forced onto the planned square.**
+The card's Teleport button never went through the hop settler. It does now.
+
 ## 0.7.72
 
 **Declining Lucky leaves the d20 unchanged.** A compiled Lucky grant was

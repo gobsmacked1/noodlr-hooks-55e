@@ -287,6 +287,8 @@
   "NOODLRHOOKS.Combat.Concentration.Reason.Failed": "failed the save",
   "NOODLRHOOKS.Combat.Concentration.Reason.FailedRoll": "failed the save, {total} against DC {dc}",
   "NOODLRHOOKS.Combat.Concentration.Reason.Incapacitated": "Incapacitated",
+  "NOODLRHOOKS.Combat.Concentration.Reason.OtherAction": "they used their Action on something else",
+  "NOODLRHOOKS.Combat.Concentration.Reason.TargetGone": "the target was slain",
   "NOODLRHOOKS.Combat.Concentration.Reason.Zero": "down to 0 hit points",
   "NOODLRHOOKS.Combat.Conditions.AutoFail": "{name} automatically fails the {ability} saving throw ({status}).",
   "NOODLRHOOKS.Combat.Conditions.AutoFailNotify": "{name} auto-fails {ability} ({status}) — no roll.",
