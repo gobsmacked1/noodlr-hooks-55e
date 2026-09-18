@@ -9,11 +9,15 @@
 import { log } from "../constants";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
+  formatTeleportTrace,
   isSelfTeleport,
   originMoved,
   plannedDestinations,
+  plannedHopSummary,
   shouldReplaceTeleportTokens,
   teleportActivationType,
+  teleportClickHint,
+  teleportDistanceLabel,
   teleportLanded,
   tokenOrigin,
 } from "../system/dnd5e-teleport";
@@ -22,11 +26,51 @@ import { isAutomating } from "./economy/enforce";
 import { refund, slotFor } from "./economy/ledger";
 
 let lastNote = "teleport: no self-teleport has been settled this session";
+const TRAIL_CAP = 24;
+const trail: string[] = [];
 const settling = new Set<string>();
 
 function note(line: string): void {
   lastNote = line;
+  trail.push(line);
+  if (trail.length > TRAIL_CAP) trail.splice(0, trail.length - TRAIL_CAP);
   log(line);
+}
+
+function trace(step: string, facts: Record<string, string | number | boolean | null | undefined> = {}): void {
+  note(`teleport: ${formatTeleportTrace(step, facts)}`);
+}
+
+function namesOf(tokens: Iterable<any> | null | undefined): string {
+  const names: string[] = [];
+  for (const token of tokens ?? []) {
+    const name = String(token?.name ?? token?.document?.name ?? token?.id ?? "").trim();
+    if (name) names.push(name);
+  }
+  return names.join(",") || "none";
+}
+
+function hopWorldFacts(activity: any, placeable: any): Record<string, string | number | boolean> {
+  const origin = tokenOrigin(placeable);
+  const canvas = (globalThis as any).canvas;
+  const game = (globalThis as any).game;
+  const autom = String(game?.settings?.get?.("dnd5e", "movementAutomation") ?? "unread");
+  const tool = String(game?.activeTool ?? canvas?.activeLayer?.name ?? "");
+  return {
+    name: String(activity?.item?.name ?? activity?.name ?? "Teleport"),
+    type: String(activity?.type ?? ""),
+    self: isSelfTeleport(activity),
+    auto: isAutomating(),
+    canPlan: activity?.canPlanTeleport !== false,
+    range: `${String(activity?.range?.units ?? "")}/${String(activity?.item?.system?.range?.units ?? "")}`,
+    affects: String(activity?.target?.affects?.type ?? activity?.item?.system?.target?.affects?.type ?? ""),
+    max: teleportDistanceLabel(activity) || "unread",
+    origin: origin ? `${Math.round(origin.x)},${Math.round(origin.y)}` : "none",
+    controlled: namesOf(canvas?.tokens?.controlled),
+    targets: namesOf(game?.user?.targets),
+    autom,
+    tool: tool || "unread",
+  };
 }
 
 function placeableOf(activity: any): any {
@@ -50,6 +94,33 @@ function controlCaster(placeable: any): void {
   } catch {
     /* selection is a courtesy so planTeleport sees a token */
   }
+}
+
+function clearLeftoverTargets(): void {
+  const targets = [...((globalThis as any).game?.user?.targets ?? [])];
+  for (const token of targets) {
+    try {
+      token?.setTarget?.(false, { releaseOthers: false });
+    } catch {
+      /* a leftover that will not clear is still not the destination */
+    }
+  }
+}
+
+function promptEmptySquare(activity: any): void {
+  const distance = teleportDistanceLabel(activity);
+  const i18n = (globalThis as any).game?.i18n;
+  const text =
+    (distance
+      ? i18n?.format?.("NOODLRHOOKS.Combat.Teleport.ClickSquare", { distance })
+      : i18n?.localize?.("NOODLRHOOKS.Combat.Teleport.ClickSquareAny")) || teleportClickHint(distance);
+  try {
+    (globalThis as any).ui?.notifications?.info?.(text);
+  } catch {
+    /* the console line still names the click */
+  }
+  const name = String(activity?.item?.name ?? activity?.name ?? "Teleport");
+  trace("awaiting-click", { name, max: distance || "unread" });
 }
 
 function injectCasterToken(activity: any, config: any): boolean {
@@ -161,7 +232,7 @@ async function refundTeleport(activity: any, results: any): Promise<void> {
   } catch {
     /* notify already fired */
   }
-  note(`teleport: ${name} did not land — refunded ${slotLabel}`);
+  trace("refund", { name, slot: slotLabel });
 }
 
 /** Chat-card Teleport never hits `postUseActivity` — force-land the plan if the blink snapped home. */
@@ -173,39 +244,60 @@ async function settlePlannedHop(activity: any, results: any): Promise<void> {
       return Boolean(now && now.x === dest.x && now.y === dest.y);
     })
   ) {
-    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} landed`);
+    trace("landed", { name: String(activity?.item?.name ?? "Teleport"), how: "card" });
     return;
   }
   const before = snapshot(placeableOf(activity));
   if (await forceLand(results, before)) {
-    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} force-landed`);
+    trace("force-land", { name: String(activity?.item?.name ?? "Teleport"), how: "card" });
   }
 }
 
 async function finishSelfTeleport(activity: any, results: any): Promise<void> {
   const key = String(results?.message?.id ?? "");
   if (key) {
-    if (settling.has(key)) return;
+    if (settling.has(key)) {
+      trace("settle-skip", { name: String(activity?.item?.name ?? "Teleport"), why: "already-settling" });
+      return;
+    }
     settling.add(key);
   }
   const placeable = placeableOf(activity);
   controlCaster(placeable);
   const before = snapshot(placeable);
+  trace("plan-open", hopWorldFacts(activity, placeable));
+  const started = Date.now();
   let planned: unknown = null;
   try {
     if (typeof activity?.planTeleport === "function") {
       planned = await activity.planTeleport();
+    } else {
+      trace("plan-abort", { why: "no-planTeleport" });
     }
   } catch (err) {
-    log("teleport: planTeleport threw:", err);
+    const reason = err instanceof Error ? err.message : String(err);
+    trace("plan-throw", { why: reason || err?.constructor?.name || "Error" });
     planned = null;
   }
+  const hop = plannedHopSummary(planned);
+  const now = tokenOrigin(placeable);
+  trace("plan-done", {
+    dest: hop.dest,
+    movedFlag: hop.movedFlag,
+    rows: hop.rows,
+    source: now ? `${Math.round(now.x)},${Math.round(now.y)}` : "none",
+    ms: Date.now() - started,
+  });
   if (landedAfter(before, placeable, planned)) {
-    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} landed`);
+    trace("landed", { name: String(activity?.item?.name ?? "Teleport"), how: "plan" });
     return;
   }
   if (await forceLand(planned, before)) {
-    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} force-landed`);
+    const after = tokenOrigin(placeable);
+    trace("force-land", {
+      name: String(activity?.item?.name ?? "Teleport"),
+      source: after ? `${Math.round(after.x)},${Math.round(after.y)}` : "none",
+    });
     return;
   }
   await refundTeleport(activity, results);
@@ -215,43 +307,71 @@ export function registerTeleport(): void {
   if (!isDnd5e()) return;
   Hooks.on("dnd5e.preTeleport", (activity: any, config: any) => {
     try {
-      if (injectCasterToken(activity, config)) {
-        log("teleport: injected the caster token — planTeleport had nobody controlled");
+      const leftover = [...((globalThis as any).game?.user?.targets ?? [])].length;
+      const injected = injectCasterToken(activity, config);
+      if (isSelfTeleport(activity)) {
+        clearLeftoverTargets();
+        promptEmptySquare(activity);
       }
+      trace("pre", {
+        name: String(activity?.item?.name ?? "Teleport"),
+        self: isSelfTeleport(activity),
+        injected,
+        tokens: namesOf(config?.tokens),
+        leftover,
+        max: Number.isFinite(config?.maxDistance) ? config.maxDistance : "unread",
+      });
     } catch (err) {
-      log("teleport: could not inject the caster:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      trace("pre-throw", { why: reason || "Error" });
     }
   });
   Hooks.on("dnd5e.preUseActivity", (activity: any) => {
     try {
-      if (isSelfTeleport(activity)) {
-        log(`teleport: ${String(activity?.item?.name ?? "Teleport")} use starting`);
-      }
+      if (String(activity?.type ?? "").toLowerCase() !== "teleport" && !isSelfTeleport(activity)) return;
+      trace("use", hopWorldFacts(activity, placeableOf(activity)));
     } catch {
       /* diagnostic only */
     }
   });
   Hooks.on("dnd5e.postUseActivity", (activity: any, _usage: any, results: any) => {
     try {
-      if (!isSelfTeleport(activity)) return;
-      if (isAutomating()) return;
+      if (String(activity?.type ?? "").toLowerCase() !== "teleport" && !isSelfTeleport(activity)) return;
+      if (!isSelfTeleport(activity)) {
+        trace("post-skip", { why: "not-self", type: String(activity?.type ?? "") });
+        return;
+      }
+      if (isAutomating()) {
+        trace("post-skip", { why: "automating" });
+        return;
+      }
       void finishSelfTeleport(activity, results);
     } catch (err) {
-      log("teleport:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      trace("post-throw", { why: reason || "Error" });
     }
   });
   Hooks.on("dnd5e.postTeleport", (activity: any, results: any) => {
     try {
+      const hop = plannedHopSummary(results);
+      trace("post-teleport", {
+        name: String(activity?.item?.name ?? "Teleport"),
+        self: isSelfTeleport(activity),
+        dest: hop.dest,
+        movedFlag: hop.movedFlag,
+      });
       if (!isSelfTeleport(activity)) return;
       if (isAutomating()) return;
       void settlePlannedHop(activity, results);
     } catch (err) {
-      log("teleport:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      trace("post-teleport-throw", { why: reason || "Error" });
     }
   });
 }
 
 export function surveyTeleport(): { report: string } {
-  log(lastNote);
-  return { report: lastNote };
+  const report = trail.length ? trail.join("\n") : lastNote;
+  log(report);
+  return { report };
 }

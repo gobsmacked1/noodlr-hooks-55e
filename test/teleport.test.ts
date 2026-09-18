@@ -8,6 +8,10 @@ import {
   shouldReplaceTeleportTokens,
   teleportActivationType,
   teleportAffects,
+  teleportClickHint,
+  teleportDistanceLabel,
+  formatTeleportTrace,
+  plannedHopSummary,
   teleportLanded,
   teleportRangeUnits,
   plannedDestination,
@@ -134,6 +138,37 @@ test("a leftover multi-select is replaced; the caster alone is not", () => {
 test("an empty or unreadable plan is not a landing", () => {
   assert.equal(teleportLanded(new Map(), []), false);
   assert.equal(teleportLanded(new Map([["t1", { x: 1, y: 1 }]]), { moved: true }), false);
+});
+
+test("the click hint names a square, never a creature", () => {
+  assert.equal(teleportDistanceLabel({ teleport: { value: 30, units: "ft" } }), "30 ft");
+  assert.equal(teleportDistanceLabel({ teleport: { value: 0, units: "ft" } }), "");
+  assert.equal(teleportClickHint("30 ft"), "Click an empty square within 30 ft — not a creature.");
+  assert.equal(teleportClickHint(""), "Click an empty square on the map — not a creature.");
+});
+
+test("a hop trace is one flat line, never a nested object", () => {
+  assert.equal(formatTeleportTrace("use"), "use");
+  assert.equal(
+    formatTeleportTrace("plan-open", {
+      name: "Misty Step",
+      self: true,
+      targets: "Dire Wolf",
+      dest: undefined,
+      empty: "",
+    }),
+    "plan-open | name=Misty Step self=true targets=Dire Wolf",
+  );
+});
+
+test("a cancelled or empty plan is named, not treated as a landing", () => {
+  assert.deepEqual(plannedHopSummary(null), { dest: "none", movedFlag: "none", rows: 0 });
+  assert.deepEqual(plannedHopSummary([]), { dest: "empty", movedFlag: "empty", rows: 0 });
+  assert.deepEqual(
+    plannedHopSummary([{ plan: { destination: { x: 400.2, y: 200 } }, moved: true }]),
+    { dest: "400,200", movedFlag: "true", rows: 1 },
+  );
+  assert.deepEqual(plannedHopSummary([{ moved: true }]), { dest: "none", movedFlag: "true", rows: 1 });
 });
 
 test("the planned destination is the player's chosen square, not moved:true", () => {

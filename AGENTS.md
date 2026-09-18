@@ -5206,6 +5206,24 @@ Recorded because they will be reported again.
     Refund only `results.message.system.deltas` — `activity.refund`
     wants `ActorDeltasData`, and `results.updates` TypeErrors. A toast
     is not a hop. `plannedDestination` is the chosen square.
+  - **The click is an empty map square, never a token (Empowered Sorc,
+    2026-09-18).** `token.planMovement({ allowedActions: ["blink"],
+    direct: true, maxDistance })` waits for a canvas waypoint. T / the
+    Target tool is for a creature (Witch Bolt). A leftover `user.targets`
+    from the last pointed spell makes the next click look like that
+    creature — we clear it on `preTeleport` and toast
+    `Click an empty square within 30 ft — not a creature.` AA plays on
+    `use()`, so the mist without a hop is the planner still waiting, not
+    a finished cast. Esc then the walking-person Teleport button on the
+    usage card re-opens the ruler.     Occupied dest under Full automation
+    snaps home — same as the force-land note.
+    Every gate writes one flat `teleport: <step> | k=v` line (use,
+    plan-open, pre, awaiting-click, plan-done, landed / force-land /
+    refund, post-skip). `noodlrHooks.surveyTeleport()` prints the last
+    24. A hop that only shows `use` never reached `postUseActivity`.
+    `plan-open` with no `plan-done` means the blink ruler is still
+    waiting for a square. `movedFlag=true` with the same `source` as
+    `origin` is Full automation snapping home.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —

@@ -90,6 +90,8 @@
   "NOODLRHOOKS.Combat.AutoSaves.Name": "Let saving throws settle the damage",
   "NOODLRHOOKS.Combat.Teleport.NoLand": "The teleport did not land. The spell slot and the action used to cast it have been returned.",
   "NOODLRHOOKS.Combat.Teleport.Refunded": "{name}'s teleport did not land — slot and {slot} returned.",
+  "NOODLRHOOKS.Combat.Teleport.ClickSquare": "Click an empty square within {distance} — not a creature.",
+  "NOODLRHOOKS.Combat.Teleport.ClickSquareAny": "Click an empty square on the map — not a creature.",
   "NOODLRHOOKS.Combat.Target.SelfOnly": "That needs a creature other than you. Hover them and press T.",
   "NOODLRHOOKS.Combat.TemplateLifetime.Name": "Templates leave when the effect does",
   "NOODLRHOOKS.Combat.TemplateLifetime.Hint": "An instantaneous Fireball, breath or wail is removed once the placing turn is over and the saves have landed. A Wall of Fire (concentration AND a maximum duration) ends when concentration breaks or when that duration runs out — whichever first — and the parent effect and its templates leave together. You cannot hold the same slot forever by concentrating. Extend Spell and other riders are read when the template is placed. A successful Counterspell means the spell was never cast, so nothing appears. Out of combat the duration is real time (a wall to block a door is not a reason to start a fight). In a fight already underway it is rounds. A hand-drawn ruler is left alone.",

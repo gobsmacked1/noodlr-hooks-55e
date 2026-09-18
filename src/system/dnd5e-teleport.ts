@@ -53,6 +53,60 @@ export function isSelfTeleport(activity: any): boolean {
   return teleportAffects(activity) === "self";
 }
 
+/**
+ * The blink planner wants a canvas square. Say how far, in the activity's own units.
+ * Empty when the distance is unreadable — the click is still a square, not a token.
+ */
+export function teleportDistanceLabel(activity: any): string {
+  const n = Number(activity?.teleport?.value);
+  const units = String(activity?.teleport?.units ?? "").trim() || "ft";
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return `${n} ${units}`;
+}
+
+/** Player-facing click. The leftover Target tool / Witch Bolt target is not this. */
+export function teleportClickHint(distance: string): string {
+  const reach = String(distance ?? "").trim();
+  return reach
+    ? `Click an empty square within ${reach} — not a creature.`
+    : "Click an empty square on the map — not a creature.";
+}
+
+/**
+ * One flat line per hop gate. A nested object in the console is how four releases
+ * looked "fine" while Misty never left the square.
+ */
+export function formatTeleportTrace(
+  step: string,
+  facts: Record<string, string | number | boolean | null | undefined> = {},
+): string {
+  const bits: string[] = [];
+  for (const [key, value] of Object.entries(facts)) {
+    if (value === undefined || value === "") continue;
+    bits.push(`${key}=${value}`);
+  }
+  return bits.length ? `${step} | ${bits.join(" ")}` : step;
+}
+
+/** What dnd5e's `planTeleport` handed back — dest vs `moved`, never the promise. */
+export function plannedHopSummary(results: unknown): {
+  dest: string;
+  movedFlag: string;
+  rows: number;
+} {
+  if (results == null) return { dest: "none", movedFlag: "none", rows: 0 };
+  if (!Array.isArray(results)) return { dest: "unreadable", movedFlag: "unreadable", rows: 0 };
+  if (!results.length) return { dest: "empty", movedFlag: "empty", rows: 0 };
+  const dests: string[] = [];
+  const flags: string[] = [];
+  for (const row of results) {
+    const dest = plannedDestination(row);
+    dests.push(dest ? `${Math.round(dest.x)},${Math.round(dest.y)}` : "none");
+    flags.push(row?.moved === true ? "true" : row?.moved === false ? "false" : "unset");
+  }
+  return { dest: dests.join("+"), movedFlag: flags.join("+"), rows: results.length };
+}
+
 /** Misty Step blinks the caster. A leftover multi-select must not steal the hop. */
 export function shouldReplaceTeleportTokens(currentIds: string[], casterId: string): boolean {
   if (!casterId) return false;

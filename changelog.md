@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.74
+
+**Misty Step asks for an empty map square, not a creature.** The blink
+ruler wants a canvas coordinate. A leftover Witch Bolt target made the
+next click look like "pick that wolf." The leftover is cleared, and a
+toast says to click a vacant square within range.
+
+**Every hop now leaves a readable trail.** `noodlrHooks.surveyTeleport()`
+prints the last two dozen gates (use, plan-open, awaiting-click,
+plan-done, landed / force-land / refund). If the token still does not
+move, that trail is the report — not another guess.
+
 ## 0.7.73
 
 **Witch Bolt no longer spends the Bonus Action at the start of your turn.**
