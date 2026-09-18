@@ -25,7 +25,7 @@ import { sightModifiers } from "./unseen";
 import { flankModifiers, readFlank } from "./flanking";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import { blocked, centerOf } from "../core/positioning";
-import { originatingMessageData, originatingUsageIdFromRoll, targetsOf, tokenFromActorUuid } from "./cards";
+import { originatingMessageData, originatingUsageIdFromRoll, targetsOf, tokenFromTargetUuid } from "./cards";
 import {
   applyDamageCritDefault,
   damageActivityMayCrit,
@@ -303,7 +303,7 @@ async function autoFailSave(config: any, dialog: any, message: any): Promise<boo
 function targetsForCrit(roll: any): Array<{ token: any; actor: any; ac: number | null }> {
   const out: Array<{ token: any; actor: any; ac: number | null }> = [];
   for (const listed of targetsOf(roll?.parent ?? {})) {
-    const doc = tokenFromActorUuid(listed.uuid);
+    const doc = tokenFromTargetUuid(listed.uuid);
     if (!doc) continue;
     let actor = doc.actor;
     if (!actor) {

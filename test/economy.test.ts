@@ -264,30 +264,40 @@ function lightWeapon(mastery = "", base = "dagger") {
 
 const swing = { type: "attack", attack: { type: { value: "melee" } } };
 
-test("a Light melee weapon offers the extra attack out of the bonus action", () => {
+test("a Light melee weapon is not a second swing unless the wielder is entitled", () => {
   const hero = actor();
-  assert.equal(lightExtraAttackCost(hero, lightWeapon(), swing), "bonus");
+  assert.equal(lightExtraAttackCost(hero, lightWeapon(), swing), null);
 });
 
 test("Nick makes it free, but only for a wielder entitled to the mastery", () => {
   // `system.mastery` sits on every dagger in the world whether or not its holder may use it, so
   // reading the field alone would make the bonus action free for everybody. Proficiency is
-  // not Weapon Mastery — the Monk is the specimen.
+  // not Weapon Mastery — the Monk is the specimen. Holding two daggers is also not enough.
   const untrained = actor() as any;
   untrained.type = "character";
-  assert.equal(lightExtraAttackCost(untrained, lightWeapon("nick"), swing), "bonus");
+  assert.equal(lightExtraAttackCost(untrained, lightWeapon("nick"), swing), null);
 
   const proficient = actor();
   (proficient as any).type = "character";
   (proficient as any).system = {
     traits: { weaponProf: { value: new Set(["sim"]), mastery: { value: new Set() } } },
   };
-  assert.equal(lightExtraAttackCost(proficient, lightWeapon("nick"), swing), "bonus");
+  assert.equal(lightExtraAttackCost(proficient, lightWeapon("nick"), swing), null);
 
   const trained = actor();
   (trained as any).type = "character";
   (trained as any).system = { traits: { weaponProf: { mastery: { value: new Set(["dagger"]) } } } };
   assert.equal(lightExtraAttackCost(trained, lightWeapon("nick"), swing), "free");
+});
+
+test("Two-Weapon Fighting or Dual Wielder still buys the bonus-action extra", () => {
+  const twf = actor([
+    { name: "Two-Weapon Fighting", type: "feat", system: { identifier: "two-weapon-fighting" } },
+  ]);
+  assert.equal(lightExtraAttackCost(twf, lightWeapon(), swing), "bonus");
+
+  const dual = actor([{ name: "Dual Wielder", type: "feat", system: { identifier: "dual-wielder" } }]);
+  assert.equal(lightExtraAttackCost(dual, lightWeapon(), swing), "bonus");
 });
 
 test("a heavy weapon, a ranged attack and a spell offer nothing", () => {

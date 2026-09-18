@@ -159,10 +159,18 @@ async function settleOffer(request: OfferRequest): Promise<OfferAnswer> {
   // Re-checked on the writing client, because the asking client's reading is a moment old and this is the
   // client that will spend the reaction.
   const combatant = combatantFor(token);
-  if (!combatant || !hasReaction(combatant) || !canReact(actor)) return { taken: false };
+  if (!combatant || !hasReaction(combatant) || !canReact(actor)) {
+    const why = !combatant ? "no combatant" : !hasReaction(combatant) ? "reaction spent" : "cannot react";
+    log(`reaction offer: ${actor.name} ${request.trigger} skipped — ${why}`);
+    return { taken: false };
+  }
 
   const options = optionsFor(actor, request, target);
-  if (!options.length) return { taken: false };
+  if (!options.length) {
+    const margin = request.trigger === "incoming" ? ` (margin ${request.margin})` : "";
+    log(`reaction offer: ${actor.name} ${request.trigger} had no options${margin}`);
+    return { taken: false };
+  }
 
   const preferred = timeoutChoice(options, request.trigger);
   const choices: Choice[] = options.map((option, index) => ({

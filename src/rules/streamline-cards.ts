@@ -31,7 +31,7 @@ import {
   rollType,
   speakerToken,
   targetsOf,
-  tokenFromActorUuid,
+  tokenFromTargetUuid,
 } from "./cards";
 import {
   attackKind,
@@ -259,7 +259,7 @@ function hitActorsOf(message: any): any[] {
     if (actors.length) return uniqueActors(actors);
   }
   const fromFlags = targetsOf(message)
-    .map((t) => tokenFromActorUuid(t.uuid)?.actor)
+    .map((t) => tokenFromTargetUuid(t.uuid)?.actor)
     .filter(Boolean);
   return uniqueActors(fromFlags);
 }

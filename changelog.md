@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.72
+
+**Declining Lucky leaves the d20 unchanged.** A compiled Lucky grant was
+stamping Disadvantage before the native prompt, so a skip still rolled at
+Disadvantage, and the dialog appeared even with no Luck Points left. The
+compiled reading is refused while we offer the feat. Do not recompile the
+world.
+
+**Witch Bolt's later 1d12 now hits the creature you already struck.** The
+follow-on Damage activity names nobody. It inherits the last hit from that
+spell and fires on later turns of the concentrating caster. The leftover
+beam is not hit points.
+
+**Shield is offered when you are hit.** Stock Shield is a reaction utility.
+Those were dropped from the reaction list, so a confirmed hit never asked.
+Dodge stays out — it is an Action.
+
+**A Light extra attack needs Nick, Two-Weapon Fighting, or Dual Wielder.**
+Holding two Light weapons is not enough. A Sorcerer with two sickles no
+longer gets a bonus-action second swing.
+
+**6.0 usage cards name a token uuid.** Readers that only resolved actor
+uuids missed Hadar, Shield, and Witch Bolt targets, so auto-saves and
+auto-damage sat on Apply. Token and actor uuids both resolve now.
+
+**A planned hop that never leaves the square is forced onto the destination.**
+Movement Automation Full can report a successful blink while the token stays
+put. If `_source` did not move, we displace to the planned square. A toast
+is not a hop.
+
 ## 0.7.71
 
 **A caster-hop teleport that never lands no longer spends the slot — any hop,

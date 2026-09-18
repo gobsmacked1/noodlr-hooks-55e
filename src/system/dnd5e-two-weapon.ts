@@ -28,11 +28,11 @@
 // of attacks and is swinging a Light weapon, is this the off-hand swing?" — and for a Light melee weapon
 // the answer is yes far more often than not.
 //
-// THE ONE ACCEPTED IMPRECISION. The rules require the OTHER hand to hold a different Light weapon, and
-// Foundry models no hands. A character with a single Light weapon and no second one therefore gets a
-// swing the rules would not allow. That is the generous direction this layer takes everywhere: a
-// wrongly-permitted attack is a bad turn the GM can call back, while a wrongly-refused one is a bug
-// report about the module. The `light` counter in the ledger keeps it to one per turn either way.
+// ENTITLEMENT, NOT "HOLDING TWO LIGHT WEAPONS". The printed 2024 Light extra is available to
+// anyone holding two Light melee weapons. At the table that handed every dual-dagger Sorcerer
+// a bonus-action second swing they had never been taught. Nick (the mastery list) still makes
+// it free; Two-Weapon Fighting or Dual Wielder still makes it a bonus action. Holding two
+// daggers is not enough. The `light` counter in the ledger keeps it to one per turn either way.
 
 import { isDnd5e } from "./dnd5e-rewards";
 import { usableMastery } from "./dnd5e-masteries";
@@ -67,5 +67,20 @@ export function lightExtraAttackCost(actor: any, item: any, activity: any): Ligh
   const attackType = String(activity?.attack?.type?.value ?? "");
   if (attackType === "ranged") return null;
 
-  return usableMastery(actor, item) === "nick" ? "free" : "bonus";
+  if (usableMastery(actor, item) === "nick") return "free";
+  if (hasTwoWeaponFighting(actor)) return "bonus";
+  return null;
+}
+
+const TWF_IDS = new Set(["two-weapon-fighting", "dual-wielder"]);
+const TWF_NAMES = [/^\s*two-weapon fighting\s*$/i, /^\s*dual wielder\s*$/i];
+
+/** Fighting style or Dual Wielder — the bonus-action extra, not Nick. */
+export function hasTwoWeaponFighting(actor: any): boolean {
+  for (const it of actor?.items ?? []) {
+    const id = String(it?.system?.identifier ?? "").toLowerCase();
+    if (id && TWF_IDS.has(id)) return true;
+    if (!id && TWF_NAMES.some((p) => p.test(String(it?.name ?? "")))) return true;
+  }
+  return false;
 }

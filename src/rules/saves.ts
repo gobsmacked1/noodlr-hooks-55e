@@ -60,7 +60,7 @@ import {
   saveMultiplier,
   speakerToken,
   targetsOf,
-  tokenFromActorUuid,
+  tokenFromTargetUuid,
   type DamagePart,
 } from "./cards";
 import { fireSaveTriggers, type SaveVerdict } from "../capability/saves";
@@ -481,7 +481,7 @@ function prune(): void {
 /** Fold a message's recorded targets into an activation, keeping anything already known about them. */
 function noteTargets(act: Activation, message: any): void {
   for (const target of targetsOf(message)) {
-    const doc = tokenFromActorUuid(target.uuid);
+    const doc = tokenFromTargetUuid(target.uuid);
     if (!doc) continue;
     const id = String(doc.id);
     if (act.targets.has(id)) continue;

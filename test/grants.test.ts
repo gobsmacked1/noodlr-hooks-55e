@@ -155,6 +155,68 @@ test("Vex Advantage does not fire against a different creature", () => {
   assert.equal(collect(actor, "attack", "", "").length, 0);
 });
 
+test("compiled Lucky does not stamp Disadvantage on the roll we then ask about", () => {
+  (globalThis as any).game = {
+    system: { id: "dnd5e" },
+    settings: { get: (_ns: string, key: string) => key.startsWith("combat.diceMods") },
+  };
+  const lucky = {
+    id: "lucky",
+    uuid: "Actor.drew.Item.lucky",
+    type: "feat",
+    name: "Lucky",
+    system: { identifier: "lucky", uses: { max: 3, spent: 0 } },
+    actor: { type: "character" },
+  };
+  const actor = {
+    uuid: "Actor.drew",
+    name: "Drew Id",
+    type: "character",
+    effects: [
+      {
+        name: "Lucky: Disadvantage",
+        flags: {
+          [MODULE_ID]: {
+            timed: { kind: "impose_disadvantage", capability: "hash-lucky", params: { rollType: "any" } },
+          },
+        },
+      },
+    ],
+    concentration: { items: [], effects: [] },
+  };
+  lucky.actor = actor;
+  bindCapabilities(actor.uuid, [
+    {
+      item: lucky,
+      capability: {
+        id: "lucky-hash",
+        label: "Lucky",
+        status: "compiled",
+        rules: [
+          {
+            trigger: { event: "on_attack_roll" },
+            condition: [],
+            effect: { kind: "impose_disadvantage", rollType: "attack" },
+            adjudication: "engine",
+          },
+          {
+            trigger: { event: "always" },
+            condition: [],
+            effect: { kind: "impose_disadvantage", rollType: "any" },
+            adjudication: "engine",
+          },
+        ],
+      },
+    },
+  ]);
+  try {
+    assert.equal(collect(actor, "attack", "", "").length, 0);
+    assert.equal(collect(actor, "check", "", "").length, 0);
+  } finally {
+    clearBindings(actor.uuid);
+  }
+});
+
 test("applyToConfig stamps advantageMode, not only the advantage flag", () => {
   const config: { advantage?: boolean; rolls: Array<{ options: Record<string, unknown> }> } = {
     rolls: [{ options: {} }],

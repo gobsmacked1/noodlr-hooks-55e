@@ -10,6 +10,8 @@ import { log } from "../constants";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   isSelfTeleport,
+  originMoved,
+  plannedDestinations,
   shouldReplaceTeleportTokens,
   teleportActivationType,
   teleportLanded,
@@ -80,8 +82,42 @@ function landedAfter(before: Map<string, { x: number; y: number }>, placeable: a
   return Boolean(prev && now && (prev.x !== now.x || prev.y !== now.y));
 }
 
+async function forceLand(planned: unknown, before: Map<string, { x: number; y: number }>): Promise<boolean> {
+  let any = false;
+  for (const { token, dest } of plannedDestinations(planned)) {
+    const id = String(token?.id ?? token?.document?.id ?? "");
+    const prev = id ? before.get(id) : undefined;
+    if (prev && prev.x === dest.x && prev.y === dest.y) continue;
+    const doc = token?.document ?? token;
+    if (typeof doc?.move !== "function") continue;
+    const actions: any = (globalThis as any).CONFIG?.Token?.movement?.actions;
+    const action = actions?.blink ? "blink" : actions?.displace ? "displace" : undefined;
+    const waypoint: Record<string, unknown> = {
+      x: Math.round(dest.x),
+      y: Math.round(dest.y),
+      explicit: true,
+      checkpoint: true,
+    };
+    if (Number.isFinite(dest.elevation as number)) waypoint.elevation = dest.elevation;
+    if (action) waypoint.action = action;
+    try {
+      await doc.move(waypoint, {
+        method: "api",
+        constrainOptions: { ignoreWalls: true, ignoreCost: true, ignoreTokens: true },
+        autoRotate: false,
+        showRuler: false,
+      });
+    } catch (err) {
+      log("teleport: force-land threw:", err);
+      continue;
+    }
+    if (originMoved(prev ?? null, tokenOrigin(token))) any = true;
+  }
+  return any;
+}
+
 async function refundTeleport(activity: any, results: any): Promise<void> {
-  const consumed = results?.updates ?? results?.message?.system?.deltas;
+  const consumed = results?.message?.system?.deltas;
   try {
     if (consumed && typeof activity?.refund === "function") {
       await activity.refund(consumed);
@@ -148,6 +184,10 @@ async function finishSelfTeleport(activity: any, results: any): Promise<void> {
   }
   if (landedAfter(before, placeable, planned)) {
     note(`teleport: ${String(activity?.item?.name ?? "Teleport")} landed`);
+    return;
+  }
+  if (await forceLand(planned, before)) {
+    note(`teleport: ${String(activity?.item?.name ?? "Teleport")} force-landed`);
     return;
   }
   await refundTeleport(activity, results);

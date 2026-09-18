@@ -55,6 +55,7 @@ import { clearUse, noteRest, rollRecharge, spendUse, usesKey, usesLeft } from ".
 import { onDamageTaken } from "./damage-log";
 import { noteRepeatSave } from "../rules/repeat-save";
 import { sneakClaimedNatively } from "../rules/sneak";
+import { luckyClaimedNatively } from "../rules/lucky";
 import { ruleMatchesApplied } from "./applied";
 import { registerAttackRollTriggers } from "./attack-roll";
 import { registerConditionTriggers } from "./condition-applied";
@@ -268,7 +269,7 @@ async function runRule(
   // A rule whose effect a hand-written layer of this module already performs. Same shape as the
   // terminal refusal above and for the same reason: the descriptor is a true reading, and running it
   // beside the layer that owns the mechanic doubles it silently.
-  const claimed = sneakClaimedNatively(rule, item);
+  const claimed = sneakClaimedNatively(rule, item) ?? luckyClaimedNatively(rule, item);
   if (claimed) return no(claimed);
 
   if (!POSTHUMOUS.includes(rule.trigger?.event as TriggerEvent) && isDefeated(ctx.self)) {

@@ -44,7 +44,7 @@ import {
   rollType,
   speakerToken,
   targetsOf,
-  tokenFromActorUuid,
+  tokenFromTargetUuid,
 } from "./cards";
 
 const QUERY = "owed-roll";
@@ -625,7 +625,7 @@ async function maybeAskCheck(message: any): Promise<void> {
   const source = String(item?.name ?? activity?.name ?? "");
   const jobs: Promise<void>[] = [];
   for (const target of targetsOf(message)) {
-    const doc = tokenFromActorUuid(target.uuid);
+    const doc = tokenFromTargetUuid(target.uuid);
     const actor = doc?.actor;
     if (!doc || !actor) continue;
     const tokenId = String(doc.id ?? "");

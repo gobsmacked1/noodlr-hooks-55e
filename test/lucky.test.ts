@@ -2,6 +2,8 @@ import { strict as assert } from "node:assert";
 import { beforeEach, test } from "node:test";
 
 import { MODULE_ID } from "../src/constants";
+import { luckyClaimedNatively, luckyEffectClaimed } from "../src/rules/lucky";
+import { staticRefusal } from "../src/capability/describe";
 import {
   alreadyHasAdvantage,
   alreadyHasDisadvantage,
@@ -16,8 +18,15 @@ import {
 } from "../src/system/dnd5e-lucky";
 import { matchesItem, DICE_MOD_SPECS } from "../src/system/dnd5e-dice-mods";
 
+let settings: Record<string, unknown> = {};
+
 beforeEach(() => {
-  (globalThis as any).game = { system: { id: "dnd5e" }, modules: new Map() };
+  settings = { "combat.diceMods.npc": true, "combat.diceMods.pc": true };
+  (globalThis as any).game = {
+    system: { id: "dnd5e" },
+    modules: new Map(),
+    settings: { get: (_ns: string, key: string) => settings[key] },
+  };
 });
 
 function feat(name: string, identifier: string, extra: Record<string, unknown> = {}) {
@@ -62,6 +71,38 @@ test("an empty pool or unreadable uses cannot be spent", () => {
   assert.equal(luckyHasCharge(feat("Lucky", "lucky", { uses: { max: 3, spent: 3 } })), false);
   assert.equal(luckyHasCharge(feat("Lucky", "lucky", { uses: {} })), false);
   assert.equal(luckyCharges(feat("Lucky", "lucky", { uses: { max: 3, spent: 1 } })), 2);
+});
+
+test("uses.value of 0 empties the pool even when spent is still 0", () => {
+  assert.equal(luckyHasCharge(feat("Lucky", "lucky", { uses: { max: 3, spent: 0, value: 0 } })), false);
+  assert.equal(luckyCharges(feat("Lucky", "lucky", { uses: { max: 3, spent: 0, value: 0 } })), 0);
+  assert.equal(luckyCharges(feat("Lucky", "lucky", { uses: { max: 3, spent: 1, value: 2 } })), 2);
+});
+
+test("a compiled grant or impose on Lucky is refused while we offer it", () => {
+  const item = { ...feat("Lucky", "lucky"), actor: { type: "character" } };
+  const impose = { trigger: { event: "always" }, effect: { kind: "impose_disadvantage" } };
+  const grant = { trigger: { event: "on_attack_roll" }, effect: { kind: "grant_advantage" } };
+  assert.match(String(luckyClaimedNatively(impose as any, item)), /natively/);
+  assert.match(String(luckyClaimedNatively(grant as any, item)), /natively/);
+  assert.match(staticRefusal(impose as any, item), /natively/);
+  assert.equal(luckyClaimedNatively({ effect: { kind: "grant_capability" } } as any, item), null);
+  assert.equal(luckyClaimedNatively(impose as any, feat("Reckless Attack", "reckless-attack")), null);
+});
+
+test("nothing is refused when dice-mods is off", () => {
+  settings["combat.diceMods.pc"] = false;
+  const item = { ...feat("Lucky", "lucky"), actor: { type: "character" } };
+  assert.equal(
+    luckyClaimedNatively({ effect: { kind: "impose_disadvantage" } } as any, item),
+    null,
+  );
+});
+
+test("a leftover Lucky timed AE is skipped while we offer it", () => {
+  const actor = { type: "character" };
+  assert.match(String(luckyEffectClaimed({ name: "Lucky: Disadvantage" }, actor)), /natively/);
+  assert.equal(luckyEffectClaimed({ name: "Reckless Attack: Advantage" }, actor), null);
 });
 
 test("luckyItem picks the charged feat and ignores Halfling", () => {

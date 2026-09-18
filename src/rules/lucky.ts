@@ -16,11 +16,14 @@
 
 import { COMBAT_SETTINGS, MODULE_ID, log } from "../constants";
 import { adjustUses } from "../capability/primitives";
+import type { CapabilityRule } from "../integration/capability";
 import { isDiceModsEnabled } from "../settings";
 import { isDnd5e } from "../system/dnd5e-rewards";
 import {
   alreadyHasAdvantage,
   alreadyHasDisadvantage,
+  isLuckyItem,
+  luckyCharges,
   luckyItem,
   luckyRollKind,
   luckyTimeoutId,
@@ -38,6 +41,9 @@ import { speakerFor } from "../util/speaker";
 const QUERY = "lucky";
 const TRANSPORT_MS = 30_000;
 const MAX_INCOMING = 1;
+const LUCKY_AE = /^\s*lucky(\s*:|$)/i;
+const CLAIMED =
+  "Lucky is offered natively, only when a Luck Point remains, and a decline leaves the d20 unchanged";
 
 interface LuckyRequest {
   actorUuid: string;
@@ -52,6 +58,29 @@ interface LuckyAnswer {
 }
 
 let holding = false;
+
+/**
+ * A compiled grant/impose on this feat is the Witch Bolt DIS bug: `grants.ts`
+ * stamps it on `preRollAttack` before the native prompt, then a decline replays
+ * with that Disadvantage. Same shape as `sneakClaimedNatively` — refuse only
+ * while we are offering it, so a table that switched dice-mods off still has
+ * one thing applying the compiled reading.
+ */
+export function luckyClaimedNatively(rule: CapabilityRule, item: any): string | null {
+  const kind = rule?.effect?.kind;
+  if (kind !== "grant_advantage" && kind !== "impose_disadvantage") return null;
+  if (!isLuckyItem(item)) return null;
+  const actor = item?.actor ?? item?.parent;
+  if (!isDiceModsEnabled(actor)) return null;
+  return CLAIMED;
+}
+
+/** Leftover timed AE (`Lucky: Disadvantage`) from a compile that ran before the refusal. */
+export function luckyEffectClaimed(effect: any, actor: any): string | null {
+  if (!effect || !LUCKY_AE.test(String(effect.name ?? ""))) return null;
+  if (!isDiceModsEnabled(actor)) return null;
+  return CLAIMED;
+}
 
 export function registerLucky(): void {
   registerQuery(QUERY, async (data: any) => {
@@ -394,11 +423,18 @@ export function surveyLucky(): unknown {
         return false;
       }
     });
-    lines.push(`feat ${item ? `${item.name}  ${item.system?.uses?.max ?? "?"} uses` : "NONE — no spendable Lucky feat"}`);
+    const uses = item?.system?.uses;
+    const left = item ? luckyCharges(item) : null;
+    lines.push(
+      item
+        ? `feat ${item.name}  remaining ${left}  spent ${uses?.spent ?? "?"}  value ${uses?.value ?? "?"}  max ${uses?.max ?? "?"}`
+        : "NONE — no spendable Lucky feat",
+    );
     if (!item && all.length) {
       for (const it of all) {
+        const u = it.system?.uses;
         lines.push(
-          `skipped ${it.name}  type=${it.type}  id=${it.system?.identifier ?? ""}  uses=${it.system?.uses?.max ?? "none"}`,
+          `skipped ${it.name}  type=${it.type}  id=${it.system?.identifier ?? ""}  remaining ${luckyCharges(it)}  spent=${u?.spent ?? "none"}  value=${u?.value ?? "none"}  max=${u?.max ?? "none"}`,
         );
       }
     }

@@ -10,6 +10,7 @@ import {
   teleportAffects,
   teleportLanded,
   teleportRangeUnits,
+  plannedDestination,
   tokenOrigin,
 } from "../src/system/dnd5e-teleport";
 
@@ -133,4 +134,14 @@ test("a leftover multi-select is replaced; the caster alone is not", () => {
 test("an empty or unreadable plan is not a landing", () => {
   assert.equal(teleportLanded(new Map(), []), false);
   assert.equal(teleportLanded(new Map([["t1", { x: 1, y: 1 }]]), { moved: true }), false);
+});
+
+test("the planned destination is the player's chosen square, not moved:true", () => {
+  const dest = { x: 400, y: 200, elevation: 0 };
+  assert.deepEqual(plannedDestination({ plan: { destination: dest }, moved: true }), dest);
+  assert.deepEqual(
+    plannedDestination({ plan: { waypoints: [{ x: 100, y: 200 }, dest] } }),
+    dest,
+  );
+  assert.equal(plannedDestination({ moved: true }), null);
 });

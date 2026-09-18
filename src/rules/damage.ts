@@ -54,10 +54,11 @@ import {
   rollType,
   speakerToken,
   targetsOf,
-  tokenFromActorUuid,
+  tokenFromTargetUuid,
   type DamagePart,
   type HitReading,
 } from "./cards";
+import { inheritFollowOnTargets, isFollowOnDamage } from "./ongoing";
 
 /** Our own flag on a message we have already acted on. */
 const APPLIED = "damageApplied";
@@ -274,6 +275,7 @@ async function reactionWindow(message: any, reading: HitReading): Promise<void> 
   for (const doc of [...reading.hits]) {
     const margin = reading.margin[String(doc?.id ?? "")];
     if (!Number.isFinite(margin)) continue; // A crit. No AC bonus reaches it.
+    log(`reaction: incoming vs ${doc?.name} (margin ${margin})`);
     const answer = await offerReaction(doc?.actor, {
       actorUuid: String(doc?.actor?.uuid ?? ""),
       tokenUuid: String(doc?.uuid ?? ""),
@@ -503,9 +505,19 @@ function resolveTargets(message: any): Resolution {
   const targets: any[] = [];
   const unresolved: Array<{ name: string; why: string }> = [];
   for (const target of targetsOf(message)) {
-    const doc = tokenFromActorUuid(target.uuid);
+    const doc = tokenFromTargetUuid(target.uuid);
     if (doc) targets.push(doc);
     else unresolved.push({ name: target.name, why: reason("UnknownToken") });
+  }
+  if (targets.length === 0 && unresolved.length === 0) {
+    const activity = activityOf(message, itemOf(message));
+    if (isFollowOnDamage(activity)) {
+      for (const inherited of inheritFollowOnTargets(activity?.item, message)) {
+        const doc = tokenFromTargetUuid(inherited.uuid);
+        if (doc) targets.push(doc);
+        else unresolved.push({ name: inherited.name, why: reason("UnknownToken") });
+      }
+    }
   }
   if (targets.length === 0 && unresolved.length === 0) {
     return { targets: [], unresolved: [], declined: reason("NoTargets") };

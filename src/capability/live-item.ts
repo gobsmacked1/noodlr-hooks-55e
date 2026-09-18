@@ -56,18 +56,29 @@ function isOurTimed(effect: any): boolean {
 }
 
 export function concentratingOn(actor: any, item: any): boolean {
+  return Boolean(concentrationItemHeld(actor, item) || concentrationEffectOf(actor, item));
+}
+
+function concentrationItemHeld(actor: any, item: any): boolean {
   if (!actor || !item) return false;
   const items = actor.concentration?.items;
   const held = items instanceof Set ? [...items] : [...(items ?? [])];
-  for (const it of held) {
-    if (sameRef(it, item)) return true;
-  }
+  return held.some((it) => sameRef(it, item));
+}
+
+function concentrationEffectOf(actor: any, item: any): any | null {
+  if (!actor || !item) return null;
   const effects = actor.concentration?.effects;
   const list = effects instanceof Set ? [...effects] : [...(effects ?? [])];
   for (const effect of list) {
-    if (originMatchesItem(effect, item)) return true;
+    if (originMatchesItem(effect, item)) return effect;
   }
-  return false;
+  return null;
+}
+
+/** Duration on the concentration AE for this item, if any. */
+export function concentrationDurationOf(actor: any, item: any): any | null {
+  return concentrationEffectOf(actor, item)?.duration ?? null;
 }
 
 /** A real affliction from this item — not a timed grant we wrote ourselves. */

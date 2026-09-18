@@ -20,6 +20,7 @@
 
 import { MODULE_ID, log } from "../constants";
 import { isStanding } from "../integration/capability";
+import { luckyClaimedNatively, luckyEffectClaimed } from "../rules/lucky";
 import { bindingsFor } from "./bindings";
 import { itemIsInPlay } from "./live-item";
 import { conditionsMet, type EvalContext } from "./predicates";
@@ -94,10 +95,12 @@ function fromEffect(
   ability: string,
   skill: string,
   vs?: any,
+  actor?: any,
 ): GrantHit | null {
   const flag = effect?.flags?.[MODULE_ID]?.timed;
   if (!flag || effect?.disabled || effect?.duration?.expired) return null;
   if (flag.kind !== "grant_advantage" && flag.kind !== "impose_disadvantage") return null;
+  if (luckyEffectClaimed(effect, actor ?? effect?.parent ?? effect?.actor)) return null;
   const params = (flag.params ?? {}) as Record<string, unknown>;
   if (!matchesRoll(params, kind, ability, skill)) return null;
   if (!vsMatches(params, vs)) return null;
@@ -135,7 +138,7 @@ function collect(actor: any, kind: RollKind, ability: string, skill: string, vs?
   if (!actor) return hits;
 
   for (const effect of actor.effects ?? []) {
-    const hit = fromEffect(effect, kind, ability, skill, vs);
+    const hit = fromEffect(effect, kind, ability, skill, vs, actor);
     if (hit) hits.push(hit);
   }
 
@@ -160,6 +163,7 @@ function collect(actor: any, kind: RollKind, ability: string, skill: string, vs?
         if (rule.adjudication !== "engine") continue;
         const effectKind = String(rule.effect?.kind ?? "");
         if (effectKind !== "grant_advantage" && effectKind !== "impose_disadvantage") continue;
+        if (luckyClaimedNatively(rule, binding.item)) continue;
         const guards = conditionsMet(rule.condition, ctx);
         if (!guards.met) continue;
         const hit = fromParams(

@@ -33,6 +33,7 @@ import {
   type CapabilityRule,
   type EffectKind,
 } from "../integration/capability";
+import { luckyClaimedNatively } from "../rules/lucky";
 import { bindingsFor } from "./bindings";
 import { itemIsInPlay } from "./live-item";
 import { conditionsMet } from "./predicates";
@@ -50,7 +51,19 @@ export interface StandingGrant {
   reason?: string;
 }
 
-function grantsOf(capability: Capability, rule: CapabilityRule, index: number, actor: any) {
+function grantsOf(capability: Capability, rule: CapabilityRule, index: number, actor: any, item: any) {
+  const claimed = luckyClaimedNatively(rule, item);
+  if (claimed) {
+    return {
+      capability: capability.label,
+      capabilityId: capability.id,
+      ruleIndex: index,
+      kind: rule.effect.kind,
+      params: { ...(rule.effect as Record<string, unknown>) },
+      active: false,
+      reason: claimed,
+    } satisfies StandingGrant;
+  }
   const guards = conditionsMet(rule.condition, { self: { actor, token: tokenOf(actor) } });
   return {
     capability: capability.label,
@@ -83,7 +96,7 @@ export function standingGrants(actor: any): StandingGrant[] {
     for (let index = 0; index < rules.length; index++) {
       const rule = rules[index];
       if (!isStanding(rule)) continue;
-      out.push(grantsOf(capability, rule, index, actor));
+      out.push(grantsOf(capability, rule, index, actor, binding.item));
     }
   }
   return out;

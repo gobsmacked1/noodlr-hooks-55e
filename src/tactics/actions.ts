@@ -532,13 +532,15 @@ function fromActivities(item: any, actor: any, P: SystemPaths): CreatureAction[]
         )
       : null;
     // A legendary utility is a real off-turn button (Eye Rays as a picker, Wing Attack flavour).
-    // Dropping it here is how those never reached the layer that spends them. Lair stays out —
-    // that trigger is initiative 20, not the end of another creature's turn.
-    const shapeSource = spellShape ?? (isLegendaryActivation(activationType) ? activity : spell ? null : activity);
+    // A reaction utility is the other half: Shield, Absorb Elements, Feather Fall are all
+    // `type: utility` and were dropped here, so the incoming offer never saw them. Lair stays
+    // out — that trigger is initiative 20, not the end of another creature's turn.
+    const keepUtility = isLegendaryActivation(activationType) || economy === "reaction";
+    const shapeSource = spellShape ?? (keepUtility ? activity : spell ? null : activity);
     if (!shapeSource) continue;
 
     const kind = kindOfActivity(shapeSource);
-    if (kind === "utility" && !isLegendaryActivation(activationType)) continue;
+    if (kind === "utility" && !keepUtility) continue;
 
     // An empty attack type is not "unknown" — the system resolves it to melee/weapon during data
     // preparation, and its weapon-type map deliberately omits natural weapons so that every claw and

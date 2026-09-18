@@ -73,6 +73,7 @@ import { registerOwedRolls, surveyOwedRolls } from "./rules/owed-roll";
 import { registerInitiativeHold, surveyInitiativeHold } from "./rules/initiative-hold";
 import { registerTemplateTargets } from "./rules/template-targets";
 import { registerTeleport, surveyTeleport } from "./rules/teleport";
+import { registerOngoing, surveyOngoing } from "./rules/ongoing";
 import { registerTargetPick, surveyTargetPick } from "./rules/target-pick";
 import { registerTemplateLifetime, surveyTemplates } from "./rules/template-lifetime";
 import { surveyLegendary } from "./rules/legendary";
@@ -222,6 +223,7 @@ export interface NoodlrHooksApi {
   surveyRecharge(): unknown;
   surveyTemplates(): unknown;
   surveyTeleport(): unknown;
+  surveyOngoing(): unknown;
   surveyTargetPick(): unknown;
   repeatSave(clause: RepeatSave): Promise<void>;
   surveyInfluence(): unknown;
@@ -426,6 +428,8 @@ const api: NoodlrHooksApi = {
   surveyTemplates: () => surveyTemplates(),
   /** Whether a self-range teleport (Misty Step) landed, or the slot was handed back. */
   surveyTeleport: () => surveyTeleport(),
+  /** Whether a later-turn follow-on (Witch Bolt) was used, or is waiting. */
+  surveyOngoing: () => surveyOngoing(),
   /** Last T-hover target and any leftover-self refusal on a pointed creature spell. */
   surveyTargetPick: () => surveyTargetPick(),
   /**
@@ -553,6 +557,8 @@ Hooks.once("ready", () => {
   // Self-range teleports (Misty Step) must land or the slot comes back. The system's
   // own subsequent-action hook is a TODO; this runs on the using client.
   registerTeleport();
+  // Witch Bolt's later 1d12 is on the concentrating caster's client.
+  registerOngoing();
   // T targets the hovered token, and a leftover "me" is not a Witch Bolt. Player-side:
   // the Target tool and preUseActivity both fire on whoever pressed the spell.
   registerTargetPick();

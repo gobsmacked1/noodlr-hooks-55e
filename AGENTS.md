@@ -3938,6 +3938,19 @@ button press.
   pointed creature activity whose only live target is still the caster. Witch
   Bolt's later Ongoing Damage activity overrides the target block and names
   nobody, so it is not refused. `noodlrHooks.surveyTargetPick()`.
+- **6.0 `system.targets.token` is a Token uuid (Hadar / Shield / Witch Bolt, 2026-09-17).**
+  Native `TargetsField.getDescriptors` writes `token: token.uuid`. A reader that
+  only called `tokenFromActorUuid` went blind on every usage card that named
+  a token — `fileUsage` never filed the catch, auto-saves never rolled, and
+  `resolveTargets` said `NoTargets`. `tokenFromTargetUuid` is the one door
+  (`cards.ts`, `saves.ts`, `damage.ts`, `owed-roll.ts`, `conditions.ts`,
+  `attack-roll.ts`, `streamline-cards.ts`).
+- **Witch Bolt's later 1d12 is follow-on, not a new target (2026-09-17).**
+  The Damage activity's empty override is why auto-apply saw nobody. Inherit
+  the last attack's hits from that item (`inheritFollowOnTargets`). On a later
+  turn of the concentrating caster, `registerOngoing` uses that activity on
+  the owner's client. The first turn is skipped (`concentrationDurationOf`).
+  AA's leftover beam is not HP. `noodlrHooks.surveyOngoing()`.
 - **A Cast wrapper has no template of its own (Archmage, 2026-08-20).** Spellcasting →
   Lightning Bolt is `type: "cast"`; `CastActivity.use` forwards to the cached spell and
   *that* activity is what `#placeTemplate` reads. `placesTemplate` follows the link.
@@ -4008,6 +4021,14 @@ button press.
 - **`incoming` is never answered by the clock.** Every AC boost costs something and every one of them decides
   a hit, so it is exactly the decision a person has to make. `timeoutChoice` returns null for it outright
   rather than looking at `depleting`.
+- **`readActions` used to drop every non-legendary utility (Shield, 2026-09-17).**
+  Stock Shield is `type: utility` + `activation: reaction`. `fromActivities`
+  skipped those, so `optionsFor("incoming")` had nothing to offer even when
+  `readHits` said the Dire Wolf connected. Keep a utility when
+  `economy === "reaction"` (or legendary). Dodge stays out — it is an Action.
+  Hurt-after-damage is not this offer. A miss-by-5+ never asks (`bonus > margin`).
+  `settleOffer` now logs why it skipped (no combatant / spent / cannot react /
+  no options). Pinned by `test/actions-reaction.test.ts`.
 - **`acBoostOf`'s Shield pattern is ANCHORED (`/^\s*shield\s*$/i`)** because "Shield" is also every buckler in
   the game; matching loosely offers a fighter their armour as a spell and then tries to cast it. Defensive
   Duelist reads proficiency off the sheet and floors at 2 — under-promising, the safe direction for a bonus
@@ -4557,7 +4578,14 @@ per feature. Five axes — window, operation, whose roll, resource, ask-vs-auto.
   is `"decline"`. Same `combat.diceMods` switch. Identifier `lucky` is believed
   only on `type === "feat"` (or `flags.<ns>.diceMod === "lucky"`); 2014 Halfling
   race `lucky` and 2024 species `luck` / `halflingLucky` are not this feat — the
-  system already rerolls a 1. Do not put Lucky in `DICE_MOD_SPECS`. Diagnostics:
+  system already rerolls a 1. Do not put Lucky in `DICE_MOD_SPECS`.
+  **Compiled Lucky must not stamp the die (2026-09-17).** A cache-backed
+  `grant_advantage` / `impose_disadvantage` on this feat ran in `grants.ts`
+  *before* the native prompt. Decline then replayed with that Disadvantage —
+  RAW a skipped Luck Point leaves the d20 neither ADV nor DIS. `luckyClaimedNatively`
+  is the Sneak refusal for this; leftover `Lucky: Disadvantage` AEs are skipped
+  too. `uses.value` clamps remaining when DDB left `spent` at 0. Do not
+  recompile the world to "fix" those descriptors. Diagnostics:
   `noodlrHooks.surveyLucky()`.
 - **Portent is before-roll, not this table** (`src/rules/portent.ts` +
   `src/system/dnd5e-portent.ts`). 2024 Diviner: after a Long Rest record two
@@ -4667,6 +4695,12 @@ something the code demonstrably did not do.
   it against a budget it does not draw on, and leaving it out entirely makes the Nick case unlimited.
   **Free and unlimited are not the same thing** — Nick costs nothing and is still once per turn, which
   is why `takeLightSwing` takes a nullable slot and always increments the counter.
+  **Holding two Light weapons is not enough (Empowered Sorc, 2026-09-17).**
+  The log said `charged … bonus action for the Light extra attack`, not Nick —
+  `usableMastery` correctly refused an empty mastery list. The printed 2024
+  Light extra would allow that swing; the table does not want a Sorcerer
+  attacking twice. Nick (mastery list) stays free; Two-Weapon Fighting or
+  Dual Wielder stays bonus; otherwise `lightExtraAttackCost` is null.
 
 ### Three that were absent
 
@@ -5154,6 +5188,14 @@ Recorded because they will be reported again.
     Step / Far Step / Vortex Warp / Arcane Gate are not `type: teleport` in 6.0.3
     (utility or save). The auto-plan is every caster-hop TeleportActivity, not
     Misty Step by name.
+  - **`planTeleport` can return a dest that never lands (2026-09-17).**
+    Movement Automation Full constrains a blink to the origin while
+    `moved === true`; AA still plays on `use()`. After the plan, if
+    `_source` did not move, `forceLand` `doc.move`s blink/displace with
+    `ignoreWalls` / `ignoreCost` / `ignoreTokens` to `plan.destination`.
+    Refund only `results.message.system.deltas` — `activity.refund`
+    wants `ActorDeltasData`, and `results.updates` TypeErrors. A toast
+    is not a hop. `plannedDestination` is the chosen square.
 
 - **Reactions, concentration and saves all prompting the GM** is midi's `playerForActor()`, and the cause is
   narrower than "wrong ownership level". Core resolves ownership through the default row —

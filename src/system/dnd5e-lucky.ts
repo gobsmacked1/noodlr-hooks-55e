@@ -37,7 +37,14 @@ export function isLuckyItem(item: any): boolean {
 /** Remaining Luck Points, or null when the pool cannot be read. */
 export function luckyCharges(item: any): number | null {
   if (!isLuckyItem(item)) return null;
-  return usesRemaining(item);
+  const fromSpent = usesRemaining(item);
+  if (fromSpent === null) return null;
+  // Prepared `value` is max − spent. DDB and a hand-clicked tracker sometimes
+  // write `value` as remaining and leave `spent` at 0, so believing spent alone
+  // offers a pool the sheet already shows as empty.
+  const raw = Number(item?.system?.uses?.value);
+  if (Number.isFinite(raw)) return Math.max(0, Math.min(fromSpent, raw));
+  return fromSpent;
 }
 
 export function luckyHasCharge(item: any): boolean {

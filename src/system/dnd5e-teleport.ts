@@ -107,3 +107,31 @@ export function teleportLanded(
   }
   return false;
 }
+
+/** Where the player asked the blink to go. `moved === true` is not this. */
+export function plannedDestination(row: any): { x: number; y: number; elevation?: number } | null {
+  const dest = row?.plan?.destination;
+  if (Number.isFinite(dest?.x) && Number.isFinite(dest?.y)) {
+    const elevation = Number(dest.elevation);
+    return Number.isFinite(elevation) ? { x: dest.x, y: dest.y, elevation } : { x: dest.x, y: dest.y };
+  }
+  const path = row?.plan?.waypoints ?? row?.plan?.path;
+  if (Array.isArray(path) && path.length) {
+    const last = path[path.length - 1];
+    if (Number.isFinite(last?.x) && Number.isFinite(last?.y)) {
+      const elevation = Number(last.elevation);
+      return Number.isFinite(elevation) ? { x: last.x, y: last.y, elevation } : { x: last.x, y: last.y };
+    }
+  }
+  return null;
+}
+
+export function plannedDestinations(results: unknown): { token: any; dest: { x: number; y: number; elevation?: number } }[] {
+  if (!Array.isArray(results)) return [];
+  const out: { token: any; dest: { x: number; y: number; elevation?: number } }[] = [];
+  for (const row of results) {
+    const dest = plannedDestination(row);
+    if (dest && row?.token) out.push({ token: row.token, dest });
+  }
+  return out;
+}

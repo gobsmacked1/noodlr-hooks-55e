@@ -31,8 +31,7 @@ import {
   rollType,
   speakerToken,
   targetsOf,
-  tokenFromActorUuid,
-  tokenFromTokenUuid,
+  tokenFromTargetUuid,
 } from "../rules/cards";
 import { fireTrigger, type TriggerContext } from "./executor";
 import type { Subject } from "./predicates";
@@ -46,7 +45,7 @@ export function isAttackRollMessage(message: any): boolean {
 
 export function firstTargetOf(message: any): Subject | undefined {
   for (const t of targetsOf(message)) {
-    const doc = tokenFromActorUuid(t.uuid) ?? tokenFromTokenUuid(t.uuid);
+    const doc = tokenFromTargetUuid(t.uuid);
     if (doc?.actor) return { actor: doc.actor, token: doc.object ?? doc };
   }
   return undefined;

@@ -24,6 +24,7 @@ import { isExecutable, isStanding } from "../integration/capability";
 import { duplicatesItemDamage } from "./duplicate";
 import { contestRefusal, primaryContestActivity } from "./contest";
 import { sneakClaimedNatively } from "../rules/sneak";
+import { luckyClaimedNatively } from "../rules/lucky";
 
 const TRIGGERS: Record<string, string> = {
   on_hit: "when it hits",
@@ -343,7 +344,9 @@ export function staticRefusal(rule: CapabilityRule, item: unknown): string {
   const contest = contestRefusal(rule, primaryContestActivity(item));
   if (contest) return contest;
   if (!item) return "";
-  return duplicatesItemDamage(rule, item) ?? sneakClaimedNatively(rule, item) ?? "";
+  return (
+    duplicatesItemDamage(rule, item) ?? sneakClaimedNatively(rule, item) ?? luckyClaimedNatively(rule, item) ?? ""
+  );
 }
 
 export function describeCapability(capability: Capability, item?: unknown): RuleView[] {
