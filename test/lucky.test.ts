@@ -138,14 +138,18 @@ test("initiative is not a Lucky hold; death and concentration are", () => {
 test("self Lucky is not offered when Advantage is already on the config", () => {
   assert.equal(shouldOfferSelf({ advantage: true }), false);
   assert.equal(shouldOfferSelf({ rolls: [{ options: { advantageMode: 1 } }] }), false);
+  assert.equal(shouldOfferSelf({ rolls: [{ options: { advantage: true } }] }), false);
   assert.equal(shouldOfferSelf({}), true);
   assert.equal(shouldOfferSelf({ disadvantage: true }), true);
+  assert.equal(shouldOfferSelf({ rolls: [{ options: { disadvantage: true } }] }), true);
 });
 
 test("incoming Lucky is not offered when Disadvantage is already on the attack", () => {
   assert.equal(shouldOfferIncoming({ disadvantage: true }), false);
   assert.equal(shouldOfferIncoming({ rolls: [{ options: { advantageMode: -1 } }] }), false);
+  assert.equal(shouldOfferIncoming({ rolls: [{ options: { disadvantage: true } }] }), false);
   assert.equal(shouldOfferIncoming({ advantage: true }), true);
+  assert.equal(shouldOfferIncoming({ rolls: [{ options: { advantage: true } }] }), true);
   assert.equal(shouldOfferIncoming({}), true);
 });
 

@@ -4568,9 +4568,13 @@ per feature. Five axes — window, operation, whose roll, resource, ask-vs-auto.
   `preRollDeathSave`); a false from V1 never reaches V2, and listening to both
   would let the second through while the first is holding. Initiative is skipped
   (`initiativeDialog`) — replaying `rollAbilityCheck` would break the tracker.
-  Self is not offered when Advantage is already on the config; incoming is not
-  offered when Disadvantage is already on. Both can fire on one attack (they
-  cancel — RAW). Incoming: `MAX_ASKED` 1, no range/sight, being the target is
+  Self is not offered when Advantage is already on the roll; incoming is not
+  offered when Disadvantage is already on. Read `config.advantage` /
+  `rolls[0].options.advantage` / `advantageMode` — dnd5e writes sheet and AE
+  mods onto the roll options before `preRollD20Test`, and our condition /
+  grant readers stamp the config on the earlier attack hook. Both can fire
+  on one attack (they cancel — RAW). A Luck Point cannot un-cancel.
+  Incoming: `MAX_ASKED` 1, no range/sight, being the target is
   enough; `config.target` on an attack is an **AC number**, so targets come from
   `config.targets[]` or `game.user.targets`. Automated combatants are skipped for
   the creature *being asked* — incoming Lucky against an automated monster still

@@ -88,13 +88,27 @@ export function luckyRollKind(hookNames: unknown): LuckyRollKind | null {
   return null;
 }
 
+/**
+ * Would this D20 already have Advantage without a Luck Point?
+ *
+ * dnd5e writes sheet / AE mods onto `rolls[0].options.advantage` *before*
+ * `preRollD20Test` (AttackActivity `combineFields`). Our condition and grant
+ * readers stamp `config.advantage` on the earlier `preRollAttack` hook.
+ * `advantageMode` is usually still unset — `applyKeybindings` runs after we
+ * hold. Read all three, the same sources `applyKeybindings` will.
+ */
 export function alreadyHasAdvantage(config: any): boolean {
-  if (config?.advantage === true) return true;
+  if (config?.advantage) return true;
+  const options = config?.rolls?.[0]?.options;
+  if (options?.advantage) return true;
   return modeOf(config) === 1;
 }
 
+/** Would this D20 already have Disadvantage without an incoming Luck Point? */
 export function alreadyHasDisadvantage(config: any): boolean {
-  if (config?.disadvantage === true) return true;
+  if (config?.disadvantage) return true;
+  const options = config?.rolls?.[0]?.options;
+  if (options?.disadvantage) return true;
   return modeOf(config) === -1;
 }
 
@@ -104,7 +118,7 @@ function modeOf(config: any): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-/** Self Lucky is wasted if Advantage is already on the config. */
+/** Self Lucky is wasted if Advantage is already on the roll. */
 export function shouldOfferSelf(config: any): boolean {
   return !alreadyHasAdvantage(config);
 }

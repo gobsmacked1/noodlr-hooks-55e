@@ -8,6 +8,12 @@ Disadvantage, and the dialog appeared even with no Luck Points left. The
 compiled reading is refused while we offer the feat. Do not recompile the
 world.
 
+**Lucky is not offered when the roll already has that modifier.** Self Lucky
+is skipped if Advantage is already on the D20 (Reckless, Help, unseen).
+Incoming Lucky is skipped if the attack already has Disadvantage (Poisoned,
+unseen attacker). Sheet and Active Effect mods live on the roll options, not
+only on `config.advantage`. A Luck Point cannot un-cancel.
+
 **Witch Bolt's later 1d12 now hits the creature you already struck.** The
 follow-on Damage activity names nobody. It inherits the last hit from that
 spell and fires on later turns of the concentrating caster. The leftover
